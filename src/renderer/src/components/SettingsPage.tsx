@@ -23,6 +23,15 @@ const CLEAR_RANGES: { id: ClearDataRange; label: string }[] = [
   { id: 'all', label: 'All time' }
 ]
 
+const SETTING_SECTIONS = [
+  { id: 'set-general', label: 'General / search & start' },
+  { id: 'set-appearance', label: 'Appearance' },
+  { id: 'set-downloads', label: 'Downloads' },
+  { id: 'set-privacy', label: 'Privacy & data' },
+  { id: 'set-permissions', label: 'Site permissions' },
+  { id: 'set-updates', label: 'Updates' }
+]
+
 function displayOrigin(origin: string): string {
   try {
     const u = new URL(origin)
@@ -64,6 +73,19 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
   const [confirmClear, setConfirmClear] = useState(false)
   const [clearing, setClearing] = useState(false)
   const [clearDone, setClearDone] = useState(false)
+  const [activeSection, setActiveSection] = useState(SETTING_SECTIONS[0].id)
+
+  useEffect(() => {
+    const root = document.querySelector('.settings')
+    const sections = SETTING_SECTIONS.map(({ id }) => document.getElementById(id)).filter((el): el is HTMLElement => !!el)
+    if (!root || !sections.length) return
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+      if (visible[0]) setActiveSection(visible[0].target.id)
+    }, { root, rootMargin: '-8% 0px -72% 0px', threshold: 0 })
+    sections.forEach((section) => observer.observe(section))
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     if (initial) setSettings(initial)
@@ -136,7 +158,13 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
         <h1>Settings</h1>
       </header>
 
-      <section className="set-section" aria-labelledby="set-search-h">
+      <div className="set-main-layout">
+      <nav className="set-nav" aria-label="Settings sections">
+        {SETTING_SECTIONS.map((section) => <a key={section.id} href={`#${section.id}`} className={activeSection === section.id ? 'on' : ''} aria-current={activeSection === section.id ? 'location' : undefined}>{section.label}</a>)}
+      </nav>
+      <div className="set-content">
+
+      <section className="set-section" id="set-general" aria-labelledby="set-search-h">
         <h2 id="set-search-h">Search engine</h2>
         <div className="set-card">
           <div className="set-row stack">
@@ -161,7 +189,7 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
         </div>
       </section>
 
-      <section className="set-section" aria-labelledby="set-appearance-h">
+      <section className="set-section" id="set-appearance" aria-labelledby="set-appearance-h">
         <h2 id="set-appearance-h">Appearance</h2>
         <div className="set-card">
           <div className="set-row">
@@ -208,7 +236,7 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
         </div>
       </section>
 
-      <section className="set-section" aria-labelledby="set-downloads-h">
+      <section className="set-section" id="set-downloads" aria-labelledby="set-downloads-h">
         <h2 id="set-downloads-h">Downloads</h2>
         <div className="set-card">
           <div className="set-row">
@@ -250,7 +278,7 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
         </div>
       </section>
 
-      <section className="set-section" aria-labelledby="set-privacy-h">
+      <section className="set-section" id="set-privacy" aria-labelledby="set-privacy-h">
         <h2 id="set-privacy-h">Privacy</h2>
         <div className="set-card">
           <div className="set-row stack">
@@ -344,7 +372,7 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
         </div>
       </section>
 
-      <section className="set-section" aria-labelledby="set-perms-h">
+      <section className="set-section" id="set-permissions" aria-labelledby="set-perms-h">
         <h2 id="set-perms-h">Site permissions</h2>
         <div className="set-card">
           {savedPerms.length === 0 ? (
@@ -397,7 +425,7 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
         </div>
       </section>
 
-      <section className="set-section" aria-labelledby="set-updates-h">
+      <section className="set-section" id="set-updates" aria-labelledby="set-updates-h">
         <h2 id="set-updates-h">Updates</h2>
         <div className="set-card">
           <div className="set-row">
@@ -430,6 +458,8 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
           </div>
         </div>
       </section>
+      </div>
+      </div>
     </div>
   )
 }

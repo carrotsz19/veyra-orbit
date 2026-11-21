@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "electron-vite preview",
     "test": "node --test tests/url.test.ts tests/suggest.test.ts tests/store.test.ts tests/format.test.ts tests/downloads.test.ts tests/settings.test.ts tests/external.test.ts tests/updates.test.ts tests/release.test.ts tests/compat.test.ts",
+    "icons:generate": "node tools/generate-icons.mjs",
     "dist": "npm run build && electron-builder --win --publish never",
     "postinstall": "node node_modules/electron/install.js",
     "dist:dev": "node tools/dist-dev.mjs",
@@ -68,8 +69,10 @@
     "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
     "lucide-react": "^1.72.0",
+    "png-to-ico": "^3.0.2",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "sharp": "^0.35.5",
     "typescript": "~5.9.3",
     "vite": "^7.0.0"
   },
