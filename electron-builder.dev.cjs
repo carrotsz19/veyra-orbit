@@ -8,6 +8,7 @@ module.exports = {
   productName: 'Veyra Orbit Dev',
   extraMetadata: { name: 'veyra-orbit-dev' },
   directories: { output: 'release-dev' },
+  win: { ...base.win, icon: 'resources/icon-dev.ico' },
   artifactName: 'Veyra-Orbit-Dev-Setup-${version}.${ext}',
   nsis: { ...base.nsis, shortcutName: 'Veyra Orbit Dev', uninstallDisplayName: 'Veyra Orbit Dev' },
   // Dev builds read updates from the private dev repo using a read-only token embedded in main only.

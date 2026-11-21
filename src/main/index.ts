@@ -68,7 +68,7 @@ function createWindow(): void {
     minHeight: 480,
     show: false,
     title: APP_NAME,
-    icon: join(__dirname, '../../resources/icon.png'),
+    icon: join(__dirname, `../../resources/${__CHANNEL__ === 'dev' ? 'icon-dev.png' : 'icon.png'}`),
     autoHideMenuBar: true,
     ...(acrylic ? { backgroundColor: '#00000000', backgroundMaterial: 'acrylic' as const } : { backgroundColor: nativeTheme.shouldUseDarkColors ? '#15140f' : '#f3f1ec' }),
     ...(isWin ? { titleBarStyle: 'hidden' as const, titleBarOverlay: overlay() } : { titleBarStyle: 'hiddenInset' as const }),
@@ -383,3 +383,9 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (!win) createWindow()
 })
+
+// Bounded UI smoke runs can opt in to a self-terminating Electron process.
+const smokeExitMs = Number(process.env.VEYRA_TEST_EXIT_MS)
+if (!app.isPackaged && Number.isFinite(smokeExitMs) && smokeExitMs > 0) {
+  setTimeout(() => app.exit(0), Math.min(smokeExitMs, 120_000))
+}
