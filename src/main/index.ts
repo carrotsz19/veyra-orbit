@@ -270,10 +270,13 @@ function createWindow(): void {
    * isolated workspace persist:ws-<id> partition) so security, site compat and downloads never drift.
    */
   const setupWebSession = (partition: string): Session => {
+    // Without the permission handler a session falls back to Electron's default, which allows every
+    // permission, so a session must never be set up before Permissions exists.
+    if (!perms) throw new Error('web session set up before permissions')
     const sess = sessionForPartition(partition)
     if (configuredSessions.has(sess)) return sess
     configuredSessions.add(sess)
-    perms?.attach(sess)
+    perms.attach(sess)
     attachSessionCompat(sess)
     d.attach(sess)
     sess.on('will-download', onDownload)
