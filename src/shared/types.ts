@@ -196,6 +196,9 @@ export interface VeyraCompactPanelApi {
   requestNewWorkspace(): void
   openSettingsSection(sectionId: string): void
   setOmniboxOpen(open: boolean): void
+  startWindowDrag(): void
+  moveWindowDrag(): void
+  endWindowDrag(): void
 }
 
 export type ClearDataRange = 'hour' | 'day' | 'all'

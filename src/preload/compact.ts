@@ -96,7 +96,10 @@ const panelApi: VeyraCompactPanelApi = {
   onNewWorkspace: (cb) => listen<void>('ui:new-workspace', () => cb()),
   requestNewWorkspace: () => ipcRenderer.send('compact-panel:new-workspace'),
   openSettingsSection: (sectionId) => ipcRenderer.send('compact-panel:settings-section', sectionId),
-  setOmniboxOpen: (open) => ipcRenderer.send('compact-panel:omnibox-open', open)
+  setOmniboxOpen: (open) => ipcRenderer.send('compact-panel:omnibox-open', open),
+  startWindowDrag: () => ipcRenderer.send('compact-panel:drag-start'),
+  moveWindowDrag: () => ipcRenderer.send('compact-panel:drag-move'),
+  endWindowDrag: () => ipcRenderer.send('compact-panel:drag-end')
 }
 
 contextBridge.exposeInMainWorld('veyra', uiSubset)

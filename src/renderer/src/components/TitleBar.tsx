@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, EyeOff, Menu as MenuIcon, RotateCw, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Copy, EyeOff, Menu as MenuIcon, Minus, RotateCw, Square, X } from 'lucide-react'
 import type {
   Bookmark,
   BrowserState,
@@ -89,6 +89,29 @@ function WindowDots({ state }: { state: WindowState }): React.JSX.Element {
   )
 }
 
+/** Windows-style min/max/close buttons rendered inside the floating compact titlebar when using Windows buttons. */
+function WindowWinButtons({ state }: { state: WindowState }): React.JSX.Element {
+  return (
+    <div className="wb-win-btns" role="group" aria-label="Window">
+      <button type="button" className="wb-win-btn" aria-label="Minimise" title="Minimise" onClick={() => api.winCmd('minimize')}>
+        <Minus size={14} strokeWidth={1.75} aria-hidden />
+      </button>
+      <button
+        type="button"
+        className="wb-win-btn"
+        aria-label={state.maximized ? 'Restore' : 'Maximise'}
+        title={state.maximized ? 'Restore' : 'Maximise'}
+        onClick={() => api.winCmd('maximize')}
+      >
+        {state.maximized ? <Copy size={12} strokeWidth={1.75} aria-hidden /> : <Square size={12} strokeWidth={1.75} aria-hidden />}
+      </button>
+      <button type="button" className="wb-win-btn close" aria-label="Close" title="Close" onClick={() => api.winCmd('close')}>
+        <X size={14} strokeWidth={1.85} aria-hidden />
+      </button>
+    </div>
+  )
+}
+
 type OpenTarget = MenuId | 'collapsed' | null
 
 interface TitleBarProps {
@@ -103,6 +126,10 @@ interface TitleBarProps {
   onPointerEdge?: (inside: boolean) => void
   onNewWorkspace: () => void
   onOpenSettingsSection: (sectionId: string) => void
+  /** True when rendered inside the floating compact-mode titlebar child window. */
+  inCompactPanel?: boolean
+  onCompactDragStart?: (e: React.PointerEvent<HTMLElement>) => void
+  onCompactDragDoubleClick?: () => void
 }
 
 export function TitleBar({
@@ -116,7 +143,10 @@ export function TitleBar({
   useOmniboxOverlay = true,
   onPointerEdge,
   onNewWorkspace,
-  onOpenSettingsSection
+  onOpenSettingsSection,
+  inCompactPanel = false,
+  onCompactDragStart,
+  onCompactDragDoubleClick
 }: TitleBarProps): React.JSX.Element {
   const [windowWidth, setWindowWidth] = useState(() => window.innerWidth)
   const [openTarget, setOpenTarget] = useState<OpenTarget>(null)
@@ -509,17 +539,32 @@ export function TitleBar({
 
   const titlebarClasses = [
     'titlebar',
-    isWin && activeWindowButtons === 'windows' ? 'native-buttons' : '',
+    isWin && activeWindowButtons === 'windows' && !inCompactPanel ? 'native-buttons' : '',
     isWin && activeWindowButtons === 'dots' ? 'dots-buttons' : ''
   ]
     .filter(Boolean)
     .join(' ')
+
+  const isCompactDragTarget = (target: EventTarget | null): boolean => {
+    if (!inCompactPanel || !(target instanceof Element)) return false
+    return !target.closest('button, input, a, [role="button"], .omni-wrap, .wb-dots, .wb-win-btns, .wb-menus, .ext-toolbar')
+  }
 
   return (
     <header
       className={titlebarClasses}
       onMouseEnter={() => onPointerEdge?.(true)}
       onMouseLeave={() => onPointerEdge?.(false)}
+      onPointerDown={(e) => {
+        if (e.button === 0 && isCompactDragTarget(e.target)) {
+          onCompactDragStart?.(e)
+        }
+      }}
+      onDoubleClick={(e) => {
+        if (isCompactDragTarget(e.target)) {
+          onCompactDragDoubleClick?.()
+        }
+      }}
     >
       <div className="tb-left">
         <div className="wb-brand">
@@ -645,6 +690,8 @@ export function TitleBar({
 
       {isWin && activeWindowButtons === 'dots' ? (
         <WindowDots state={winState} />
+      ) : isWin && inCompactPanel ? (
+        <WindowWinButtons state={winState} />
       ) : isWin ? (
         <div className="caption-space" />
       ) : null}

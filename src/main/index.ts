@@ -15,7 +15,14 @@ import type {
 } from '../shared/types'
 import { isAllowedUrl, isInternalUrl, toUrl } from '../shared/url'
 import { suggest, type Candidate } from '../shared/suggest'
-import { computeCompactZones } from '../shared/compact'
+import {
+  computeCompactWindowDrag,
+  computeCompactZones,
+  computeEdgeSnap,
+  computeRestoreDragBounds,
+  type ScreenPoint,
+  type WindowBounds
+} from '../shared/compact'
 import { resolveSleepTimeoutMs } from '../shared/sleep'
 import { WORKSPACE_ACCENTS } from '../shared/workspaces'
 import {
@@ -85,8 +92,15 @@ let importer: BrowserImporter | null = null
 
 /** Compact mode runtime state for the active window. */
 let compactState: CompactRevealState = { enabled: false, sidebar: false, toolbar: false }
-let compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false }
+let compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false, dragging: false }
 let compactHover = { sidebar: false, toolbar: false }
+let compactDrag: {
+  startCursor: ScreenPoint
+  startBounds: WindowBounds
+  wasMaximized: boolean
+  moved: boolean
+} | null = null
+let lastNormalBounds: WindowBounds = { x: 100, y: 100, width: 1360, height: 860 }
 let lastPolledCursor: { x: number; y: number } | null = null
 let compactPoller: NodeJS.Timeout | null = null
 let sideHideTimer: NodeJS.Timeout | null = null
@@ -201,7 +215,7 @@ function handleOrbitFocusBlur(): void {
   setTimeout(() => {
     if (!win || win.isDestroyed()) return
     sendWinState()
-    if (settings?.get().compactMode && !isAnyOrbitFocused() && !compactPins.menu && !compactPins.titleMenu) {
+    if (settings?.get().compactMode && !isAnyOrbitFocused() && !compactPins.menu && !compactPins.titleMenu && !compactPins.dragging) {
       compactHover = { sidebar: false, toolbar: false }
       compactPins.omnibox = false
       compactState = { enabled: true, sidebar: false, toolbar: false }
@@ -246,7 +260,7 @@ function applyCompactTargets(wantSide: boolean, wantBar: boolean): void {
   } else if (compactState.toolbar && !barHideTimer) {
     barHideTimer = setTimeout(() => {
       barHideTimer = null
-      if (!compactPins.omnibox && !compactPins.titleMenu && !compactHover.toolbar && compactState.toolbar) {
+      if (!compactPins.omnibox && !compactPins.titleMenu && !compactPins.dragging && !compactHover.toolbar && compactState.toolbar) {
         compactState = { ...compactState, toolbar: false }
         broadcastUi('compact:state', compactState)
         syncCompactPanels()
@@ -267,7 +281,7 @@ function sendCompactState(force = false, focusTarget?: 'sidebar' | 'toolbar', im
     ? {
         enabled: true,
         sidebar: compactState.sidebar || compactPins.sidebar || compactPins.menu || compactHover.sidebar,
-        toolbar: compactState.toolbar || compactPins.omnibox || compactPins.titleMenu || compactHover.toolbar
+        toolbar: compactState.toolbar || compactPins.omnibox || compactPins.titleMenu || compactPins.dragging || compactHover.toolbar
       }
     : { enabled: false, sidebar: false, toolbar: false }
 
@@ -324,16 +338,26 @@ function pollCompactCursor(): void {
   if (!zones.insideWindow && !moved) {
     applyCompactTargets(
       compactHover.sidebar || compactPins.sidebar || compactPins.menu,
-      compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu
+      compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu || compactPins.dragging
     )
     return
+  }
+
+  // Clear stale DOM mouseenter flags if the real OS cursor moved outside that panel's keep-open zone
+  // (child BrowserWindows on Windows can miss mouseleave when crossing onto a native WebContentsView).
+  if (!zones.insideWindow && moved) {
+    compactHover.sidebar = false
+    compactHover.toolbar = false
+  } else if (zones.insideWindow) {
+    if (!zones.wantSidebar && compactHover.sidebar) compactHover.sidebar = false
+    if (!zones.wantToolbar && compactHover.toolbar) compactHover.toolbar = false
   }
 
   // Only reveal newly when the window is focused; keep-open or pinned states still hold cleanly.
   const sideByCursor = focused ? zones.wantSidebar : compactState.sidebar && zones.wantSidebar
   const barByCursor = focused ? zones.wantToolbar : compactState.toolbar && zones.wantToolbar
   const wantSide = sideByCursor || compactHover.sidebar || compactPins.sidebar || compactPins.menu
-  const wantBar = barByCursor || compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu
+  const wantBar = barByCursor || compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu || compactPins.dragging
   applyCompactTargets(wantSide, wantBar)
 }
 
@@ -341,8 +365,9 @@ function syncCompactMode(): void {
   const enabled = !!settings?.get().compactMode
   if (!enabled) {
     stopCompactPoller()
+    compactDrag = null
     compactHover = { sidebar: false, toolbar: false }
-    compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false }
+    compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false, dragging: false }
     compactOmniboxOpen = false
     compactState = { enabled: false, sidebar: false, toolbar: false }
     sendCompactState(true, undefined, true)
@@ -351,7 +376,7 @@ function syncCompactMode(): void {
   compactState = {
     enabled: true,
     sidebar: compactPins.sidebar || compactPins.menu || compactHover.sidebar,
-    toolbar: compactPins.omnibox || compactPins.titleMenu || compactHover.toolbar
+    toolbar: compactPins.omnibox || compactPins.titleMenu || compactPins.dragging || compactHover.toolbar
   }
   sendCompactState(true)
   if (!compactPoller) {
@@ -942,7 +967,15 @@ function createWindow(): void {
     sendWinState()
     syncCompactPanels()
   })
+  w.on('restore', () => {
+    sendWinState()
+    syncCompactPanels()
+  })
   w.on('move', () => {
+    if (!w.isMaximized() && !w.isFullScreen()) lastNormalBounds = w.getBounds()
+    if (settings?.get().compactMode) syncCompactPanels()
+  })
+  w.on('moved', () => {
     if (settings?.get().compactMode) syncCompactPanels()
   })
   w.on('enter-full-screen', () => {
@@ -964,13 +997,18 @@ function createWindow(): void {
     if (settings?.get().compactMode) syncCompactPanels()
   })
   w.on('resize', () => {
+    if (!w.isMaximized() && !w.isFullScreen()) lastNormalBounds = w.getBounds()
     t.relayout()
+    if (settings?.get().compactMode) syncCompactPanels()
+  })
+  w.on('resized', () => {
     if (settings?.get().compactMode) syncCompactPanels()
   })
   w.on('close', () => t.save())
   w.on('closed', () => {
     stopCompactPoller()
-    compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false }
+    compactDrag = null
+    compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false, dragging: false }
     compactHover = { sidebar: false, toolbar: false }
     compactOmniboxOpen = false
     compactState = { enabled: false, sidebar: false, toolbar: false }
@@ -1134,6 +1172,65 @@ ipcMain.on('compact-panel:settings-section', (e, sectionId: unknown) => {
   if (!fromCompactPanel(e) || !str(sectionId) || !tabs) return
   tabs.openInternal('orbit://settings')
   if (win && !win.isDestroyed()) win.webContents.send('ui:settings-section', sectionId)
+})
+ipcMain.on('compact-panel:drag-start', (e) => {
+  if (!compactTitlebar?.isSender(e.sender) || !win || win.isDestroyed() || win.isFullScreen()) return
+  menuPopup?.close()
+  const wasMaximized = win.isMaximized()
+  const bounds = win.getBounds()
+  if (!wasMaximized) lastNormalBounds = bounds
+  compactDrag = {
+    startCursor: screen.getCursorScreenPoint(),
+    startBounds: bounds,
+    wasMaximized,
+    moved: false
+  }
+  compactPins.dragging = true
+})
+ipcMain.on('compact-panel:drag-move', (e) => {
+  if (!compactTitlebar?.isSender(e.sender) || !compactDrag || !win || win.isDestroyed() || win.isFullScreen()) return
+  const cursor = screen.getCursorScreenPoint()
+  const dist = Math.hypot(cursor.x - compactDrag.startCursor.x, cursor.y - compactDrag.startCursor.y)
+  if (!compactDrag.moved && dist < 4) return
+
+  if (compactDrag.wasMaximized) {
+    const maxBounds = compactDrag.startBounds
+    win.unmaximize()
+    const restoredSize = { width: lastNormalBounds.width || 1200, height: lastNormalBounds.height || 800 }
+    const next = computeRestoreDragBounds(maxBounds, restoredSize, cursor)
+    win.setBounds(next)
+    compactDrag = {
+      startCursor: cursor,
+      startBounds: win.getBounds(),
+      wasMaximized: false,
+      moved: true
+    }
+    syncCompactPanels()
+    return
+  }
+
+  compactDrag.moved = true
+  const next = computeCompactWindowDrag(compactDrag.startBounds, compactDrag.startCursor, cursor)
+  win.setBounds(next)
+  syncCompactPanels()
+})
+ipcMain.on('compact-panel:drag-end', (e) => {
+  if (!compactTitlebar?.isSender(e.sender)) return
+  const drag = compactDrag
+  compactDrag = null
+  compactPins.dragging = false
+  if (drag?.moved && win && !win.isDestroyed() && !win.isFullScreen()) {
+    const cursor = screen.getCursorScreenPoint()
+    const workArea = screen.getDisplayNearestPoint(cursor).workArea
+    const snap = computeEdgeSnap(cursor, workArea)
+    if (snap.kind === 'maximize') {
+      win.maximize()
+    } else if (snap.kind === 'bounds') {
+      win.setBounds(snap.bounds)
+    }
+    syncCompactPanels()
+    sendWinState()
+  }
 })
 
 onSurface('tab:new', (t, input?: unknown) => {
