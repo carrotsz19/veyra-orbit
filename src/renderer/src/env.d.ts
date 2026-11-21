@@ -1,4 +1,10 @@
-import type { VeyraApi, VeyraCompactPanelApi, VeyraMenuWindowApi, VeyraPaletteWindowApi } from '@shared/types'
+import type {
+  VeyraApi,
+  VeyraCompactPanelApi,
+  VeyraMenuWindowApi,
+  VeyraPaletteWindowApi,
+  VeyraPeekWindowApi
+} from '@shared/types'
 
 declare global {
   interface Window {
@@ -6,6 +12,7 @@ declare global {
     veyraMenu?: VeyraMenuWindowApi
     veyraCompactPanel?: VeyraCompactPanelApi
     veyraPalette?: VeyraPaletteWindowApi
+    veyraPeek?: VeyraPeekWindowApi
   }
 }
 

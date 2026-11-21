@@ -34,6 +34,7 @@ import {
   type SplitGroup
 } from '../shared/split'
 import { canSleepTab, type SleepPolicy } from '../shared/sleep'
+import { shouldPeekWindowOpen } from '../shared/peek'
 import { attachPageCompat } from './compat'
 
 interface Tab {
@@ -82,6 +83,8 @@ export interface TabHooks {
   onTogglePalette?(mode: 'command' | 'new-tab'): void
   /** Called on Ctrl+T when no URL is given; returns true if handled (e.g. opening command bar in new-tab mode). */
   onNewTabShortcut?(): boolean
+  /** Opens a link in the floating Peek preview window (Shift+click, Alt+click, or right-click "Peek link"). */
+  openPeek?(url: string, sourceTabId: number, workspaceId: string, partition: string): void
   /** Quits the application (Ctrl+Q). */
   quit?(): void
 }
@@ -120,6 +123,10 @@ export class Tabs {
   private lastFocusTarget: 'ui' | 'page' = 'ui'
   /** Tracks a standalone Alt key press so Alt-release focuses the menu bar without clashing with Alt+Left/Tab. */
   private altStandalone = false
+  /** Tracks held Shift/Alt modifiers for Shift+click and Alt+click link preview ("peek"). */
+  private shiftHeld = false
+  private altHeld = false
+  private lastAltAt = 0
 
   constructor(
     private win: BrowserWindow,
@@ -132,6 +139,8 @@ export class Tabs {
     })
     this.win.on('blur', () => {
       this.altStandalone = false
+      this.shiftHeld = false
+      this.altHeld = false
     })
   }
 
@@ -1248,23 +1257,53 @@ export class Tabs {
 
   // ---- keyboard -------------------------------------------------------------
 
+  /**
+   * Intercepts Alt+click on a link (which Chromium turns into SaveLinkAs / will-download)
+   * and opens it in the floating Peek preview window instead of downloading the page.
+   */
+  consumeAltPeek(wc: WebContents, url: string): boolean {
+    if (!this.altHeld && Date.now() - this.lastAltAt > 450) return false
+    if (!isAllowedUrl(url)) return false
+    const tab = this.tabs.find((t) => t.view?.webContents === wc)
+    if (!tab) return false
+    this.altStandalone = false
+    this.altHeld = false
+    this.hooks.openPeek?.(url, tab.info.id, tab.info.workspaceId, this.partitionFor(tab.info.workspaceId))
+    return true
+  }
+
   /** Browser shortcuts, from the UI or from a page. True when one was used. */
   shortcut(input: Input): boolean {
+    const isShift = input.key === 'Shift' || input.code === 'ShiftLeft' || input.code === 'ShiftRight'
     const isAlt = input.key === 'Alt' || input.code === 'AltLeft' || input.code === 'AltRight'
     if (input.type === 'keyUp') {
-      if (isAlt && this.altStandalone) {
-        this.altStandalone = false
-        this.hooks.onFocusMenuBar?.()
-        return true
+      if (isShift) this.shiftHeld = false
+      if (isAlt) {
+        this.altHeld = false
+        this.lastAltAt = Date.now()
+        if (this.altStandalone) {
+          this.altStandalone = false
+          this.hooks.onFocusMenuBar?.()
+          return true
+        }
       }
       return false
     }
     if (input.type !== 'keyDown') return false
+    if (isShift) {
+      this.shiftHeld = true
+      this.altStandalone = false
+      return false
+    }
     if (isAlt) {
+      this.altHeld = true
+      this.lastAltAt = Date.now()
       if (!input.control && !input.meta && !input.shift && !input.isAutoRepeat) this.altStandalone = true
       else this.altStandalone = false
       return false
     }
+    this.shiftHeld = input.shift
+    this.altHeld = input.alt
     this.altStandalone = false
 
     const mod = process.platform === 'darwin' ? input.meta : input.control
@@ -1395,11 +1434,17 @@ export class Tabs {
       }
     })
 
-    // Links that open a new tab become a tab in the same workspace. Real pop-ups stay pop-ups
-    // and inherit the workspace's session partition and security baseline.
-    wc.setWindowOpenHandler(({ url, disposition }) => {
+    // Links that open a new tab become a tab in the same workspace. Shift+click opens a floating
+    // Peek preview. Real pop-ups (window.open with explicit features, e.g. "Sign in with ...") stay pop-ups.
+    wc.setWindowOpenHandler(({ url, disposition, features }) => {
       if (!isAllowedUrl(url)) {
         if (parseExternalAppUrl(url)) this.hooks.externalApp(info.id, wc.getURL(), url)
+        return { action: 'deny' }
+      }
+      if (shouldPeekWindowOpen(disposition, features, this.shiftHeld)) {
+        this.shiftHeld = false
+        const partition = this.partitionFor(info.workspaceId)
+        this.hooks.openPeek?.(url, info.id, info.workspaceId, partition)
         return { action: 'deny' }
       }
       if (disposition === 'new-window') {
@@ -1551,6 +1596,10 @@ export class Tabs {
     if (p.linkURL && isAllowedUrl(p.linkURL)) {
       items.push(
         { label: 'Open link in new tab', click: () => this.create(p.linkURL, { activate: false, after: tab.info.id, workspaceId: wsId }) },
+        {
+          label: 'Peek link',
+          click: () => this.hooks.openPeek?.(p.linkURL, tab.info.id, wsId, this.partitionFor(wsId))
+        },
         { label: 'Copy link', click: () => clipboard.writeText(p.linkURL) }
       )
       gap()

@@ -30,7 +30,8 @@ export default defineConfig({
           index: resolve('src/preload/index.ts'),
           floating: resolve('src/preload/floating.ts'),
           compact: resolve('src/preload/compact.ts'),
-          palette: resolve('src/preload/palette.ts')
+          palette: resolve('src/preload/palette.ts'),
+          peek: resolve('src/preload/peek.ts')
         }
       }
     }

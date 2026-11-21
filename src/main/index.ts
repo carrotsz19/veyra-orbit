@@ -25,6 +25,7 @@ import {
   type PaletteContext,
   type PaletteMode
 } from '../shared/palette'
+import { PEEK_TAB_ID, isPeekAction } from '../shared/peek'
 import { Tabs } from './tabs'
 import { Store } from './store'
 import { SettingsStore } from './settings'
@@ -32,7 +33,7 @@ import { ExternalApps, Permissions, WEB_PARTITION, cleanUserAgent, hardenAll, se
 import { attachSessionCompat } from './compat'
 import { Downloads } from './downloads'
 import { Updater } from './updater'
-import { CompactPanel, MenuPopup, PalettePopup } from './floating'
+import { CompactPanel, MenuPopup, PalettePopup, PeekPopup } from './floating'
 
 const APP_NAME = __CHANNEL__ === 'dev' ? 'Veyra Orbit Dev' : 'Veyra Orbit'
 app.setName(APP_NAME)
@@ -62,6 +63,7 @@ function overlay(): Electron.TitleBarOverlayOptions {
 let win: BrowserWindow | null = null
 let menuPopup: MenuPopup | null = null
 let palettePopup: PalettePopup | null = null
+let peekPopup: PeekPopup | null = null
 let compactSidebar: CompactPanel | null = null
 let compactTitlebar: CompactPanel | null = null
 let compactOmniboxOpen = false
@@ -94,6 +96,7 @@ function isAnyOrbitFocused(): boolean {
     !!(win && !win.isDestroyed() && win.isFocused()) ||
     !!menuPopup?.isFocused() ||
     !!palettePopup?.isFocused() ||
+    !!peekPopup?.isFocused() ||
     !!compactSidebar?.isFocused() ||
     !!compactTitlebar?.isFocused()
   )
@@ -435,6 +438,7 @@ function openOrTogglePalette(mode: PaletteMode): void {
     return
   }
   menuPopup?.close()
+  peekPopup?.close()
   if (tabs.isPageFullscreen()) tabs.exitPageFullscreen(true)
   const ctx = buildPaletteContext('', mode)
   if (!ctx) return
@@ -697,7 +701,14 @@ function createWindow(): void {
   const d = downloads
 
   const configuredSessions = new Set<Session>()
-  const onDownload = (_e: Electron.Event, _item: Electron.DownloadItem, wc: Electron.WebContents): void => tabs?.downloadStarted(wc)
+  const onAltPeekDownload = (e: Electron.Event, item: Electron.DownloadItem, wc: Electron.WebContents): void => {
+    if (tabs?.consumeAltPeek(wc, item.getURL())) {
+      e.preventDefault()
+    }
+  }
+  const onDownload = (e: Electron.Event, _item: Electron.DownloadItem, wc: Electron.WebContents): void => {
+    if (!e.defaultPrevented) tabs?.downloadStarted(wc)
+  }
 
   /**
    * Single setup path for every web session partition (the shared persist:web partition and every
@@ -712,10 +723,30 @@ function createWindow(): void {
     configuredSessions.add(sess)
     perms.attach(sess)
     attachSessionCompat(sess)
+    // Alt+click peek intercepts link SaveLinkAs before Downloads records it.
+    sess.on('will-download', onAltPeekDownload)
     d.attach(sess)
     sess.on('will-download', onDownload)
     return sess
   }
+
+  // Reusable floating Link Preview ("Peek") window hosting a sandboxed WebContentsView.
+  peekPopup?.destroy()
+  peekPopup = new PeekPopup(w, {
+    preload: join(__dirname, '../preload/peek.js'),
+    acrylic,
+    ensureSession: (partition) => {
+      setupWebSession(partition)
+    },
+    onExternalApp: (tabId, pageUrl, targetUrl) => {
+      ext.request(tabId, pageUrl, targetUrl)
+    },
+    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur()),
+    onClosed: () => {
+      perms?.dropTab(PEEK_TAB_ID)
+      ext.dropTab(PEEK_TAB_ID)
+    }
+  })
 
   tabs = new Tabs(w, join(app.getPath('userData'), 'session.json'), {
     visit: (url, title, typed) => {
@@ -795,6 +826,7 @@ function createWindow(): void {
         compactSidebar?.hide(true)
         compactTitlebar?.hide(true)
         palettePopup?.close()
+        peekPopup?.close()
       } else if (settings?.get().compactMode) {
         syncCompactPanels()
       }
@@ -807,12 +839,26 @@ function createWindow(): void {
       }
       return false
     },
+    openPeek: (url, sourceTabId, workspaceId, partition) => {
+      if (!peekPopup || !isAllowedUrl(url)) return
+      menuPopup?.close()
+      palettePopup?.close()
+      if (tabs?.isPageFullscreen()) tabs.exitPageFullscreen(true)
+      peekPopup.open({
+        url,
+        sourceTabId,
+        workspaceId,
+        partition,
+        dark: nativeTheme.shouldUseDarkColors,
+        accent: activeWorkspaceAccentHex()
+      })
+    },
     quit: () => app.quit()
   })
   const t = tabs
 
   perms = new Permissions(
-    (wc) => t.tabIdOf(wc),
+    (wc) => (peekPopup?.isContentWebContents(wc) ? PEEK_TAB_ID : t.tabIdOf(wc)),
     (list) => {
       asks = list
       if (!w.isDestroyed()) w.webContents.send('permissions', list)
@@ -890,9 +936,14 @@ function createWindow(): void {
     compactTitlebar = null
     palettePopup?.destroy()
     palettePopup = null
+    peekPopup?.destroy()
+    peekPopup = null
     menuPopup?.destroy()
     menuPopup = null
-    for (const sess of configuredSessions) sess.off('will-download', onDownload)
+    for (const sess of configuredSessions) {
+      sess.off('will-download', onAltPeekDownload)
+      sess.off('will-download', onDownload)
+    }
     configuredSessions.clear()
     d.detach()
     if (downloads === d) downloads = null
@@ -944,6 +995,11 @@ function fromMenu(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
 /** Only the floating Ctrl+K command palette window may call palette:* return channels. */
 function fromPalette(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
   return !!palettePopup && palettePopup.isSender(e.sender)
+}
+
+/** Only the floating Link Preview ("Peek") toolbar window may call peek:* return channels. */
+function fromPeek(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  return !!peekPopup && peekPopup.isSender(e.sender)
 }
 
 const WIN_CMDS = new Set<WinCmd>([
@@ -1151,6 +1207,50 @@ ipcMain.on('palette:size', (e, height: unknown) => {
 })
 ipcMain.on('palette:dismiss', (e) => {
   if (fromPalette(e)) palettePopup?.dismiss()
+})
+
+// Floating Link Preview ("Peek") toolbar IPC: strict sender check + fixed action allowlist (never accepts URLs).
+ipcMain.on('peek:ready', (e) => {
+  if (fromPeek(e)) peekPopup?.markReady()
+})
+ipcMain.on('peek:action', (e, act: unknown) => {
+  if (!fromPeek(e) || !peekPopup || !tabs || !isPeekAction(act)) return
+  switch (act) {
+    case 'back':
+      peekPopup.back()
+      return
+    case 'reload':
+      peekPopup.reload()
+      return
+    case 'close':
+      peekPopup.dismiss()
+      return
+    case 'open-tab': {
+      const target = peekPopup.currentTarget()
+      peekPopup.close()
+      if (target && isAllowedUrl(target.url)) {
+        tabs.create(target.url, { after: target.sourceTabId, workspaceId: target.workspaceId, activate: true })
+      }
+      return
+    }
+    case 'open-split': {
+      const target = peekPopup.currentTarget()
+      peekPopup.close()
+      if (target && isAllowedUrl(target.url)) {
+        const st = tabs.state()
+        const anchorId = st.tabs.some((tab) => tab.id === target.sourceTabId)
+          ? target.sourceTabId
+          : st.activeId
+        const newId = tabs.create(target.url, { after: anchorId ?? undefined, workspaceId: target.workspaceId, activate: false })
+        if (anchorId !== null && anchorId !== newId) {
+          tabs.splitTabs(anchorId, newId, 'right', newId)
+        } else {
+          tabs.activate(newId)
+        }
+      }
+      return
+    }
+  }
 })
 onSurface('tab:mute', (t, id: unknown) => num(id) && t.toggleMute(id))
 onSurface('tab:sleep', (t, id: unknown) => num(id) && t.sleepTab(id, true))

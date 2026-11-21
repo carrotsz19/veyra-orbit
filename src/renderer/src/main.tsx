@@ -23,6 +23,10 @@ if (view === 'menu') {
   void import('./components/PaletteWindow').then(({ PaletteWindow }) => {
     createRoot(document.getElementById('root')!).render(<PaletteWindow />)
   })
+} else if (view === 'peek') {
+  void import('./components/PeekWindow').then(({ PeekWindow }) => {
+    createRoot(document.getElementById('root')!).render(<PeekWindow />)
+  })
 } else {
   if (__CHANNEL__ === 'dev') document.title = 'Veyra Orbit Dev'
   void import('./App').then(({ App }) => {

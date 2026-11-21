@@ -5,7 +5,7 @@
  * Each floating window loads Orbit's own renderer route with a minimal sandboxed preload,
  * no Node access, and locked-down navigation so web content can never enter it.
  */
-import { BrowserWindow, screen, type Input, type WebContents } from 'electron'
+import { BrowserWindow, WebContentsView, screen, type Input, type WebContents } from 'electron'
 import { join } from 'node:path'
 import { clampPopupBounds, type BoundsRect, type MenuEntry, type MenuPopupHeader, type MenuPopupSpec } from '../shared/menu'
 import {
@@ -16,6 +16,10 @@ import {
   type PaletteMode,
   type PaletteOpenState
 } from '../shared/palette'
+import { PEEK_TAB_ID, computePeekBounds, computePeekViewRect, type PeekState } from '../shared/peek'
+import { isAllowedUrl } from '../shared/url'
+import { isSafeSubframeUrl, parseExternalAppUrl } from '../shared/external'
+import { attachPageCompat } from './compat'
 
 export interface FloatingWindowOptions {
   parent: BrowserWindow
@@ -686,6 +690,313 @@ export class PalettePopup {
 
   destroy(): void {
     this.actions.clear()
+    this.floating.destroy()
+  }
+}
+
+// ---- Floating Link Preview ("Peek") window hosting a sandboxed WebContentsView ---
+
+export interface PeekOpenRequest {
+  url: string
+  sourceTabId: number
+  workspaceId: string
+  partition: string
+  dark: boolean
+  accent: string
+}
+
+export interface PeekTarget {
+  url: string
+  sourceTabId: number
+  workspaceId: string
+}
+
+export class PeekPopup {
+  private readonly floating: FloatingWindow
+  private readonly parent: BrowserWindow
+  private readonly ensureSession: (partition: string) => void
+  private readonly onExternalApp: (tabId: number, pageUrl: string, targetUrl: string) => void
+  private readonly onClosed?: () => void
+  private view: WebContentsView | null = null
+  private target: PeekTarget | null = null
+  private state: PeekState | null = null
+
+  constructor(
+    parent: BrowserWindow,
+    opts: {
+      preload: string
+      acrylic: boolean
+      ensureSession: (partition: string) => void
+      onExternalApp: (tabId: number, pageUrl: string, targetUrl: string) => void
+      onFocusChange?: (focused: boolean) => void
+      onClosed?: () => void
+    }
+  ) {
+    this.parent = parent
+    this.ensureSession = opts.ensureSession
+    this.onExternalApp = opts.onExternalApp
+    this.onClosed = opts.onClosed
+
+    this.floating = new FloatingWindow({
+      parent,
+      preload: opts.preload,
+      view: 'peek',
+      acrylic: opts.acrylic,
+      width: 820,
+      height: 600,
+      hideOnBlur: true,
+      hideOnParentMove: true,
+      onFocusChange: opts.onFocusChange,
+      onHidden: () => {
+        this.teardownView()
+        this.onClosed?.()
+      }
+    })
+  }
+
+  isSender(wc: WebContents): boolean {
+    return this.floating.isSender(wc)
+  }
+
+  isContentWebContents(wc: WebContents): boolean {
+    return !!this.view && !this.view.webContents.isDestroyed() && this.view.webContents === wc
+  }
+
+  isOpen(): boolean {
+    return this.floating.isVisible() && this.target !== null
+  }
+
+  isFocused(): boolean {
+    return this.floating.isFocused()
+  }
+
+  markReady(): void {
+    this.floating.markReady()
+    if (this.state) this.floating.send('peek:state', this.state)
+  }
+
+  currentTarget(): PeekTarget | null {
+    return this.target ? { ...this.target } : null
+  }
+
+  private emitState(): void {
+    if (this.state) this.floating.send('peek:state', this.state)
+  }
+
+  private teardownView(): void {
+    this.target = null
+    this.state = null
+    const view = this.view
+    this.view = null
+    if (!view) return
+    const hostWin = this.floating.getBrowserWindow()
+    if (!hostWin.isDestroyed()) {
+      try {
+        hostWin.contentView.removeChildView(view)
+      } catch {
+        /* already detached */
+      }
+    }
+    if (!view.webContents.isDestroyed()) view.webContents.close()
+  }
+
+  open(req: PeekOpenRequest): void {
+    if (this.parent.isDestroyed() || !isAllowedUrl(req.url)) return
+    this.teardownView()
+    this.ensureSession(req.partition)
+
+    const z = this.parent.webContents.getZoomFactor()
+    this.floating.setZoomFactor(z)
+    const cb = this.parent.getContentBounds()
+    const workArea = screen.getDisplayNearestPoint({ x: cb.x + Math.round(cb.width / 2), y: cb.y + Math.round(cb.height / 2) }).workArea
+    const bounds = computePeekBounds(cb, workArea, z)
+
+    this.target = { url: req.url, sourceTabId: req.sourceTabId, workspaceId: req.workspaceId }
+    this.state = {
+      url: req.url,
+      title: '',
+      loading: true,
+      canGoBack: false,
+      dark: req.dark,
+      accent: req.accent
+    }
+
+    // Create a sandboxed WebContentsView with NO preload in the originating workspace's session.
+    const view = new WebContentsView({
+      webPreferences: {
+        partition: req.partition,
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        webSecurity: true,
+        spellcheck: true,
+        safeDialogs: true,
+        plugins: true
+      }
+    })
+    view.setBackgroundColor('#ffffffff')
+    try {
+      view.setBorderRadius(10)
+    } catch {
+      /* ignore on older Electron */
+    }
+    attachPageCompat(view.webContents)
+    this.wireView(view, req.partition)
+    this.view = view
+
+    const hostWin = this.floating.getBrowserWindow()
+    this.floating.showAtBounds(bounds, true, 10)
+    if (!hostWin.isDestroyed()) {
+      hostWin.contentView.addChildView(view)
+      const [cw, ch] = hostWin.getContentSize()
+      view.setBounds(computePeekViewRect(cw, ch, z))
+    }
+
+    this.emitState()
+    void view.webContents.loadURL(req.url).catch(() => {})
+    view.webContents.focus()
+  }
+
+  private wireView(view: WebContentsView, partition: string): void {
+    const wc = view.webContents
+    const isCurrent = (): boolean => this.view === view && !wc.isDestroyed()
+
+    const sync = (): void => {
+      if (!isCurrent() || !this.state || !this.target) return
+      const curUrl = wc.getURL()
+      if (curUrl && isAllowedUrl(curUrl)) {
+        this.target.url = curUrl
+        this.state.url = curUrl
+      }
+      this.state.canGoBack = wc.navigationHistory.canGoBack()
+      this.emitState()
+    }
+
+    wc.on('before-input-event', (e, input) => {
+      if (input.type === 'keyDown' && input.key === 'Escape') {
+        e.preventDefault()
+        this.dismiss()
+      }
+    })
+
+    // Same security baseline as normal tabs: allow only http(s)/about:blank; ask for allowlisted external apps.
+    wc.on('will-navigate', (e, url) => {
+      if (!isAllowedUrl(url)) {
+        e.preventDefault()
+        if (parseExternalAppUrl(url)) this.onExternalApp(PEEK_TAB_ID, wc.getURL(), url)
+      }
+    })
+    wc.on('will-redirect', (e, url) => {
+      if (!isAllowedUrl(url)) {
+        e.preventDefault()
+        if (parseExternalAppUrl(url)) this.onExternalApp(PEEK_TAB_ID, wc.getURL(), url)
+      }
+    })
+    wc.on('will-frame-navigate', (details) => {
+      if (details.isMainFrame) return
+      if (!isSafeSubframeUrl(details.url)) {
+        details.preventDefault()
+        if (parseExternalAppUrl(details.url)) this.onExternalApp(PEEK_TAB_ID, wc.getURL(), details.url)
+      }
+    })
+    wc.setWindowOpenHandler(({ url, disposition, features }) => {
+      if (!isAllowedUrl(url)) {
+        if (parseExternalAppUrl(url)) this.onExternalApp(PEEK_TAB_ID, wc.getURL(), url)
+        return { action: 'deny' }
+      }
+      if (disposition === 'new-window' && features.trim().length > 0) {
+        this.ensureSession(partition)
+        return {
+          action: 'allow',
+          overrideBrowserWindowOptions: {
+            autoHideMenuBar: true,
+            width: 520,
+            height: 680,
+            webPreferences: {
+              partition,
+              sandbox: true,
+              contextIsolation: true,
+              nodeIntegration: false,
+              webSecurity: true
+            }
+          }
+        }
+      }
+      // Keep link clicks inside the preview itself.
+      if (isCurrent()) void wc.loadURL(url).catch(() => {})
+      return { action: 'deny' }
+    })
+    wc.on('did-create-window', (popup) => {
+      attachPageCompat(popup.webContents)
+      popup.webContents.on('will-navigate', (e, url) => {
+        if (!isAllowedUrl(url)) {
+          e.preventDefault()
+          if (parseExternalAppUrl(url)) this.onExternalApp(PEEK_TAB_ID, popup.webContents.getURL() || wc.getURL(), url)
+        }
+      })
+      popup.webContents.on('will-redirect', (e, url) => {
+        if (!isAllowedUrl(url)) {
+          e.preventDefault()
+          if (parseExternalAppUrl(url)) this.onExternalApp(PEEK_TAB_ID, popup.webContents.getURL() || wc.getURL(), url)
+        }
+      })
+      popup.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    })
+
+    wc.on('did-start-loading', () => {
+      if (!isCurrent() || !this.state) return
+      this.state.loading = true
+      this.state.error = undefined
+      this.emitState()
+    })
+    wc.on('did-stop-loading', () => {
+      if (!isCurrent() || !this.state) return
+      this.state.loading = false
+      sync()
+    })
+    wc.on('did-navigate', () => sync())
+    wc.on('did-navigate-in-page', () => sync())
+    wc.on('page-title-updated', (_e, title) => {
+      if (!isCurrent() || !this.state) return
+      this.state.title = title
+      this.emitState()
+    })
+    wc.on('page-favicon-updated', (_e, icons) => {
+      if (!isCurrent() || !this.state) return
+      this.state.favicon = icons.find((u) => /^(https?|data):/.test(u))
+      this.emitState()
+    })
+    wc.on('did-fail-load', (_e, code, description, _url, isMainFrame) => {
+      if (!isCurrent() || !this.state || !isMainFrame || code === -3) return
+      this.state.loading = false
+      this.state.error = description || `Error ${code}`
+      this.emitState()
+    })
+  }
+
+  back(): void {
+    const wc = this.view?.webContents
+    if (wc && !wc.isDestroyed() && wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack()
+  }
+
+  reload(): void {
+    const wc = this.view?.webContents
+    if (wc && !wc.isDestroyed()) wc.reload()
+  }
+
+  dismiss(): void {
+    this.close()
+    if (!this.parent.isDestroyed()) this.parent.focus()
+  }
+
+  close(): void {
+    this.teardownView()
+    this.floating.hide('asked')
+    this.onClosed?.()
+  }
+
+  destroy(): void {
+    this.teardownView()
     this.floating.destroy()
   }
 }

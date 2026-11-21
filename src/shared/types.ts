@@ -125,6 +125,7 @@ export type { CompactRevealState } from './compact'
 export type { MenuEntry, MenuId, MenuItemEntry, MenuPopupHeader, MenuPopupSpec, MenuSection } from './menu'
 export type { SplitGroup } from './split'
 export type { PaletteItem, PaletteMode, PaletteOpenState, PaletteResultsPayload } from './palette'
+export type { PeekAction, PeekState } from './peek'
 export type { InternalUrl } from './url'
 
 export type CompactPinKind = 'omnibox' | 'sidebar'
@@ -177,6 +178,13 @@ export interface VeyraPaletteWindowApi {
   submitText(text: string, openInNewTab: boolean): void
   size(height: number): void
   dismiss(): void
+}
+
+/** Minimal bridge exposed ONLY to the floating Link Preview ("Peek") toolbar BrowserWindow. */
+export interface VeyraPeekWindowApi {
+  ready(): void
+  onState(cb: (state: import('./peek').PeekState) => void): () => void
+  action(act: import('./peek').PeekAction): void
 }
 
 /** Minimal bridge exposed ONLY to the floating compact-mode sidebar / titlebar windows. */

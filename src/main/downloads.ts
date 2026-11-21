@@ -29,7 +29,8 @@ export class Downloads {
   private emitTimer: NodeJS.Timeout | null = null
   private lastEmit = 0
 
-  private readonly onWillDownload = (_e: Event, item: DownloadItem): void => {
+  private readonly onWillDownload = (e: Event, item: DownloadItem): void => {
+    if (e.defaultPrevented) return
     this.handle(item)
   }
 
