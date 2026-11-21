@@ -23,7 +23,16 @@ export default defineConfig({
     define: { ...channel, __DEV_FEED_TOKEN__: JSON.stringify(devFeedToken) },
     build: { rollupOptions: { external: ['node:sqlite'] } }
   },
-  preload: {},
+  preload: {
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve('src/preload/index.ts'),
+          floating: resolve('src/preload/floating.ts')
+        }
+      }
+    }
+  },
   renderer: {
     define: channel,
     resolve: { alias: { '@shared': resolve('src/shared') } },
