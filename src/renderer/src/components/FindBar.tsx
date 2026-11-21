@@ -48,7 +48,17 @@ export function FindBar({ open, focusTick, onClose }: Props): React.JSX.Element 
   const hasMatches = query.length > 0 && result !== null && result.matches > 0
 
   return (
-    <div className="find" role="search" aria-label="Find in page">
+    <div
+      className="find"
+      role="search"
+      aria-label="Find in page"
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          close()
+        }
+      }}
+    >
       <div className={`find-field ${noMatches ? 'empty' : ''}`}>
         <Search size={14} className="find-icon" />
         <input
@@ -67,9 +77,6 @@ export function FindBar({ open, focusTick, onClose }: Props): React.JSX.Element 
             if (e.key === 'Enter') {
               e.preventDefault()
               step(!e.shiftKey)
-            } else if (e.key === 'Escape') {
-              e.preventDefault()
-              close()
             }
           }}
         />
