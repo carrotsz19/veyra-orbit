@@ -103,3 +103,46 @@ Tested in a scratch profile (`VEYRA_USERDATA` + `VEYRA_DOWNLOADS`) with no real 
 - **Google Docs (`docs.google.com`) & Google Classroom (`classroom.google.com`):** Landing and sign-in redirects load cleanly with no unsupported-browser warnings (redirecting to `accounts.google.com` automatically switches to the Google auth compatibility rule).
 - **Wikipedia, GitHub (`/login`), Khan Academy, Quizlet, Microsoft 365 (`login.microsoftonline.com`):** All load cleanly with consistent Chrome UA + Client Hints, no unsupported-browser banners, and no unexpected Windows Security prompts.
 - **Not tested:** Full interactive login flows with real user accounts (Google, Microsoft, GitHub, Quizlet, Khan Academy), real Windows Hello explicit passkey sign-in, and DRM-protected streaming (still planned for M3).
+
+## Settings roadmap
+
+Settings grows towards Vivaldi-level customisation, in Orbit's calm style.
+
+**Structure**
+- Sections down the left, grouped under *You*, *Look & feel*, *Browsing*, *Privacy & security*, *Study* and *System*.
+- A search box over every setting.
+- A dot on anything changed from its default. Each section can be reset, and so can everything at once.
+- Export and import of settings. Later, sync through the Veyra account.
+
+**Sections**
+- **General**
+  - Search engines, with your own `!` shortcuts like DuckDuckGo's bangs: `!w photosynthesis` searches Wikipedia, `!yt` YouTube, `!gs` Google Scholar. A starter set comes built in, and suggestions show the engine as soon as you type the shortcut.
+  - What opens at start and in new tabs, default browser, language.
+- **Appearance:** theme, accent colour (presets or your own), glass or solid window, window buttons (Windows or Veyra dots), corner roundness, fonts, default zoom, reduced motion.
+- **Layout:** sidebar on the left or right and its width, tab density, compact-mode behaviour, address bar position, toolbar buttons and their order, title-bar menus on or off.
+- **Tabs & workspaces:** where new tabs open, what happens when the last tab closes, the sleep timer and sites that never sleep, workspace defaults, pinned tabs.
+- **Shortcuts:** every shortcut, editable and searchable, with a warning when two clash. Mouse gestures later.
+- **Start page:** background, greeting, bookmarks grid. Later, Veyra Study widgets: today's tasks, the focus timer, recent notes.
+- **Privacy & security:**
+  - clear data, and clear when Orbit closes
+  - cookie rules per site, and blocking third-party cookies
+  - tracker and ad blocking, with an allow-list
+  - HTTPS-only mode
+  - site permissions, and asking before opening other apps
+- **Downloads:** folder, ask each time, auto-clear the list. Rules per file type later.
+- **Passwords & autofill:** saved passwords using Windows encryption. Addresses and cards later.
+- **Extensions:**
+  - Chrome extensions through a community Electron library: turn each one on or off, see its permissions, and show its toolbar button.
+  - uBlock Origin Lite and Bitwarden come first.
+  - Some extensions won't work. Installing from the Chrome Web Store takes extra work. A memory read-out for each extension keeps Orbit light.
+  - Planned for M3.
+- **Study** (the Veyra twist): Veyra Study connection, workspaces as subjects, focus-mode blocked sites and how strict to be, logging time on study sites, the save-to-note target.
+- **Performance:** sleeping tabs, memory saver, hardware acceleration, preloading on hover, memory used by each tab.
+- **Accessibility:** minimum font size, focus outlines, contrast, larger click targets.
+- **Updates & about:** version, channel, check for updates, the changelog, reporting a bug.
+- **Advanced:** proxy, DNS-over-HTTPS, a user-agent switch for awkward sites, developer options, opening the profile folder.
+
+**Order**
+1. Search box, changed dots and reset, Layout, Shortcuts, and the `!` search shortcuts.
+2. Tabs & workspaces, window-button style and accent colours, alongside the title bar.
+3. Tracker blocking, passwords, start page widgets, Study, extensions and settings sync.
