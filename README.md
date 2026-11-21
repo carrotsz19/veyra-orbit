@@ -16,4 +16,4 @@ npm run build   # typecheck + production build
 npm test        # address bar tests
 ```
 
-`VEYRA_USERDATA=<folder>` runs it on a scratch profile.
+`VEYRA_USERDATA=<folder>` runs it on a scratch profile, and `VEYRA_DOWNLOADS=<folder>` sends downloads somewhere other than your Downloads folder.

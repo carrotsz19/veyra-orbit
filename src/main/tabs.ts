@@ -216,6 +216,27 @@ export class Tabs {
     this.changed()
   }
 
+  /**
+   * A navigation in a tab turned out to be a file download. A tab opened only for it closes (as in
+   * Chrome); a tab that already had a page goes back to showing that page's address.
+   */
+  downloadStarted(wc: WebContents): void {
+    const tab = this.tabs.find((t) => t.view.webContents === wc)
+    if (!tab) return
+    const committed = wc.getURL()
+    tab.info.loading = false
+    if (!committed) {
+      // Closed a moment later, once the download is under way on its own.
+      setTimeout(() => {
+        if (this.tabs.includes(tab) && !wc.isDestroyed() && !wc.getURL()) this.close(tab.info.id)
+      }, 400)
+    } else if (!isInternalUrl(tab.info.url)) {
+      tab.info.url = committed
+      tab.info.title = wc.getTitle()
+    }
+    this.changed()
+  }
+
   /** Tells the UI to read state again (after a bookmark changed elsewhere). */
   refresh(): void {
     this.changed()

@@ -7,7 +7,7 @@ import { shell, type DownloadItem, type Event, type Session } from 'electron'
 import { existsSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { DownloadInfo, DownloadState } from '../shared/types'
-import { pickUniqueFilename } from '../shared/downloads'
+import { isRunnable, pickUniqueFilename } from '../shared/downloads'
 
 interface TrackedDownload {
   info: DownloadInfo
@@ -145,7 +145,9 @@ export class Downloads {
   open(id: number): void {
     const entry = this.get(id)
     if (!entry || entry.info.state !== 'completed' || !existsSync(entry.info.savePath)) return
-    void shell.openPath(entry.info.savePath)
+    // A downloaded program or script never runs from one click here: it's shown in its folder instead.
+    if (isRunnable(entry.info.filename)) shell.showItemInFolder(entry.info.savePath)
+    else void shell.openPath(entry.info.savePath)
   }
 
   show(id: number): void {

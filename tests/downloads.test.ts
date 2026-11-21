@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatBytes, formatSpeed, pickUniqueFilename, sanitizeFilename, splitFilename } from '../src/shared/downloads.ts'
+import { formatBytes, formatSpeed, isRunnable, pickUniqueFilename, sanitizeFilename, splitFilename } from '../src/shared/downloads.ts'
 
 test('splitFilename separates stem and extension cleanly', () => {
   assert.deepEqual(splitFilename('report.pdf'), { stem: 'report', ext: '.pdf' })
@@ -55,4 +55,9 @@ test('formatBytes and formatSpeed format sizes cleanly', () => {
   assert.equal(formatSpeed(0), '')
   assert.equal(formatSpeed(-10), '')
   assert.equal(formatSpeed(2 * 1024 * 1024), '2 MB/s')
+})
+
+test('programs and scripts are recognised so they are never opened from the downloads list', () => {
+  for (const f of ['setup.exe', 'Installer.MSI', 'run.bat', 'x.cmd', 'script.ps1', 'a.vbs', 'shortcut.lnk', 'page.hta', 'tool.jar', 'evil.exe. ']) assert.equal(isRunnable(f), true, f)
+  for (const f of ['notes.pdf', 'essay.docx', 'photo.jpg', 'data.csv', 'README', 'archive.zip']) assert.equal(isRunnable(f), false, f)
 })

@@ -100,10 +100,13 @@ function createWindow(): void {
   t.onTabGone = (id) => p.dropTab(id)
 
   downloads?.detach()
-  downloads = new Downloads(app.getPath('downloads'), (list) => {
+  downloads = new Downloads(process.env.VEYRA_DOWNLOADS || app.getPath('downloads'), (list) => {
     if (!w.isDestroyed()) w.webContents.send('downloads', list)
   })
   downloads.attach(webSession())
+  const onDownload = (_e: Electron.Event, _item: Electron.DownloadItem, wc: Electron.WebContents): void => t.downloadStarted(wc)
+  webSession().on('will-download', onDownload)
+  w.on('closed', () => webSession().off('will-download', onDownload))
   const d = downloads
 
   w.once('ready-to-show', () => w.show())

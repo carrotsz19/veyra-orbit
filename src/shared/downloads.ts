@@ -57,6 +57,19 @@ export function pickUniqueFilename(filename: string, exists: (name: string) => b
   return `${stem} (${Date.now()})${ext}`
 }
 
+/** Files that run code when opened on Windows. Orbit shows these in their folder instead of opening them. */
+const RUNNABLE = new Set([
+  'exe', 'msi', 'msix', 'msixbundle', 'appx', 'appxbundle', 'bat', 'cmd', 'com', 'scr', 'pif', 'cpl',
+  'ps1', 'psm1', 'vbs', 'vbe', 'js', 'jse', 'wsf', 'wsh', 'hta', 'lnk', 'url', 'reg', 'jar', 'msc', 'scf', 'inf', 'application', 'appref-ms'
+])
+
+export function isRunnable(filename: string): boolean {
+  // Windows ignores trailing dots and spaces, so "a.exe. " is still a program.
+  const name = filename.replace(/[. ]+$/, '')
+  const dot = name.lastIndexOf('.')
+  return dot >= 0 && RUNNABLE.has(name.slice(dot + 1).toLowerCase())
+}
+
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB']
 
 /** Formats a byte count like "12.4 MB" or "512 B". */
