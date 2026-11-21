@@ -4,6 +4,8 @@ All notable changes to Veyra Orbit are documented here.
 
 ## Unreleased
 
+## 26.11.4 — 2026-11-21
+
 - Compact mode no longer makes the page jump: the sidebar and title bar now slide in over the page while it stays where it is.
 - Split view: show two to four tabs side by side. Right-click a tab → Split with active tab, drag a tab onto the left or right half of the page, or press Ctrl+Shift+\. Drag the divider to resize; your split comes back after a restart.
 - Command bar (Ctrl+K): search your open tabs in every workspace, bookmarks, history and Orbit's own commands, or type a search or an address.
