@@ -15,6 +15,7 @@ import { SEARCH_ENGINES } from '@shared/settings'
 import { SLEEP_MINUTES_OPTIONS } from '@shared/sleep'
 import { pickActiveSection } from '@shared/compact'
 import { permissionName } from '@shared/permissions'
+import { ImportSection } from './ImportCard'
 
 const api = window.veyra
 
@@ -45,6 +46,7 @@ const CLEAR_RANGES: { id: ClearDataRange; label: string }[] = [
 
 const SETTING_SECTIONS = [
   { id: 'set-general', label: 'General / search & start' },
+  { id: 'set-import', label: 'Import data' },
   { id: 'set-appearance', label: 'Appearance' },
   { id: 'set-performance', label: 'Performance' },
   { id: 'set-downloads', label: 'Downloads' },
@@ -303,6 +305,8 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
               ))}
             </div>
           </section>
+
+          <ImportSection />
 
           <section className="set-section" id="set-appearance" aria-labelledby="set-appearance-h">
             <h2 id="set-appearance-h">Appearance</h2>

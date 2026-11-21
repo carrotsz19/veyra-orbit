@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Search } from 'lucide-react'
+import { EyeOff, Search } from 'lucide-react'
 import type { Bookmark } from '@shared/types'
+import { FirstRunImportBanner } from './ImportCard'
 
 const api = window.veyra
 
@@ -21,7 +22,7 @@ function hostOf(url: string): string {
 }
 
 /** What a new tab shows. Later: today's tasks, the focus timer and recent notes from Veyra Study. */
-export function StartPage({ tabId }: { tabId: number }): React.JSX.Element {
+export function StartPage({ tabId, isPrivate = false }: { tabId: number; isPrivate?: boolean }): React.JSX.Element {
   const [text, setText] = useState('')
   const [marks, setMarks] = useState<Bookmark[]>([])
   useEffect(() => {
@@ -32,9 +33,23 @@ export function StartPage({ tabId }: { tabId: number }): React.JSX.Element {
 
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
   return (
-    <div className="start">
-      <p className="start-date">{today}</p>
-      <h1 className="start-hello">{greeting()}.</h1>
+    <div className={`start ${isPrivate ? 'private-start' : ''}`}>
+      {isPrivate ? (
+        <>
+          <div className="start-private-emblem" aria-hidden>
+            <EyeOff size={22} strokeWidth={1.8} />
+          </div>
+          <h1 className="start-hello">Private browsing.</h1>
+          <p className="start-private-note">
+            Private: Orbit won&apos;t save your history, cookies or site data from this workspace.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="start-date">{today}</p>
+          <h1 className="start-hello">{greeting()}.</h1>
+        </>
+      )}
       <form
         className="start-search"
         onSubmit={(e) => {
@@ -60,8 +75,18 @@ export function StartPage({ tabId }: { tabId: number }): React.JSX.Element {
           })}
         </nav>
       )}
+      {!isPrivate && <FirstRunImportBanner />}
       <p className="start-hint">
-        <kbd>Ctrl L</kbd> address bar · <kbd>Ctrl T</kbd> new tab · <kbd>Ctrl Shift T</kbd> reopen a closed tab
+        <kbd>Ctrl L</kbd> address bar · <kbd>Ctrl T</kbd> new tab ·{' '}
+        {isPrivate ? (
+          <>
+            <kbd>Ctrl Shift N</kbd> new private workspace
+          </>
+        ) : (
+          <>
+            <kbd>Ctrl Shift T</kbd> reopen a closed tab
+          </>
+        )}
       </p>
       <p className="start-links">
         <button onClick={() => api.navigate(tabId, 'orbit://history')}>History</button>

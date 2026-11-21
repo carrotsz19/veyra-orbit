@@ -113,6 +113,7 @@ export type { WorkspaceAccentId, WorkspaceCreateInput, WorkspaceIconId, Workspac
 export type { CompactRevealState } from './compact'
 export type { MenuEntry, MenuId, MenuItemEntry, MenuPopupHeader, MenuPopupSpec, MenuSection } from './menu'
 export type { InternalUrl } from './url'
+export type { ImportBrowserId, ImportProfile, ImportRequest, ImportResult, ImportStatus } from './importer'
 
 export type CompactPinKind = 'omnibox' | 'sidebar'
 export type CompactEdgeKind = 'sidebar' | 'toolbar'
@@ -198,6 +199,7 @@ export interface VeyraApi {
   tabMenu(id: number): void
   switchWorkspace(id: string): void
   createWorkspace(input: import('./workspaces').WorkspaceCreateInput): Promise<import('./workspaces').WorkspaceInfo | null>
+  createPrivateWorkspace(): Promise<import('./workspaces').WorkspaceInfo | null>
   updateWorkspace(id: string, patch: import('./workspaces').WorkspaceUpdateInput): Promise<import('./workspaces').WorkspaceInfo | null>
   deleteWorkspace(id: string): Promise<boolean>
   onCompactState(cb: (s: import('./compact').CompactRevealState) => void): () => void
@@ -254,4 +256,7 @@ export interface VeyraApi {
   onWinState(cb: (s: WindowState) => void): () => void
   onFocusMenuBar(cb: () => void): () => void
   menu: MenuBridgeApi
+  getImportStatus(): Promise<import('./importer').ImportStatus>
+  runImport(req: import('./importer').ImportRequest): Promise<import('./importer').ImportResult>
+  dismissImportPrompt(): Promise<void>
 }

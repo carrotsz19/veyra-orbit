@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import type { BrowserState, CompactRevealState, DownloadInfo, ExternalAppAsk, PermissionAsk, SettingsView, TabInfo, UpdateState, WindowState } from '@shared/types'
 import './library.css'
 import './settings.css'
+import './import-private.css'
 import { Sidebar } from './components/Sidebar'
 import { TitleBar } from './components/TitleBar'
 import { StartPage } from './components/StartPage'
@@ -140,6 +141,7 @@ export function App(): React.JSX.Element {
     <div
       className={`shell ${pageFullscreen ? 'fullscreen' : ''} ${compactClasses}`}
       data-ws-accent={activeWorkspace?.accent ?? 'clay'}
+      data-ws-private={activeWorkspace?.private ? 'true' : undefined}
     >
       {compact.enabled && !pageFullscreen && !compact.sidebar && (
         <div
@@ -190,7 +192,7 @@ export function App(): React.JSX.Element {
             api.setCompactHover('toolbar', false)
           }}
         >
-          {active && !active.url && <StartPage tabId={active.id} />}
+          {active && !active.url && <StartPage tabId={active.id} isPrivate={!!activeWorkspace?.private} />}
           {active?.url === 'orbit://history' && <HistoryPage key={active.id} tabId={active.id} />}
           {active?.url === 'orbit://bookmarks' && <BookmarksPage key={active.id} tabId={active.id} />}
           {active?.url === 'orbit://settings' && <SettingsPage key={active.id} settings={settings} update={update} />}
