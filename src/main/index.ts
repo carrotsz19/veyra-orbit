@@ -24,7 +24,7 @@ import { ExternalApps, Permissions, WEB_PARTITION, cleanUserAgent, hardenAll, se
 import { attachSessionCompat } from './compat'
 import { Downloads } from './downloads'
 import { Updater } from './updater'
-import { MenuPopup } from './floating'
+import { CompactPanel, MenuPopup } from './floating'
 
 const APP_NAME = __CHANNEL__ === 'dev' ? 'Veyra Orbit Dev' : 'Veyra Orbit'
 app.setName(APP_NAME)
@@ -53,6 +53,9 @@ function overlay(): Electron.TitleBarOverlayOptions {
 
 let win: BrowserWindow | null = null
 let menuPopup: MenuPopup | null = null
+let compactSidebar: CompactPanel | null = null
+let compactTitlebar: CompactPanel | null = null
+let compactOmniboxOpen = false
 let tabs: Tabs | null = null
 let perms: Permissions | null = null
 let externalApps: ExternalApps | null = null
@@ -72,14 +75,112 @@ let compactPoller: NodeJS.Timeout | null = null
 let sideHideTimer: NodeJS.Timeout | null = null
 let barHideTimer: NodeJS.Timeout | null = null
 
+const COMPACT_SIDEBAR_W = 264
+const COMPACT_TITLEBAR_H = 52
+const COMPACT_TITLEBAR_OPEN_H = 380
+const COMPACT_MARGIN = 6
+
+function isAnyOrbitFocused(): boolean {
+  return (
+    !!(win && !win.isDestroyed() && win.isFocused()) ||
+    !!menuPopup?.isFocused() ||
+    !!compactSidebar?.isFocused() ||
+    !!compactTitlebar?.isFocused()
+  )
+}
+
+function broadcastUi(channel: string, payload?: unknown): void {
+  if (win && !win.isDestroyed()) {
+    if (payload === undefined) win.webContents.send(channel)
+    else win.webContents.send(channel, payload)
+  }
+  compactSidebar?.send(channel, payload)
+  compactTitlebar?.send(channel, payload)
+}
+
+function compactSidebarGeometry(): { offset: { x: number; y: number }; size: { width: number; height: number } } {
+  const cb = win && !win.isDestroyed() ? win.getContentBounds() : { width: 1200, height: 800 }
+  const z = win && !win.isDestroyed() ? win.webContents.getZoomFactor() : 1
+  const cw = Math.round(cb.width / z)
+  const ch = Math.round(cb.height / z)
+  const top = compactState.toolbar ? COMPACT_TITLEBAR_H + 2 : COMPACT_MARGIN
+  return {
+    offset: { x: COMPACT_MARGIN, y: top },
+    size: { width: Math.min(COMPACT_SIDEBAR_W, Math.max(220, cw - COMPACT_MARGIN * 2)), height: Math.max(200, ch - top - COMPACT_MARGIN) }
+  }
+}
+
+function compactTitlebarGeometry(): { offset: { x: number; y: number }; size: { width: number; height: number } } {
+  const cb = win && !win.isDestroyed() ? win.getContentBounds() : { width: 1200, height: 800 }
+  const z = win && !win.isDestroyed() ? win.webContents.getZoomFactor() : 1
+  const cw = Math.round(cb.width / z)
+  const ch = Math.round(cb.height / z)
+  const h = compactOmniboxOpen ? Math.min(COMPACT_TITLEBAR_OPEN_H, Math.max(COMPACT_TITLEBAR_H, ch - COMPACT_MARGIN * 2)) : COMPACT_TITLEBAR_H
+  return {
+    offset: { x: COMPACT_MARGIN, y: COMPACT_MARGIN },
+    size: { width: Math.max(320, cw - COMPACT_MARGIN * 2), height: h }
+  }
+}
+
+function syncCompactPanels(focusTarget?: 'sidebar' | 'toolbar', immediateHide = false): void {
+  const enabled = !!settings?.get().compactMode && !tabs?.isPageFullscreen() && !!win && !win.isDestroyed() && !win.isMinimized()
+  if (!enabled) {
+    compactOmniboxOpen = false
+    compactSidebar?.hide(true)
+    compactTitlebar?.hide(true)
+    return
+  }
+
+  if (compactState.toolbar) {
+    const geom = compactTitlebarGeometry()
+    if (compactTitlebar?.isRevealed()) {
+      compactTitlebar.reposition(geom.offset, geom.size)
+      if (focusTarget === 'toolbar') compactTitlebar.focus()
+    } else {
+      compactTitlebar?.show(geom.offset, geom.size, focusTarget === 'toolbar')
+    }
+  } else {
+    compactOmniboxOpen = false
+    compactTitlebar?.hide(immediateHide)
+  }
+
+  if (compactState.sidebar) {
+    const geom = compactSidebarGeometry()
+    if (compactSidebar?.isRevealed()) {
+      compactSidebar.reposition(geom.offset, geom.size)
+      if (focusTarget === 'sidebar') compactSidebar.focus()
+    } else {
+      compactSidebar?.show(geom.offset, geom.size, focusTarget === 'sidebar')
+    }
+  } else {
+    compactSidebar?.hide(immediateHide)
+  }
+}
+
 function sendWinState(): void {
   if (!win || win.isDestroyed()) return
   const payload: WindowState = {
-    focused: win.isFocused() || !!menuPopup?.isFocused(),
+    focused: isAnyOrbitFocused(),
     maximized: win.isMaximized(),
     fullscreen: win.isFullScreen()
   }
-  win.webContents.send('win:state', payload)
+  broadcastUi('win:state', payload)
+}
+
+function handleOrbitFocusBlur(): void {
+  sendWinState()
+  // Defer slightly so focus handoff between main window, floating panels, and menus settles first.
+  setTimeout(() => {
+    if (!win || win.isDestroyed()) return
+    sendWinState()
+    if (settings?.get().compactMode && !isAnyOrbitFocused() && !compactPins.menu && !compactPins.titleMenu) {
+      compactHover = { sidebar: false, toolbar: false }
+      compactPins.omnibox = false
+      compactState = { enabled: true, sidebar: false, toolbar: false }
+      broadcastUi('compact:state', compactState)
+      syncCompactPanels(undefined, false)
+    }
+  }, 60)
 }
 
 function applyCompactTargets(wantSide: boolean, wantBar: boolean): void {
@@ -99,7 +200,8 @@ function applyCompactTargets(wantSide: boolean, wantBar: boolean): void {
       sideHideTimer = null
       if (!compactPins.sidebar && !compactPins.menu && !compactHover.sidebar && compactState.sidebar) {
         compactState = { ...compactState, sidebar: false }
-        if (win && !win.isDestroyed()) win.webContents.send('compact:state', compactState)
+        broadcastUi('compact:state', compactState)
+        syncCompactPanels()
       }
     }, COMPACT_HIDE_DELAY_MS)
   }
@@ -118,17 +220,19 @@ function applyCompactTargets(wantSide: boolean, wantBar: boolean): void {
       barHideTimer = null
       if (!compactPins.omnibox && !compactPins.titleMenu && !compactHover.toolbar && compactState.toolbar) {
         compactState = { ...compactState, toolbar: false }
-        if (win && !win.isDestroyed()) win.webContents.send('compact:state', compactState)
+        broadcastUi('compact:state', compactState)
+        syncCompactPanels()
       }
     }, COMPACT_HIDE_DELAY_MS)
   }
 
   if (changed && win && !win.isDestroyed()) {
-    win.webContents.send('compact:state', compactState)
+    broadcastUi('compact:state', compactState)
+    syncCompactPanels()
   }
 }
 
-function sendCompactState(force = false): void {
+function sendCompactState(force = false, focusTarget?: 'sidebar' | 'toolbar', immediateHide = false): void {
   if (!win || win.isDestroyed()) return
   const enabled = !!settings?.get().compactMode
   const next: CompactRevealState = enabled
@@ -140,10 +244,12 @@ function sendCompactState(force = false): void {
     : { enabled: false, sidebar: false, toolbar: false }
 
   if (!force && next.enabled === compactState.enabled && next.sidebar === compactState.sidebar && next.toolbar === compactState.toolbar) {
+    if (focusTarget) syncCompactPanels(focusTarget, immediateHide)
     return
   }
   compactState = next
-  win.webContents.send('compact:state', compactState)
+  broadcastUi('compact:state', compactState)
+  syncCompactPanels(focusTarget, immediateHide)
 }
 
 function clearCompactTimers(): void {
@@ -170,7 +276,7 @@ function pollCompactCursor(): void {
   if (!win || win.isDestroyed() || !settings?.get().compactMode) return
   if (tabs?.isPageFullscreen() || win.isMinimized() || !win.isVisible()) return
 
-  const focused = win.isFocused()
+  const focused = isAnyOrbitFocused()
   const cursor = screen.getCursorScreenPoint()
   const moved = lastPolledCursor !== null && (cursor.x !== lastPolledCursor.x || cursor.y !== lastPolledCursor.y)
   lastPolledCursor = cursor
@@ -208,8 +314,10 @@ function syncCompactMode(): void {
   if (!enabled) {
     stopCompactPoller()
     compactHover = { sidebar: false, toolbar: false }
+    compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false }
+    compactOmniboxOpen = false
     compactState = { enabled: false, sidebar: false, toolbar: false }
-    sendCompactState(true)
+    sendCompactState(true, undefined, true)
     return
   }
   compactState = {
@@ -226,11 +334,11 @@ function syncCompactMode(): void {
 /** History and bookmarks changed: the UI re-reads them (the Library page, the star). */
 function dataChanged(): void {
   tabs?.refresh()
-  if (win && !win.isDestroyed()) win.webContents.send('data-changed')
+  broadcastUi('data-changed')
 }
 
 function sendSettings(): void {
-  if (win && !win.isDestroyed() && settings) win.webContents.send('settings', settings.view())
+  if (settings) broadcastUi('settings', settings.view())
 }
 
 function toggleCompactMode(): void {
@@ -273,7 +381,39 @@ function createWindow(): void {
   // Orbit draws its own title bar and menus; remove Electron's default menu bar so Alt never shows it.
   w.setMenu(null)
 
-  // Reusable floating acrylic window for title-bar menus (sits above native WebContentsViews).
+  const panelExtraQuery = {
+    buttons: activeButtons,
+    version: app.getVersion()
+  }
+
+  // Floating overlay panels for compact mode (sidebar & titlebar slide over the page without moving it).
+  compactSidebar?.destroy()
+  compactSidebar = new CompactPanel(w, {
+    view: 'compact-sidebar',
+    preload: join(__dirname, '../preload/compact.js'),
+    extraQuery: panelExtraQuery,
+    width: COMPACT_SIDEBAR_W,
+    height: 760,
+    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur()),
+    onBeforeInput: (e, input) => {
+      if (tabs?.shortcut(input)) e.preventDefault()
+    }
+  })
+
+  compactTitlebar?.destroy()
+  compactTitlebar = new CompactPanel(w, {
+    view: 'compact-titlebar',
+    preload: join(__dirname, '../preload/compact.js'),
+    extraQuery: panelExtraQuery,
+    width: 1200,
+    height: COMPACT_TITLEBAR_H,
+    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur()),
+    onBeforeInput: (e, input) => {
+      if (tabs?.shortcut(input)) e.preventDefault()
+    }
+  })
+
+  // Reusable floating acrylic window for title-bar menus (sits above native WebContentsViews and compact panels).
   menuPopup?.destroy()
   menuPopup = new MenuPopup(w, {
     preload: join(__dirname, '../preload/floating.js'),
@@ -288,7 +428,7 @@ function createWindow(): void {
       }
       sendWinState()
     },
-    onFocusChange: () => sendWinState()
+    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur())
   })
 
   // The browser's own UI never navigates and never opens windows; pages do that in tabs.
@@ -308,7 +448,7 @@ function createWindow(): void {
   downloads = new Downloads(
     () => ({ dir: s.effectiveDownloadsDir(), askWhereToSave: s.get().askWhereToSave }),
     (list) => {
-      if (!w.isDestroyed()) w.webContents.send('downloads', list)
+      broadcastUi('downloads', list)
     }
   )
   const d = downloads
@@ -337,7 +477,7 @@ function createWindow(): void {
   tabs = new Tabs(w, join(app.getPath('userData'), 'session.json'), {
     visit: (url, title, typed) => {
       db.visit(url, title, typed)
-      if (win) win.webContents.send('data-changed')
+      broadcastUi('data-changed')
     },
     title: (url, title) => db.title(url, title),
     isBookmarked: (url) => db.isBookmarked(url),
@@ -366,14 +506,16 @@ function createWindow(): void {
       if (settings?.get().compactMode) sendCompactState()
     },
     onFocusOmnibox: () => {
-      if (!settings?.get().compactMode) return
+      if (!settings?.get().compactMode) return false
       if (barHideTimer) {
         clearTimeout(barHideTimer)
         barHideTimer = null
       }
       compactPins.omnibox = true
       compactState = { ...compactState, toolbar: true }
-      sendCompactState(true)
+      sendCompactState(true, 'toolbar')
+      compactTitlebar?.send('focus-omnibox')
+      return true
     },
     onFocusMenuBar: () => {
       if (w.isDestroyed()) return
@@ -383,10 +525,35 @@ function createWindow(): void {
           barHideTimer = null
         }
         compactState = { ...compactState, toolbar: true }
-        sendCompactState(true)
+        sendCompactState(true, 'toolbar')
+        compactTitlebar?.send('menu:focus-bar')
+        return
       }
       w.webContents.focus()
       w.webContents.send('menu:focus-bar')
+    },
+    onState: (st) => {
+      compactSidebar?.send('state', st)
+      compactTitlebar?.send('state', st)
+    },
+    onToggleDownloads: () => {
+      if (!settings?.get().compactMode) return false
+      if (sideHideTimer) {
+        clearTimeout(sideHideTimer)
+        sideHideTimer = null
+      }
+      compactState = { ...compactState, sidebar: true }
+      sendCompactState(true, 'sidebar')
+      compactSidebar?.send('downloads:toggle')
+      return true
+    },
+    onPageFullscreen: (on) => {
+      if (on) {
+        compactSidebar?.hide(true)
+        compactTitlebar?.hide(true)
+      } else if (settings?.get().compactMode) {
+        syncCompactPanels()
+      }
     },
     quit: () => app.quit()
   })
@@ -420,9 +587,22 @@ function createWindow(): void {
   // Windows flickers acrylic on a full-screen window, so full screen is solid; and a page in
   // full screen leaves it when the window does (Esc, F11).
   w.on('focus', sendWinState)
-  w.on('blur', sendWinState)
-  w.on('maximize', sendWinState)
-  w.on('unmaximize', sendWinState)
+  w.on('blur', handleOrbitFocusBlur)
+  w.on('minimize', () => {
+    compactSidebar?.hide(true)
+    compactTitlebar?.hide(true)
+  })
+  w.on('maximize', () => {
+    sendWinState()
+    syncCompactPanels()
+  })
+  w.on('unmaximize', () => {
+    sendWinState()
+    syncCompactPanels()
+  })
+  w.on('move', () => {
+    if (settings?.get().compactMode) syncCompactPanels()
+  })
   w.on('enter-full-screen', () => {
     if (acrylic) {
       w.setBackgroundMaterial('none')
@@ -430,6 +610,7 @@ function createWindow(): void {
     }
     sendWinState()
     t.relayout()
+    if (settings?.get().compactMode) syncCompactPanels()
   })
   w.on('leave-full-screen', () => {
     if (acrylic) {
@@ -438,14 +619,23 @@ function createWindow(): void {
     }
     sendWinState()
     t.exitPageFullscreen()
+    if (settings?.get().compactMode) syncCompactPanels()
   })
-  w.on('resize', () => t.relayout())
+  w.on('resize', () => {
+    t.relayout()
+    if (settings?.get().compactMode) syncCompactPanels()
+  })
   w.on('close', () => t.save())
   w.on('closed', () => {
     stopCompactPoller()
     compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false }
     compactHover = { sidebar: false, toolbar: false }
+    compactOmniboxOpen = false
     compactState = { enabled: false, sidebar: false, toolbar: false }
+    compactSidebar?.destroy()
+    compactSidebar = null
+    compactTitlebar?.destroy()
+    compactTitlebar = null
     menuPopup?.destroy()
     menuPopup = null
     for (const sess of configuredSessions) sess.off('will-download', onDownload)
@@ -471,15 +661,25 @@ function createWindow(): void {
 
   if (!updater) {
     updater = new Updater((state) => {
-      if (win && !win.isDestroyed()) win.webContents.send('update:state', state)
+      broadcastUi('update:state', state)
     })
     updater.start()
   }
 }
 
-/** Only the browser's own main UI may call app/tab/settings IPC; pages have no preload. */
+/** Only the browser's own main UI may call privileged IPC (settings, privacy, bounds, overlay); pages have no preload. */
 function fromUi(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
   return !!win && e.sender === win.webContents
+}
+
+/** Only the floating compact-mode sidebar or titlebar panels may call compact-panel channels. */
+function fromCompactPanel(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  return !!compactSidebar?.isSender(e.sender) || !!compactTitlebar?.isSender(e.sender)
+}
+
+/** Main UI or floating compact-mode panels (for shared Sidebar/TitleBar actions). */
+function fromUiSurface(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  return fromUi(e) || fromCompactPanel(e)
 }
 
 /** Only the floating menu window may call menu-popup return channels. */
@@ -507,6 +707,12 @@ function on<A extends unknown[]>(channel: string, f: (t: Tabs, ...args: A) => vo
   })
 }
 
+function onSurface<A extends unknown[]>(channel: string, f: (t: Tabs, ...args: A) => void): void {
+  ipcMain.on(channel, (e, ...args) => {
+    if (fromUiSurface(e) && tabs) f(tabs, ...(args as A))
+  })
+}
+
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 const str = (v: unknown): v is string => typeof v === 'string' && v.length < 8192
 
@@ -523,29 +729,77 @@ on('ready', () => {
   win.webContents.send('page-fullscreen', tabs.isPageFullscreen())
   if (updater) win.webContents.send('update:state', updater.state())
 })
-on('tab:new', (t, input?: unknown) => t.create((str(input) && toUrl(input, settings?.searchUrl())) || ''))
-on('tab:close', (t, id: unknown) => num(id) && t.close(id))
-on('tab:reopen', (t) => t.reopenClosed())
-on('tab:print', (t) => t.print())
-on('tab:devtools', (t) => t.toggleDevTools())
-on('tab:open-internal', (t, url: unknown) => {
+
+// Compact-mode floating panel handshake and narrow panel-specific IPC.
+ipcMain.on('compact-panel:ready', (e) => {
+  if (!fromCompactPanel(e) || !tabs) return
+  const panel = compactSidebar?.isSender(e.sender) ? compactSidebar : compactTitlebar
+  if (!panel) return
+  panel.markReady()
+  panel.send('state', tabs.state())
+  panel.send('downloads', downloads?.list() ?? [])
+  if (settings) panel.send('settings', settings.view())
+  panel.send('compact:state', compactState)
+  panel.send('win:state', {
+    focused: isAnyOrbitFocused(),
+    maximized: !!win && !win.isDestroyed() && win.isMaximized(),
+    fullscreen: !!win && !win.isDestroyed() && win.isFullScreen()
+  })
+  if (updater) panel.send('update:state', updater.state())
+})
+ipcMain.on('compact-panel:omnibox-open', (e, open: unknown) => {
+  if (!compactTitlebar?.isSender(e.sender)) return
+  const next = open === true
+  if (compactOmniboxOpen === next) return
+  compactOmniboxOpen = next
+  if (compactTitlebar.isRevealed()) {
+    const geom = compactTitlebarGeometry()
+    compactTitlebar.reposition(geom.offset, geom.size)
+  }
+})
+ipcMain.on('compact-panel:new-workspace', (e) => {
+  if (!fromCompactPanel(e)) return
+  if (settings?.get().compactMode) {
+    if (sideHideTimer) {
+      clearTimeout(sideHideTimer)
+      sideHideTimer = null
+    }
+    compactState = { ...compactState, sidebar: true }
+    sendCompactState(true, 'sidebar')
+    compactSidebar?.send('ui:new-workspace')
+  } else if (win && !win.isDestroyed()) {
+    win.webContents.send('ui:new-workspace')
+  }
+})
+ipcMain.on('compact-panel:settings-section', (e, sectionId: unknown) => {
+  if (!fromCompactPanel(e) || !str(sectionId) || !tabs) return
+  tabs.openInternal('orbit://settings')
+  if (win && !win.isDestroyed()) win.webContents.send('ui:settings-section', sectionId)
+})
+
+onSurface('tab:new', (t, input?: unknown) => t.create((str(input) && toUrl(input, settings?.searchUrl())) || ''))
+onSurface('tab:close', (t, id: unknown) => num(id) && t.close(id))
+onSurface('tab:reopen', (t) => t.reopenClosed())
+onSurface('tab:print', (t) => t.print())
+onSurface('tab:devtools', (t) => t.toggleDevTools())
+onSurface('tab:open-internal', (t, url: unknown) => {
   if (str(url) && isInternalUrl(url)) t.openInternal(url)
 })
-on('downloads:toggle', (t) => t.toggleDownloads())
-on('find:open', (t) => t.openFind())
-on('tab:activate', (t, id: unknown) => num(id) && t.activate(id))
+onSurface('downloads:toggle', (t) => t.toggleDownloads())
+onSurface('find:open', (t) => t.openFind())
+onSurface('tab:activate', (t, id: unknown) => num(id) && t.activate(id))
 // Everything the UI navigates to was typed (address bar, start page), which history ranks higher.
-on('tab:navigate', (t, id: unknown, input: unknown) => num(id) && str(input) && t.navigate(id, input, true))
-on('tab:pin', (t, id: unknown) => num(id) && t.togglePin(id))
-on('tab:move', (t, id: unknown, to: unknown) => num(id) && num(to) && t.move(id, to))
-on('nav:back', (t) => t.back())
-on('nav:forward', (t) => t.forward())
-on('nav:reload', (t) => t.reload())
-on('nav:stop', (t) => t.stop())
-on('nav:zoom-in', (t) => t.zoomIn())
-on('nav:zoom-out', (t) => t.zoomOut())
-on('nav:zoom-reset', (t) => t.resetZoom())
-on('win:cmd', (t, cmd: unknown) => {
+onSurface('tab:navigate', (t, id: unknown, input: unknown) => num(id) && str(input) && t.navigate(id, input, true))
+onSurface('tab:pin', (t, id: unknown) => num(id) && t.togglePin(id))
+onSurface('tab:move', (t, id: unknown, to: unknown) => num(id) && num(to) && t.move(id, to))
+onSurface('nav:back', (t) => t.back())
+onSurface('nav:forward', (t) => t.forward())
+onSurface('nav:reload', (t) => t.reload())
+onSurface('nav:stop', (t) => t.stop())
+onSurface('nav:zoom-in', (t) => t.zoomIn())
+onSurface('nav:zoom-out', (t) => t.zoomOut())
+onSurface('nav:zoom-reset', (t) => t.resetZoom())
+onSurface('win:cmd', (t, cmd: unknown) => {
   if (!str(cmd) || !WIN_CMDS.has(cmd as WinCmd) || !win || win.isDestroyed()) return
   switch (cmd as WinCmd) {
     case 'minimize':
@@ -579,12 +833,14 @@ on('app:relaunch', (t) => {
   app.relaunch()
   app.quit()
 })
-// Floating title-bar menu IPC: main UI asks to open/close; menu window reports size/pick/step/dismiss.
+// Floating title-bar menu IPC: main UI or compact titlebar asks to open/close; menu window reports size/pick/step/dismiss.
 ipcMain.on('menu:open', (e, spec: unknown) => {
-  if (fromUi(e)) menuPopup?.open(spec)
+  if (!fromUiSurface(e)) return
+  const offset = compactTitlebar?.isSender(e.sender) ? compactTitlebar.offsetCss() : { x: 0, y: 0 }
+  menuPopup?.open(spec, e.sender, offset)
 })
 ipcMain.on('menu:close', (e) => {
-  if (fromUi(e)) menuPopup?.close()
+  if (fromUiSurface(e)) menuPopup?.close()
 })
 ipcMain.on('menu:ready', (e) => {
   if (fromMenu(e)) menuPopup?.markReady()
@@ -601,16 +857,16 @@ ipcMain.on('menu:step', (e, by: unknown) => {
 ipcMain.on('menu:dismiss', (e) => {
   if (fromMenu(e)) menuPopup?.dismiss()
 })
-on('tab:mute', (t, id: unknown) => num(id) && t.toggleMute(id))
-on('tab:sleep', (t, id: unknown) => num(id) && t.sleepTab(id, true))
-on('tab:menu', (t, id: unknown) => num(id) && t.tabMenu(id))
-on('split:with', (t, anchorId: unknown, otherId: unknown, placement?: unknown) => {
+onSurface('tab:mute', (t, id: unknown) => num(id) && t.toggleMute(id))
+onSurface('tab:sleep', (t, id: unknown) => num(id) && t.sleepTab(id, true))
+onSurface('tab:menu', (t, id: unknown) => num(id) && t.tabMenu(id))
+onSurface('split:with', (t, anchorId: unknown, otherId: unknown, placement?: unknown) => {
   if (!num(anchorId) || !num(otherId)) return
   const side = placement === 'left' ? 'left' : 'right'
   t.splitTabs(anchorId, otherId, side, otherId)
 })
-on('split:next', (t) => t.splitWithNext())
-on('split:unsplit', (t, tabId?: unknown) => t.unsplit(num(tabId) ? tabId : undefined))
+onSurface('split:next', (t) => t.splitWithNext())
+onSurface('split:unsplit', (t, tabId?: unknown) => t.unsplit(num(tabId) ? tabId : undefined))
 on('split:ratio', (t, groupId: unknown, kind: unknown, ratio: unknown) => {
   if (str(groupId) && (kind === 'col' || kind === 'row') && num(ratio)) {
     t.setSplitRatio(groupId, kind, ratio)
@@ -619,9 +875,9 @@ on('split:ratio', (t, groupId: unknown, kind: unknown, ratio: unknown) => {
 on('split:swap', (t, groupId: unknown) => {
   if (str(groupId)) t.swapSplit(groupId)
 })
-on('workspace:switch', (t, id: unknown) => str(id) && t.switchWorkspace(id))
-on('compact:toggle', () => toggleCompactMode())
-on('compact:pin', (_t, kind: unknown, pinned: unknown) => {
+onSurface('workspace:switch', (t, id: unknown) => str(id) && t.switchWorkspace(id))
+onSurface('compact:toggle', () => toggleCompactMode())
+onSurface('compact:pin', (_t, kind: unknown, pinned: unknown) => {
   if (kind !== 'omnibox' && kind !== 'sidebar') return
   const k = kind as CompactPinKind
   compactPins[k] = pinned === true
@@ -632,7 +888,7 @@ on('compact:pin', (_t, kind: unknown, pinned: unknown) => {
     )
   }
 })
-on('compact:hover', (_t, edge: unknown, hovering: unknown) => {
+onSurface('compact:hover', (_t, edge: unknown, hovering: unknown) => {
   if (edge !== 'sidebar' && edge !== 'toolbar') return
   compactHover[edge] = hovering === true
   if (settings?.get().compactMode && !tabs?.isPageFullscreen()) {
@@ -648,7 +904,7 @@ on('bounds', (t, r: unknown) => {
   if (rect && num(rect.x) && num(rect.y) && num(rect.width) && num(rect.height)) t.setBounds(rect)
 })
 
-/** Calls from the UI that answer back. Pages can't reach these either. */
+/** Calls from the main UI only (privileged settings/privacy/permissions/overlay). */
 function handle(channel: string, f: (...args: unknown[]) => unknown): void {
   ipcMain.handle(channel, (e, ...args) => {
     if (!fromUi(e)) throw new Error('not allowed')
@@ -656,7 +912,15 @@ function handle(channel: string, f: (...args: unknown[]) => unknown): void {
   })
 }
 
-handle('workspace:create', (input) => {
+/** Calls from either the main UI or the floating compact-mode panels (workspaces, suggest, read-only history/bookmarks). */
+function handleSurface(channel: string, f: (...args: unknown[]) => unknown): void {
+  ipcMain.handle(channel, (e, ...args) => {
+    if (!fromUiSurface(e)) throw new Error('not allowed')
+    return f(...args)
+  })
+}
+
+handleSurface('workspace:create', (input) => {
   if (!tabs || !input || typeof input !== 'object' || Array.isArray(input)) return null
   const raw = input as Record<string, unknown>
   const req: WorkspaceCreateInput = {
@@ -668,7 +932,7 @@ handle('workspace:create', (input) => {
   return tabs.createWorkspace(req)
 })
 
-handle('workspace:update', (id, patch) => {
+handleSurface('workspace:update', (id, patch) => {
   if (!tabs || !str(id) || !patch || typeof patch !== 'object' || Array.isArray(patch)) return null
   const raw = patch as Record<string, unknown>
   const req: WorkspaceUpdateInput = {}
@@ -679,12 +943,12 @@ handle('workspace:update', (id, patch) => {
   return tabs.updateWorkspace(id, req)
 })
 
-handle('workspace:delete', (id) => {
+handleSurface('workspace:delete', (id) => {
   if (!tabs || !str(id)) return false
   return tabs.deleteWorkspace(id)
 })
 
-handle('suggest', (input) => {
+handleSurface('suggest', (input) => {
   if (!str(input) || !store || !tabs) return []
   const open: Candidate[] = tabs
     .allTabs()
@@ -694,7 +958,7 @@ handle('suggest', (input) => {
 })
 handle('overlay', (open) => tabs?.setOverlay(open === true) ?? null)
 on('overlay:hide', (t) => t.hidePageForOverlay())
-handle('history:list', (query, before) => store?.history(str(query) ? query : '', num(before) ? before : null) ?? [])
+handleSurface('history:list', (query, before) => store?.history(str(query) ? query : '', num(before) ? before : null) ?? [])
 handle('history:delete', (id) => {
   if (num(id)) store?.deleteVisit(id)
   dataChanged()
@@ -704,8 +968,8 @@ handle('history:clear', (msAgo) => {
   store?.clear(msAgo === 0 ? 0 : Date.now() - msAgo)
   dataChanged()
 })
-handle('bookmarks:list', () => store?.bookmarks() ?? [])
-on('bookmark:toggle', (t) => t.toggleBookmark())
+handleSurface('bookmarks:list', () => store?.bookmarks() ?? [])
+onSurface('bookmark:toggle', (t) => t.toggleBookmark())
 handle('bookmark:remove', (url) => {
   if (str(url)) store?.removeBookmark(url)
   dataChanged()
@@ -787,27 +1051,27 @@ on('find:start', (t, text: unknown, opts: unknown) => {
   })
 })
 on('find:stop', (t) => t.stopFind())
-on('download:pause', (_t, id: unknown) => {
+onSurface('download:pause', (_t, id: unknown) => {
   if (num(id)) downloads?.pause(id)
 })
-on('download:resume', (_t, id: unknown) => {
+onSurface('download:resume', (_t, id: unknown) => {
   if (num(id)) downloads?.resume(id)
 })
-on('download:cancel', (_t, id: unknown) => {
+onSurface('download:cancel', (_t, id: unknown) => {
   if (num(id)) downloads?.cancel(id)
 })
-on('download:open', (_t, id: unknown) => {
+onSurface('download:open', (_t, id: unknown) => {
   if (num(id)) downloads?.open(id)
 })
-on('download:show', (_t, id: unknown) => {
+onSurface('download:show', (_t, id: unknown) => {
   if (num(id)) downloads?.show(id)
 })
-on('download:clear', () => {
+onSurface('download:clear', () => {
   downloads?.clearFinished()
 })
 handle('update:state', () => updater?.state() ?? null)
-handle('update:check', () => updater?.check(true) ?? null)
-on('update:install', () => updater?.install())
+handleSurface('update:check', () => updater?.check(true) ?? null)
+onSurface('update:install', () => updater?.install())
 
 nativeTheme.on('updated', () => {
   if (!win || win.isDestroyed()) return

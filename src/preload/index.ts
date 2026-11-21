@@ -113,6 +113,8 @@ const api: VeyraApi = {
   relaunch: () => ipcRenderer.send('app:relaunch'),
   onWinState: (cb) => listen('win:state', cb),
   onFocusMenuBar: (cb) => listen<void>('menu:focus-bar', () => cb()),
+  onOpenSettingsSection: (cb) => listen<string>('ui:settings-section', cb),
+  onNewWorkspaceRequest: (cb) => listen<void>('ui:new-workspace', () => cb()),
   menu: {
     open: (spec) => ipcRenderer.send('menu:open', spec),
     close: () => ipcRenderer.send('menu:close'),

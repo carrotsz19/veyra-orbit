@@ -5,21 +5,24 @@
  * Each floating window loads Orbit's own renderer route with a minimal sandboxed preload,
  * no Node access, and locked-down navigation so web content can never enter it.
  */
-import { BrowserWindow, screen, type WebContents } from 'electron'
+import { BrowserWindow, screen, type Input, type WebContents } from 'electron'
 import { join } from 'node:path'
-import { clampPopupBounds, type MenuEntry, type MenuPopupHeader, type MenuPopupSpec } from '../shared/menu'
+import { clampPopupBounds, type BoundsRect, type MenuEntry, type MenuPopupHeader, type MenuPopupSpec } from '../shared/menu'
 
 export interface FloatingWindowOptions {
   parent: BrowserWindow
   preload: string
   view: string
   acrylic: boolean
+  extraQuery?: Record<string, string>
   width?: number
   height?: number
+  hasShadow?: boolean
   hideOnBlur?: boolean
   hideOnParentMove?: boolean
   onHidden?: (reason: 'blur' | 'parent' | 'asked') => void
   onFocusChange?: (focused: boolean) => void
+  onBeforeInput?: (e: Electron.Event, input: Input) => void
 }
 
 /**
@@ -58,7 +61,7 @@ export class FloatingWindow {
       minimizable: false,
       maximizable: false,
       skipTaskbar: true,
-      hasShadow: true,
+      hasShadow: opts.hasShadow ?? true,
       ...(opts.acrylic
         ? { backgroundColor: '#00000000', backgroundMaterial: 'acrylic' as const }
         : { transparent: true, backgroundColor: '#00000000' }),
@@ -78,6 +81,9 @@ export class FloatingWindow {
     this.win.webContents.on('will-navigate', (e) => e.preventDefault())
     this.win.webContents.on('will-redirect', (e) => e.preventDefault())
     this.win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    if (opts.onBeforeInput) {
+      this.win.webContents.on('before-input-event', opts.onBeforeInput)
+    }
 
     this.win.webContents.once('did-finish-load', () => {
       if (!this.ready) this.markReady()
@@ -93,10 +99,11 @@ export class FloatingWindow {
     this.parent.on('resize', this.handleParentMove)
     this.parent.on('closed', this.handleParentClosed)
 
-    const query = {
+    const query: Record<string, string> = {
       view: opts.view,
       material: opts.acrylic ? 'acrylic' : 'solid',
-      platform: process.platform
+      platform: process.platform,
+      ...(opts.extraQuery ?? {})
     }
     if (process.env.ELECTRON_RENDERER_URL) {
       void this.win.loadURL(`${process.env.ELECTRON_RENDERER_URL}?${new URLSearchParams(query)}`)
@@ -127,8 +134,48 @@ export class FloatingWindow {
     return !this.win.isDestroyed() && this.win.isFocused()
   }
 
+  getBrowserWindow(): BrowserWindow {
+    return this.win
+  }
+
+  focus(): void {
+    if (!this.win.isDestroyed()) this.win.focus()
+  }
+
   setZoomFactor(zoom: number): void {
     if (!this.win.isDestroyed()) this.win.webContents.setZoomFactor(zoom)
+  }
+
+  /** Places the floating window at explicit screen bounds, clamped inside the display workArea. */
+  showAtBounds(bounds: BoundsRect, focus = true, clampMargin = 0): void {
+    if (this.win.isDestroyed() || this.parent.isDestroyed()) return
+    const workArea = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y }).workArea
+    const placed =
+      clampMargin >= 0
+        ? clampPopupBounds({ x: bounds.x, y: bounds.y }, { width: bounds.width, height: bounds.height }, workArea, clampMargin)
+        : {
+            x: Math.round(bounds.x),
+            y: Math.round(bounds.y),
+            width: Math.max(80, Math.round(bounds.width)),
+            height: Math.max(32, Math.round(bounds.height))
+          }
+    this.win.setBounds(placed)
+    if (!this.win.isVisible()) {
+      if (focus) this.win.show()
+      else this.win.showInactive()
+    }
+    if (focus) this.win.focus()
+  }
+
+  /** Moves/resizes an already-created window without changing visibility. */
+  setBounds(bounds: BoundsRect): void {
+    if (this.win.isDestroyed()) return
+    this.win.setBounds({
+      x: Math.round(bounds.x),
+      y: Math.round(bounds.y),
+      width: Math.max(80, Math.round(bounds.width)),
+      height: Math.max(32, Math.round(bounds.height))
+    })
   }
 
   send(channel: string, payload: unknown): void {
@@ -252,6 +299,7 @@ export class MenuPopup {
   private readonly floating: FloatingWindow
   private readonly parent: BrowserWindow
   private readonly onOpenChange?: (open: boolean) => void
+  private owner: WebContents | null = null
   private pendingAnchor: { x: number; y: number } | null = null
   private openState = false
 
@@ -279,11 +327,19 @@ export class MenuPopup {
       onHidden: (reason) => {
         this.pendingAnchor = null
         this.setOpen(false)
-        if (reason !== 'asked' && !this.parent.isDestroyed()) {
-          this.parent.webContents.send('menu:closed')
+        if (reason !== 'asked') {
+          this.sendToOwner('menu:closed')
         }
+        this.owner = null
       }
     })
+  }
+
+  private sendToOwner(channel: string, payload?: unknown): void {
+    const target = this.owner && !this.owner.isDestroyed() ? this.owner : !this.parent.isDestroyed() ? this.parent.webContents : null
+    if (!target) return
+    if (payload === undefined) target.send(channel)
+    else target.send(channel, payload)
   }
 
   private setOpen(open: boolean): void {
@@ -308,10 +364,11 @@ export class MenuPopup {
     this.floating.markReady()
   }
 
-  open(rawSpec: unknown): void {
+  open(rawSpec: unknown, sender?: WebContents, offsetCss: { x: number; y: number } = { x: 0, y: 0 }): void {
     const spec = sanitizeMenuSpec(rawSpec)
     if (!spec || this.parent.isDestroyed()) return
-    this.pendingAnchor = { x: spec.x, y: spec.y }
+    this.owner = sender ?? this.parent.webContents
+    this.pendingAnchor = { x: spec.x + offsetCss.x, y: spec.y + offsetCss.y }
     this.setOpen(true)
     this.floating.setZoomFactor(this.parent.webContents.getZoomFactor())
     this.floating.send('menu:render', spec)
@@ -335,11 +392,12 @@ export class MenuPopup {
       this.floating.hide('asked')
       this.setOpen(false)
     }
-    if (!this.parent.isDestroyed()) this.parent.webContents.send('menu:picked', id)
+    this.sendToOwner('menu:picked', id)
+    if (!isSubmenuNav) this.owner = null
   }
 
   step(by: -1 | 1): void {
-    if (!this.parent.isDestroyed()) this.parent.webContents.send('menu:step', by)
+    this.sendToOwner('menu:step', by)
   }
 
   dismiss(): void {
@@ -348,7 +406,8 @@ export class MenuPopup {
       this.floating.hide('blur')
     } else if (this.openState) {
       this.setOpen(false)
-      if (!this.parent.isDestroyed()) this.parent.webContents.send('menu:closed')
+      this.sendToOwner('menu:closed')
+      this.owner = null
     }
     if (!this.parent.isDestroyed()) this.parent.focus()
   }
@@ -357,11 +416,147 @@ export class MenuPopup {
     this.pendingAnchor = null
     this.floating.hide('asked')
     this.setOpen(false)
+    this.owner = null
   }
 
   destroy(): void {
     this.pendingAnchor = null
+    this.owner = null
     this.setOpen(false)
+    this.floating.destroy()
+  }
+}
+
+// ---- Floating compact-mode overlay panel (sidebar or titlebar) -------------
+
+const COMPACT_EXIT_MS = 140
+
+export class CompactPanel {
+  private readonly floating: FloatingWindow
+  private readonly parent: BrowserWindow
+  private hideTimer: NodeJS.Timeout | null = null
+  private revealed = false
+  private lastOffset = { x: 0, y: 0 }
+
+  constructor(
+    parent: BrowserWindow,
+    opts: {
+      view: 'compact-sidebar' | 'compact-titlebar'
+      preload: string
+      extraQuery?: Record<string, string>
+      width: number
+      height: number
+      onFocusChange?: (focused: boolean) => void
+      onBeforeInput?: (e: Electron.Event, input: Input) => void
+    }
+  ) {
+    this.parent = parent
+    this.floating = new FloatingWindow({
+      parent,
+      preload: opts.preload,
+      view: opts.view,
+      acrylic: false,
+      hasShadow: false,
+      extraQuery: opts.extraQuery,
+      width: opts.width,
+      height: opts.height,
+      hideOnBlur: false,
+      hideOnParentMove: false,
+      onFocusChange: opts.onFocusChange,
+      onBeforeInput: opts.onBeforeInput
+    })
+  }
+
+  isSender(wc: WebContents): boolean {
+    return this.floating.isSender(wc)
+  }
+
+  isVisible(): boolean {
+    return this.floating.isVisible()
+  }
+
+  isRevealed(): boolean {
+    return this.revealed
+  }
+
+  isFocused(): boolean {
+    return this.floating.isFocused()
+  }
+
+  offsetCss(): { x: number; y: number } {
+    return this.lastOffset
+  }
+
+  markReady(): void {
+    this.floating.markReady()
+  }
+
+  send(channel: string, payload?: unknown): void {
+    this.floating.send(channel, payload)
+  }
+
+  show(offsetCss: { x: number; y: number }, sizeCss: { width: number; height: number }, focus = false): void {
+    if (this.parent.isDestroyed()) return
+    if (this.hideTimer) {
+      clearTimeout(this.hideTimer)
+      this.hideTimer = null
+    }
+    this.lastOffset = offsetCss
+    const cb = this.parent.getContentBounds()
+    const z = this.parent.webContents.getZoomFactor()
+    this.floating.setZoomFactor(z)
+    const bounds: BoundsRect = {
+      x: Math.round(cb.x + offsetCss.x * z),
+      y: Math.round(cb.y + offsetCss.y * z),
+      width: Math.max(80, Math.round(sizeCss.width * z)),
+      height: Math.max(36, Math.round(sizeCss.height * z))
+    }
+    this.revealed = true
+    this.floating.showAtBounds(bounds, focus, -1)
+    this.floating.send('compact-panel:visible', true)
+  }
+
+  reposition(offsetCss: { x: number; y: number }, sizeCss: { width: number; height: number }): void {
+    if (this.parent.isDestroyed() || !this.floating.isVisible()) return
+    this.lastOffset = offsetCss
+    const cb = this.parent.getContentBounds()
+    const z = this.parent.webContents.getZoomFactor()
+    this.floating.setBounds({
+      x: Math.round(cb.x + offsetCss.x * z),
+      y: Math.round(cb.y + offsetCss.y * z),
+      width: Math.max(80, Math.round(sizeCss.width * z)),
+      height: Math.max(36, Math.round(sizeCss.height * z))
+    })
+  }
+
+  focus(): void {
+    this.floating.focus()
+  }
+
+  hide(immediate = false): void {
+    if (this.hideTimer) {
+      clearTimeout(this.hideTimer)
+      this.hideTimer = null
+    }
+    this.revealed = false
+    if (!this.floating.isVisible()) return
+    this.floating.send('compact-panel:visible', false)
+    if (immediate) {
+      this.floating.hide('asked')
+      return
+    }
+    this.hideTimer = setTimeout(() => {
+      this.hideTimer = null
+      if (!this.revealed) this.floating.hide('asked')
+    }, COMPACT_EXIT_MS)
+  }
+
+  destroy(): void {
+    if (this.hideTimer) {
+      clearTimeout(this.hideTimer)
+      this.hideTimer = null
+    }
+    this.revealed = false
     this.floating.destroy()
   }
 }

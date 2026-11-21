@@ -131,50 +131,18 @@ kbd {
   box-shadow: none;
 }
 
-/* ---- compact mode (Zen-style) ----------------------------------------- */
+/* ---- compact mode (Zen/Arc-style floating overlay panels) ------------- */
 .shell.compact {
   grid-template-columns: 1fr;
   grid-template-rows: minmax(0, 1fr);
 }
-.shell.compact:not(.reveal-side) .side {
+.shell.compact .side,
+.shell.compact .titlebar {
   display: none;
-}
-.shell.compact.reveal-side {
-  grid-template-columns: var(--side) 1fr;
-}
-.shell.compact.reveal-side .side {
-  animation: compact-side-in 170ms var(--ease-out);
-}
-@keyframes compact-side-in {
-  from {
-    opacity: 0;
-    transform: translateX(-14px);
-  }
-}
-.shell.compact:not(.reveal-bar) .titlebar {
-  display: none;
-}
-.shell.compact.reveal-bar {
-  grid-template-rows: var(--bar) minmax(0, 1fr);
-}
-.shell.compact.reveal-bar .titlebar {
-  animation: compact-bar-in 150ms var(--ease-out);
-}
-@keyframes compact-bar-in {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
 }
 .shell.compact .page {
   margin: 5px;
   border-radius: 8px;
-}
-.shell.compact.reveal-side .page {
-  margin-left: 0;
-}
-.shell.compact.reveal-bar .page {
-  margin-top: 0;
 }
 /* Always-visible 5px edge strips outside .page bounds so compact hover works over live pages. */
 .compact-edge {
@@ -192,6 +160,67 @@ kbd {
   top: 0;
   right: 0;
   height: 5px;
+}
+
+/* Floating compact-mode panel windows (components/CompactPanels.tsx) */
+html.compact-panel-win,
+html.compact-panel-win body,
+html.compact-panel-win #root {
+  background: transparent !important;
+  overflow: hidden;
+  height: 100%;
+}
+.compact-float {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  padding: 4px;
+  background: transparent;
+}
+.compact-float-side {
+  align-items: stretch;
+}
+.compact-float-bar {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+.compact-float-card {
+  border-radius: 12px;
+  border: 1px solid var(--separator);
+  background: color-mix(in srgb, var(--bg-grouped) 92%, transparent);
+  box-shadow: var(--elev-2);
+  opacity: 0;
+  transition: transform 160ms var(--ease-out), opacity 130ms var(--ease-out);
+}
+.compact-float-side-card {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform: translateX(-16px);
+}
+.compact-float-bar-card {
+  width: 100%;
+  flex: none;
+  transform: translateY(-10px);
+}
+.compact-float.open .compact-float-card {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+.compact-float-side .side {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 8px 8px;
+}
+.compact-float-bar .titlebar {
+  grid-column: auto;
+  -webkit-app-region: no-drag;
+}
+.compact-float-bar .omni-list {
+  z-index: 100;
 }
 
 /* ---- workspace accent palette (scoped to sidebar highlights) ---------- */

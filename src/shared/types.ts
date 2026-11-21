@@ -157,6 +157,16 @@ export interface VeyraMenuWindowApi {
   dismiss(): void
 }
 
+/** Minimal bridge exposed ONLY to the floating compact-mode sidebar / titlebar windows. */
+export interface VeyraCompactPanelApi {
+  ready(): void
+  onVisible(cb: (visible: boolean) => void): () => void
+  onNewWorkspace(cb: () => void): () => void
+  requestNewWorkspace(): void
+  openSettingsSection(sectionId: string): void
+  setOmniboxOpen(open: boolean): void
+}
+
 export type ClearDataRange = 'hour' | 'day' | 'all'
 
 export interface ClearDataRequest {
@@ -266,5 +276,7 @@ export interface VeyraApi {
   relaunch(): void
   onWinState(cb: (s: WindowState) => void): () => void
   onFocusMenuBar(cb: () => void): () => void
+  onOpenSettingsSection(cb: (sectionId: string) => void): () => void
+  onNewWorkspaceRequest(cb: () => void): () => void
   menu: MenuBridgeApi
 }

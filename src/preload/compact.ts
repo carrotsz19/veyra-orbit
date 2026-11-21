@@ -1,0 +1,102 @@
+// Minimal preload bridge for the floating compact-mode sidebar and titlebar panels.
+// Exposes only the subset of UI actions needed by Sidebar / TitleBar, with no privileged
+// settings/privacy/bounds/overlay channels and no Node APIs.
+import { contextBridge, ipcRenderer } from 'electron'
+import type {
+  BrowserState,
+  CompactEdgeKind,
+  CompactPinKind,
+  CompactRevealState,
+  DownloadInfo,
+  SettingsView,
+  UpdateState,
+  VeyraCompactPanelApi,
+  WindowState,
+  WorkspaceCreateInput,
+  WorkspaceUpdateInput
+} from '../shared/types'
+
+function listen<T>(channel: string, cb: (v: T) => void): () => void {
+  const f = (_e: Electron.IpcRendererEvent, v: T): void => cb(v)
+  ipcRenderer.on(channel, f)
+  return () => ipcRenderer.off(channel, f)
+}
+
+// Subset of VeyraApi consumed by Sidebar and TitleBar / Omnibox.
+const uiSubset = {
+  onState: (cb: (s: BrowserState) => void) => listen<BrowserState>('state', cb),
+  onFocusOmnibox: (cb: () => void) => listen<void>('focus-omnibox', () => cb()),
+  onSettings: (cb: (s: SettingsView) => void) => listen<SettingsView>('settings', cb),
+  onDownloads: (cb: (items: DownloadInfo[]) => void) => listen<DownloadInfo[]>('downloads', cb),
+  onToggleDownloads: (cb: () => void) => listen<void>('downloads:toggle', () => cb()),
+  onDataChanged: (cb: () => void) => listen<void>('data-changed', () => cb()),
+  onUpdateState: (cb: (s: UpdateState) => void) => listen<UpdateState>('update:state', cb),
+  onCompactState: (cb: (s: CompactRevealState) => void) => listen<CompactRevealState>('compact:state', cb),
+  onWinState: (cb: (s: WindowState) => void) => listen<WindowState>('win:state', cb),
+  onFocusMenuBar: (cb: () => void) => listen<void>('menu:focus-bar', () => cb()),
+  newTab: (input?: string) => ipcRenderer.send('tab:new', input),
+  closeTab: (id: number) => ipcRenderer.send('tab:close', id),
+  activate: (id: number) => ipcRenderer.send('tab:activate', id),
+  navigate: (id: number, input: string) => ipcRenderer.send('tab:navigate', id, input),
+  back: () => ipcRenderer.send('nav:back'),
+  forward: () => ipcRenderer.send('nav:forward'),
+  reload: () => ipcRenderer.send('nav:reload'),
+  stop: () => ipcRenderer.send('nav:stop'),
+  resetZoom: () => ipcRenderer.send('nav:zoom-reset'),
+  togglePin: (id: number) => ipcRenderer.send('tab:pin', id),
+  move: (id: number, to: number) => ipcRenderer.send('tab:move', id, to),
+  toggleMute: (id: number) => ipcRenderer.send('tab:mute', id),
+  sleepTab: (id: number) => ipcRenderer.send('tab:sleep', id),
+  tabMenu: (id: number) => ipcRenderer.send('tab:menu', id),
+  splitWith: (anchorId: number, otherId: number, placement?: 'left' | 'right') =>
+    ipcRenderer.send('split:with', anchorId, otherId, placement),
+  splitWithNext: () => ipcRenderer.send('split:next'),
+  unsplit: (tabId?: number) => ipcRenderer.send('split:unsplit', tabId),
+  switchWorkspace: (id: string) => ipcRenderer.send('workspace:switch', id),
+  createWorkspace: (input: WorkspaceCreateInput) => ipcRenderer.invoke('workspace:create', input),
+  updateWorkspace: (id: string, patch: WorkspaceUpdateInput) => ipcRenderer.invoke('workspace:update', id, patch),
+  deleteWorkspace: (id: string) => ipcRenderer.invoke('workspace:delete', id),
+  setCompactPin: (kind: CompactPinKind, pinned: boolean) => ipcRenderer.send('compact:pin', kind, pinned),
+  setCompactHover: (edge: CompactEdgeKind, hovering: boolean) => ipcRenderer.send('compact:hover', edge, hovering),
+  toggleCompactMode: () => ipcRenderer.send('compact:toggle'),
+  pauseDownload: (id: number) => ipcRenderer.send('download:pause', id),
+  resumeDownload: (id: number) => ipcRenderer.send('download:resume', id),
+  cancelDownload: (id: number) => ipcRenderer.send('download:cancel', id),
+  openDownload: (id: number) => ipcRenderer.send('download:open', id),
+  showDownload: (id: number) => ipcRenderer.send('download:show', id),
+  clearFinishedDownloads: () => ipcRenderer.send('download:clear'),
+  suggest: (input: string) => ipcRenderer.invoke('suggest', input),
+  history: (query: string, before: number | null) => ipcRenderer.invoke('history:list', query, before),
+  bookmarks: () => ipcRenderer.invoke('bookmarks:list'),
+  toggleBookmark: () => ipcRenderer.send('bookmark:toggle'),
+  checkForUpdates: () => ipcRenderer.invoke('update:check'),
+  installUpdate: () => ipcRenderer.send('update:install'),
+  reopenClosedTab: () => ipcRenderer.send('tab:reopen'),
+  print: () => ipcRenderer.send('tab:print'),
+  zoomIn: () => ipcRenderer.send('nav:zoom-in'),
+  zoomOut: () => ipcRenderer.send('nav:zoom-out'),
+  toggleDevTools: () => ipcRenderer.send('tab:devtools'),
+  toggleDownloads: () => ipcRenderer.send('downloads:toggle'),
+  openFind: () => ipcRenderer.send('find:open'),
+  openInternal: (url: string) => ipcRenderer.send('tab:open-internal', url),
+  winCmd: (cmd: string) => ipcRenderer.send('win:cmd', cmd),
+  menu: {
+    open: (spec: unknown) => ipcRenderer.send('menu:open', spec),
+    close: () => ipcRenderer.send('menu:close'),
+    onPicked: (cb: (id: string) => void) => listen<string>('menu:picked', cb),
+    onClosed: (cb: () => void) => listen<void>('menu:closed', () => cb()),
+    onStep: (cb: (by: -1 | 1) => void) => listen<-1 | 1>('menu:step', cb)
+  }
+}
+
+const panelApi: VeyraCompactPanelApi = {
+  ready: () => ipcRenderer.send('compact-panel:ready'),
+  onVisible: (cb) => listen<boolean>('compact-panel:visible', cb),
+  onNewWorkspace: (cb) => listen<void>('ui:new-workspace', () => cb()),
+  requestNewWorkspace: () => ipcRenderer.send('compact-panel:new-workspace'),
+  openSettingsSection: (sectionId) => ipcRenderer.send('compact-panel:settings-section', sectionId),
+  setOmniboxOpen: (open) => ipcRenderer.send('compact-panel:omnibox-open', open)
+}
+
+contextBridge.exposeInMainWorld('veyra', uiSubset)
+contextBridge.exposeInMainWorld('veyraCompactPanel', panelApi)

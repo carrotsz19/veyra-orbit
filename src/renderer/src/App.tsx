@@ -105,7 +105,12 @@ export function App(): React.JSX.Element {
         setFindFocusTick((n) => n + 1)
       }),
       api.onFindClose(() => setFindOpen(false)),
-      api.onPageFullscreen(setPageFullscreen)
+      api.onPageFullscreen(setPageFullscreen),
+      api.onNewWorkspaceRequest(() => setNewWorkspaceTick((n) => n + 1)),
+      api.onOpenSettingsSection((sectionId) => {
+        sessionStorage.setItem('orbit.settingsSection', sectionId)
+        window.dispatchEvent(new CustomEvent('orbit:settings-section', { detail: sectionId }))
+      })
     ]
     api.ready()
     return () => offs.forEach((off) => off())
@@ -164,7 +169,7 @@ export function App(): React.JSX.Element {
     pageFullscreenRef.current = pageFullscreen
     if (pageFullscreen) return
     sendBounds()
-  }, [pageFullscreen, compact.enabled, compact.sidebar, compact.toolbar, sendBounds])
+  }, [pageFullscreen, compact.enabled, sendBounds])
 
   const active: TabInfo | undefined = state.tabs.find((t) => t.id === state.activeId)
   const activeSplit = useMemo(() => findSplitGroup(state.splits, state.activeId), [state.splits, state.activeId])
@@ -254,28 +259,28 @@ export function App(): React.JSX.Element {
     api.splitWith(state.activeId, droppedId, side)
   }
 
-  const compactClasses = compact.enabled
-    ? `compact ${compact.sidebar ? 'reveal-side' : ''} ${compact.toolbar ? 'reveal-bar' : ''}`
-    : ''
+  // In compact mode, the main window always keeps the page full-size; sidebar and titlebar
+  // float above the page in dedicated overlay windows so the page never jumps or resizes.
+  const compactClasses = compact.enabled ? 'compact' : ''
 
   return (
     <div
       className={`shell ${pageFullscreen ? 'fullscreen' : ''} ${compactClasses}`}
       data-ws-accent={activeWorkspace?.accent ?? 'clay'}
     >
-      {compact.enabled && !pageFullscreen && !compact.sidebar && (
-        <div
-          className="compact-edge compact-edge-left"
-          aria-hidden
-          onMouseEnter={() => api.setCompactHover('sidebar', true)}
-        />
-      )}
-      {compact.enabled && !pageFullscreen && !compact.toolbar && (
-        <div
-          className="compact-edge compact-edge-top"
-          aria-hidden
-          onMouseEnter={() => api.setCompactHover('toolbar', true)}
-        />
+      {compact.enabled && !pageFullscreen && (
+        <>
+          <div
+            className="compact-edge compact-edge-left"
+            aria-hidden
+            onMouseEnter={() => api.setCompactHover('sidebar', true)}
+          />
+          <div
+            className="compact-edge compact-edge-top"
+            aria-hidden
+            onMouseEnter={() => api.setCompactHover('toolbar', true)}
+          />
+        </>
       )}
       <TitleBar
         state={state}

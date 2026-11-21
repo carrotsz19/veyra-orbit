@@ -68,10 +68,16 @@ export interface TabHooks {
   toggleCompactMode(): void
   /** Notifies compact mode when a native context menu opens or closes. */
   onMenuOpen?(open: boolean): void
-  /** Notifies compact mode when the address bar is about to be focused. */
-  onFocusOmnibox?(): void
+  /** Notifies compact mode when the address bar is about to be focused. Returns true if handled externally. */
+  onFocusOmnibox?(): boolean | void
   /** Focuses the title-bar menu bar when standalone Alt is pressed and released. */
   onFocusMenuBar?(): void
+  /** Called whenever BrowserState is published, so floating UI panels receive the same state feed. */
+  onState?(state: BrowserState): void
+  /** Called when Downloads panel is toggled (Ctrl+J); returns true if handled by floating compact sidebar. */
+  onToggleDownloads?(): boolean | void
+  /** Called when a page enters or leaves HTML5 full screen. */
+  onPageFullscreen?(on: boolean): void
   /** Quits the application (Ctrl+Q). */
   quit?(): void
 }
@@ -1050,6 +1056,7 @@ export class Tabs {
       if (restoreWindow && this.win.isFullScreen()) this.win.setFullScreen(false)
     }
     if (!this.win.isDestroyed()) this.win.webContents.send('page-fullscreen', !!this.fullscreenTab)
+    this.hooks.onPageFullscreen?.(!!this.fullscreenTab)
     this.layout()
   }
 
@@ -1065,6 +1072,7 @@ export class Tabs {
     }
     if (restoreWindow && this.win.isFullScreen()) this.win.setFullScreen(false)
     if (!this.win.isDestroyed()) this.win.webContents.send('page-fullscreen', false)
+    this.hooks.onPageFullscreen?.(false)
     this.layout()
   }
 
@@ -1179,13 +1187,14 @@ export class Tabs {
 
   focusOmnibox(): void {
     if (this.fullscreenTab) this.exitPageFullscreen(true)
-    this.hooks.onFocusOmnibox?.()
+    if (this.hooks.onFocusOmnibox?.() === true) return
     this.win.webContents.focus()
     this.win.webContents.send('focus-omnibox')
   }
 
   toggleDownloads(): void {
     if (this.fullscreenTab) this.exitPageFullscreen(true)
+    if (this.hooks.onToggleDownloads?.() === true) return
     if (!this.win.isDestroyed()) this.win.webContents.send('downloads:toggle')
   }
 
@@ -1588,7 +1597,11 @@ export class Tabs {
       this.emitQueued = true
       setImmediate(() => {
         this.emitQueued = false
-        if (!this.win.isDestroyed()) this.win.webContents.send('state', this.state())
+        if (!this.win.isDestroyed()) {
+          const st = this.state()
+          this.win.webContents.send('state', st)
+          this.hooks.onState?.(st)
+        }
       })
     }
     if (this.saveTimer) clearTimeout(this.saveTimer)
