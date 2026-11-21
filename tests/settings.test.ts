@@ -17,6 +17,9 @@ test('sanitizeSettings returns safe defaults for non-objects and drops unknown k
     startup: 'new-tab',
     downloadsDir: '  C:\\Temp\\DL  ',
     askWhereToSave: true,
+    compactMode: true,
+    sleepAfterMinutes: 60,
+    sleepPinnedTabs: true,
     extra: 'drop me',
     __proto__: { polluted: true }
   })
@@ -25,7 +28,10 @@ test('sanitizeSettings returns safe defaults for non-objects and drops unknown k
     theme: 'dark',
     startup: 'new-tab',
     downloadsDir: 'C:\\Temp\\DL',
-    askWhereToSave: true
+    askWhereToSave: true,
+    compactMode: true,
+    sleepAfterMinutes: 60,
+    sleepPinnedTabs: true
   })
   assert.equal('extra' in cleaned, false)
 })
@@ -36,7 +42,10 @@ test('sanitizeSettings rejects invalid field values and falls back to defaults',
     theme: 'sepia',
     startup: 'homepage',
     downloadsDir: 'bad\0path',
-    askWhereToSave: 'yes'
+    askWhereToSave: 'yes',
+    compactMode: 'on',
+    sleepAfterMinutes: 45,
+    sleepPinnedTabs: 1
   })
   assert.deepEqual(cleaned, DEFAULT_SETTINGS)
 })
@@ -49,6 +58,9 @@ test('mergeSettings applies valid fields and ignores invalid or unknown ones', (
     startup: 'new-tab',
     downloadsDir: 'C:\\Downloads',
     askWhereToSave: true,
+    compactMode: true,
+    sleepAfterMinutes: 15,
+    sleepPinnedTabs: true,
     unknown: 123
   })
   assert.deepEqual(next, {
@@ -56,7 +68,10 @@ test('mergeSettings applies valid fields and ignores invalid or unknown ones', (
     theme: 'system',
     startup: 'new-tab',
     downloadsDir: 'C:\\Downloads',
-    askWhereToSave: true
+    askWhereToSave: true,
+    compactMode: true,
+    sleepAfterMinutes: 15,
+    sleepPinnedTabs: true
   })
   assert.deepEqual(mergeSettings(next, null), next)
   assert.deepEqual(mergeSettings(next, { downloadsDir: 'bad\nline' }), next)

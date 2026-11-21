@@ -3,6 +3,8 @@
  * Pure, so it can be shared between main, renderer and unit tests.
  */
 
+import { SLEEP_MINUTES_OPTIONS, type SleepMinutes } from './sleep.ts'
+
 export const SEARCH_ENGINES = [
   { id: 'google', name: 'Google', url: 'https://www.google.com/search?q=' },
   { id: 'duckduckgo', name: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=' },
@@ -14,6 +16,7 @@ export const SEARCH_ENGINES = [
 export type SearchEngineId = (typeof SEARCH_ENGINES)[number]['id']
 export type ThemeSource = 'system' | 'light' | 'dark'
 export type StartupBehavior = 'restore' | 'new-tab'
+export type { SleepMinutes }
 
 export interface Settings {
   searchEngine: SearchEngineId
@@ -22,6 +25,12 @@ export interface Settings {
   /** Custom downloads folder path, or '' to use the system Downloads folder. */
   downloadsDir: string
   askWhereToSave: boolean
+  /** Zen-style compact mode: hide sidebar and toolbar until moving pointer to left/top edges. */
+  compactMode: boolean
+  /** Minutes of background inactivity before discarding a tab to free memory (0 = off). */
+  sleepAfterMinutes: SleepMinutes
+  /** Whether pinned tabs are eligible to sleep automatically. */
+  sleepPinnedTabs: boolean
 }
 
 export interface SettingsView extends Settings {
@@ -36,12 +45,16 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   theme: 'system',
   startup: 'restore',
   downloadsDir: '',
-  askWhereToSave: false
+  askWhereToSave: false,
+  compactMode: false,
+  sleepAfterMinutes: 30,
+  sleepPinnedTabs: false
 })
 
 const ENGINE_MAP = new Map<string, string>(SEARCH_ENGINES.map((e) => [e.id, e.url]))
 const THEMES = new Set<string>(['system', 'light', 'dark'])
 const STARTUPS = new Set<string>(['restore', 'new-tab'])
+const SLEEP_SET = new Set<number>(SLEEP_MINUTES_OPTIONS)
 
 export function isSearchEngineId(v: unknown): v is SearchEngineId {
   return typeof v === 'string' && ENGINE_MAP.has(v)
@@ -53,6 +66,10 @@ export function isThemeSource(v: unknown): v is ThemeSource {
 
 export function isStartupBehavior(v: unknown): v is StartupBehavior {
   return typeof v === 'string' && STARTUPS.has(v)
+}
+
+export function isSleepMinutes(v: unknown): v is SleepMinutes {
+  return typeof v === 'number' && SLEEP_SET.has(v)
 }
 
 /** Returns the search URL prefix for an engine, falling back to Google. */
@@ -76,7 +93,10 @@ export function sanitizeSettings(raw: unknown): Settings {
     theme: isThemeSource(raw.theme) ? raw.theme : DEFAULT_SETTINGS.theme,
     startup: isStartupBehavior(raw.startup) ? raw.startup : DEFAULT_SETTINGS.startup,
     downloadsDir: isValidPath(raw.downloadsDir) ? raw.downloadsDir.trim() : DEFAULT_SETTINGS.downloadsDir,
-    askWhereToSave: typeof raw.askWhereToSave === 'boolean' ? raw.askWhereToSave : DEFAULT_SETTINGS.askWhereToSave
+    askWhereToSave: typeof raw.askWhereToSave === 'boolean' ? raw.askWhereToSave : DEFAULT_SETTINGS.askWhereToSave,
+    compactMode: typeof raw.compactMode === 'boolean' ? raw.compactMode : DEFAULT_SETTINGS.compactMode,
+    sleepAfterMinutes: isSleepMinutes(raw.sleepAfterMinutes) ? raw.sleepAfterMinutes : DEFAULT_SETTINGS.sleepAfterMinutes,
+    sleepPinnedTabs: typeof raw.sleepPinnedTabs === 'boolean' ? raw.sleepPinnedTabs : DEFAULT_SETTINGS.sleepPinnedTabs
   }
 }
 
@@ -90,5 +110,8 @@ export function mergeSettings(current: Settings, patch: unknown): Settings {
   if (own('startup') && isStartupBehavior(patch.startup)) next.startup = patch.startup
   if (own('downloadsDir') && isValidPath(patch.downloadsDir)) next.downloadsDir = patch.downloadsDir.trim()
   if (own('askWhereToSave') && typeof patch.askWhereToSave === 'boolean') next.askWhereToSave = patch.askWhereToSave
+  if (own('compactMode') && typeof patch.compactMode === 'boolean') next.compactMode = patch.compactMode
+  if (own('sleepAfterMinutes') && isSleepMinutes(patch.sleepAfterMinutes)) next.sleepAfterMinutes = patch.sleepAfterMinutes
+  if (own('sleepPinnedTabs') && typeof patch.sleepPinnedTabs === 'boolean') next.sleepPinnedTabs = patch.sleepPinnedTabs
   return next
 }

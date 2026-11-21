@@ -1,6 +1,7 @@
 /** One tab as the browser UI sees it. The page itself lives in the main process. */
 export interface TabInfo {
   id: number
+  workspaceId: string
   /** '' for a new tab that hasn't gone anywhere yet (the UI shows its start page). */
   url: string
   title: string
@@ -14,6 +15,8 @@ export interface TabInfo {
   /** Playing sound right now, and whether the tab's sound is off. */
   audible: boolean
   muted: boolean
+  /** Discarded to free memory; wakes and reloads when activated. */
+  sleeping: boolean
   /** Whether this page's address is bookmarked (the star in the address bar). */
   bookmarked: boolean
   /** Set when the last load failed; the UI shows it in place of the page. */
@@ -23,6 +26,11 @@ export interface TabInfo {
 export interface BrowserState {
   tabs: TabInfo[]
   activeId: number | null
+  workspaces: import('./workspaces').WorkspaceInfo[]
+  activeWorkspaceId: string
+  tabCounts: Record<string, number>
+  /** Direction hint for workspace switch transition: -1 (left), 0 (none), 1 (right). */
+  workspaceSwitchDir: -1 | 0 | 1
 }
 
 /** A site asking for something (camera, notifications, ...). Denied unless the person allows it. */
@@ -97,8 +105,13 @@ export interface Bookmark {
 }
 
 export type { Suggestion } from './suggest'
-export type { SearchEngineId, Settings, SettingsView, StartupBehavior, ThemeSource } from './settings'
+export type { SearchEngineId, Settings, SettingsView, SleepMinutes, StartupBehavior, ThemeSource } from './settings'
 export type { UpdateState, UpdateStatus } from './updates'
+export type { WorkspaceAccentId, WorkspaceCreateInput, WorkspaceIconId, WorkspaceInfo, WorkspaceUpdateInput } from './workspaces'
+export type { CompactRevealState } from './compact'
+
+export type CompactPinKind = 'omnibox' | 'sidebar'
+export type CompactEdgeKind = 'sidebar' | 'toolbar'
 
 export type ClearDataRange = 'hour' | 'day' | 'all'
 
@@ -139,8 +152,17 @@ export interface VeyraApi {
   find(text: string, opts?: { forward?: boolean; findNext?: boolean }): void
   stopFind(): void
   toggleMute(id: number): void
+  sleepTab(id: number): void
   /** Opens the right-click menu for a tab in the sidebar. */
   tabMenu(id: number): void
+  switchWorkspace(id: string): void
+  createWorkspace(input: import('./workspaces').WorkspaceCreateInput): Promise<import('./workspaces').WorkspaceInfo | null>
+  updateWorkspace(id: string, patch: import('./workspaces').WorkspaceUpdateInput): Promise<import('./workspaces').WorkspaceInfo | null>
+  deleteWorkspace(id: string): Promise<boolean>
+  onCompactState(cb: (s: import('./compact').CompactRevealState) => void): () => void
+  setCompactPin(kind: CompactPinKind, pinned: boolean): void
+  setCompactHover(edge: CompactEdgeKind, hovering: boolean): void
+  toggleCompactMode(): void
   /** A page went full screen (true) or came back (false): the browser's UI hides meanwhile. */
   onPageFullscreen(cb: (on: boolean) => void): () => void
   pauseDownload(id: number): void
