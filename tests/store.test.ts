@@ -68,3 +68,30 @@ test('bookmarks: toggle, rename, and found by the address bar even if never visi
   assert.equal(s.bookmarks().length, 0)
   done()
 })
+
+test('site permissions persist per origin and reject invalid origins or non-askable permissions', () => {
+  const { s, done } = fresh()
+  assert.equal(s.setPermission('https://meet.example.com/room/1', 'media', true, T), true)
+  assert.equal(s.setPermission('https://meet.example.com', 'notifications', false, T + 1000), true)
+  assert.equal(s.setPermission('file:///C:/test.html', 'media', true, T), false)
+  assert.equal(s.setPermission('orbit://settings', 'media', true, T), false)
+  assert.equal(s.setPermission('https://meet.example.com', 'usb', true, T), false)
+  assert.equal(s.setPermission('https://meet.example.com', 'fullscreen', true, T), false)
+
+  assert.deepEqual(s.permissions(), [
+    { origin: 'https://meet.example.com', permission: 'media', allow: true, updated: T },
+    { origin: 'https://meet.example.com', permission: 'notifications', allow: false, updated: T + 1000 }
+  ])
+
+  // Updating flips allow in place without creating duplicates
+  assert.equal(s.setPermission('https://meet.example.com', 'media', false, T + 2000), true)
+  assert.equal(s.permissions().find((p) => p.permission === 'media')?.allow, false)
+
+  // Removing deletes only the matching origin + permission
+  s.removePermission('https://meet.example.com', 'media')
+  assert.deepEqual(
+    s.permissions().map((p) => `${p.origin}|${p.permission}`),
+    ['https://meet.example.com|notifications']
+  )
+  done()
+})

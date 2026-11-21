@@ -30,6 +30,15 @@ export interface PermissionAsk {
   permission: string
 }
 
+/** A remembered Allow / Block decision for one site and permission. */
+export interface SitePermission {
+  origin: string
+  permission: string
+  allow: boolean
+  /** ms since 1970 */
+  updated: number
+}
+
 /** Where the active page sits inside the window, in CSS pixels. */
 export interface Rect {
   x: number

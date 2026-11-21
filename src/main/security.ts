@@ -4,7 +4,8 @@
  * the person allows them for that site.
  */
 import { app, session, type Session, type WebContents } from 'electron'
-import type { PermissionAsk } from '../shared/types'
+import type { PermissionAsk, SitePermission } from '../shared/types'
+import { ASKABLE_PERMISSIONS, normalizePermissionOrigin } from '../shared/permissions'
 
 /** Where web pages keep cookies and storage. Workspaces will get one each (persist:ws-<id>). */
 export const WEB_PARTITION = 'persist:web'
@@ -12,24 +13,38 @@ export const WEB_PARTITION = 'persist:web'
 /** Harmless permissions a page gets without asking, as in Chrome. */
 const ALWAYS = new Set(['fullscreen', 'clipboard-sanitized-write', 'pointerLock'])
 /** Permissions the person can be asked for. Anything not listed is always denied. */
-const ASKABLE = new Set(['media', 'notifications', 'geolocation', 'clipboard-read', 'midi', 'idle-detection', 'display-capture'])
+const ASKABLE = new Set<string>(ASKABLE_PERMISSIONS)
+
+export interface PermissionStore {
+  permissions(): SitePermission[]
+  setPermission(origin: string, permission: string, allow: boolean): boolean
+  removePermission(origin: string, permission: string): void
+}
 
 type Pending = PermissionAsk & { resolve: (allow: boolean) => void }
 
 export class Permissions {
   private next = 1
   private pending: Pending[] = []
-  /** Answers given this run, by "origin|permission". Kept in memory only for now. */
+  /** Remembered answers by "origin|permission", persisted via store when available. */
   private answers = new Map<string, boolean>()
 
   constructor(
     private tabIdOf: (wc: WebContents) => number | null,
-    private publish: (asks: PermissionAsk[]) => void
-  ) {}
+    private publish: (asks: PermissionAsk[]) => void,
+    private store?: PermissionStore,
+    private onSavedChanged: () => void = () => {}
+  ) {
+    if (store) {
+      for (const row of store.permissions()) {
+        if (ASKABLE.has(row.permission)) this.answers.set(`${row.origin}|${row.permission}`, row.allow)
+      }
+    }
+  }
 
   attach(sess: Session): void {
     sess.setPermissionRequestHandler((wc, permission, callback, details) => {
-      const origin = originOf(details.requestingUrl || wc.getURL())
+      const origin = normalizePermissionOrigin(details.requestingUrl || wc.getURL())
       if (ALWAYS.has(permission)) return callback(true)
       if (!origin || !ASKABLE.has(permission)) return callback(false)
       const key = `${origin}|${permission}`
@@ -47,19 +62,50 @@ export class Permissions {
     })
     sess.setPermissionCheckHandler((_wc, permission, requestingOrigin) => {
       if (ALWAYS.has(permission)) return true
-      return this.answers.get(`${originOf(requestingOrigin)}|${permission}`) === true
+      return this.answers.get(`${normalizePermissionOrigin(requestingOrigin)}|${permission}`) === true
     })
     // USB, HID and serial devices: never, for now.
     sess.setDevicePermissionHandler(() => false)
   }
 
-  answer(id: number, allow: boolean): void {
+  answer(id: number, allow: boolean, remember = true): void {
     const i = this.pending.findIndex((p) => p.id === id)
     if (i < 0) return
     const [p] = this.pending.splice(i, 1)
-    this.answers.set(`${p.origin}|${p.permission}`, allow)
+    if (remember) {
+      this.answers.set(`${p.origin}|${p.permission}`, allow)
+      if (this.store?.setPermission(p.origin, p.permission, allow)) this.onSavedChanged()
+    }
     p.resolve(allow)
     this.emit()
+  }
+
+  listSaved(): SitePermission[] {
+    return this.store?.permissions() ?? []
+  }
+
+  setSaved(origin: string, permission: string, allow: boolean): boolean {
+    const norm = normalizePermissionOrigin(origin)
+    if (!norm || !ASKABLE.has(permission)) return false
+    if (this.store && !this.store.setPermission(norm, permission, allow)) return false
+    this.answers.set(`${norm}|${permission}`, allow)
+    // Resolve any open prompt for the same origin + permission so it doesn't stay stale.
+    const matching = this.pending.filter((p) => p.origin === norm && p.permission === permission)
+    if (matching.length) {
+      this.pending = this.pending.filter((p) => !(p.origin === norm && p.permission === permission))
+      for (const p of matching) p.resolve(allow)
+      this.emit()
+    }
+    this.onSavedChanged()
+    return true
+  }
+
+  removeSaved(origin: string, permission: string): void {
+    const norm = normalizePermissionOrigin(origin)
+    if (!norm) return
+    this.store?.removePermission(norm, permission)
+    this.answers.delete(`${norm}|${permission}`)
+    this.onSavedChanged()
   }
 
   /** A tab closed or navigated away: its open questions are answered no. */
@@ -73,15 +119,6 @@ export class Permissions {
 
   private emit(): void {
     this.publish(this.pending.map(({ resolve: _r, ...ask }) => ask))
-  }
-}
-
-function originOf(url: string): string {
-  try {
-    const o = new URL(url).origin
-    return o === 'null' ? '' : o
-  } catch {
-    return ''
   }
 }
 
