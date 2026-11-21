@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import './styles.css'
 import './library.css'
+import './settings.css'
 
 const q = new URLSearchParams(location.search)
 document.documentElement.dataset.material = q.get('material') === 'acrylic' ? 'acrylic' : 'solid'

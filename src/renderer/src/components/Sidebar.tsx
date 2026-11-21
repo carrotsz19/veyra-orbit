@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Bookmark, Clock, Globe, LoaderCircle, Pin, PinOff, Plus, X } from 'lucide-react'
+import { Bookmark, Clock, Globe, LoaderCircle, Pin, PinOff, Plus, Settings, X } from 'lucide-react'
 import type { BrowserState, DownloadInfo, TabInfo } from '@shared/types'
 import { displayUrl } from '@shared/url'
 import { Downloads } from './Downloads'
@@ -15,6 +15,7 @@ function Favicon({ tab }: { tab: TabInfo }): React.JSX.Element {
   if (tab.loading) return <LoaderCircle className="fav spin" size={16} strokeWidth={2} />
   if (tab.url === 'orbit://history') return <Clock className="fav" size={16} strokeWidth={1.75} />
   if (tab.url === 'orbit://bookmarks') return <Bookmark className="fav" size={16} strokeWidth={1.75} />
+  if (tab.url === 'orbit://settings') return <Settings className="fav" size={16} strokeWidth={1.75} />
   if (tab.favicon && broken !== tab.favicon) return <img className="fav" src={tab.favicon} alt="" onError={() => setBroken(tab.favicon!)} />
   return <Globe className="fav" size={16} strokeWidth={1.75} />
 }
