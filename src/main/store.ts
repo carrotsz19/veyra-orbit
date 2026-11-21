@@ -167,6 +167,100 @@ export class Store {
     this.db.prepare('UPDATE bookmarks SET title = ? WHERE url = ?').run(clip(title.trim(), MAX_TITLE), url)
   }
 
+  // ---- bulk import (transactional) ---------------------------------------------
+
+  /** Batch-inserts bookmarks inside a transaction, deduplicating against existing bookmarks. */
+  importBookmarks(items: readonly { url: string; title: string; created: number }[]): { imported: number; skipped: number } {
+    if (!items.length) return { imported: 0, skipped: 0 }
+    let imported = 0
+    let skipped = 0
+    const insert = this.db.prepare('INSERT OR IGNORE INTO bookmarks (url, title, created) VALUES (?, ?, ?)')
+    this.db.exec('BEGIN')
+    try {
+      for (const item of items) {
+        if (!recordable(item.url)) {
+          skipped++
+          continue
+        }
+        const created = Number.isFinite(item.created) && item.created > 0 ? Math.floor(item.created) : Date.now()
+        const res = insert.run(item.url, clip(item.title, MAX_TITLE), created)
+        if (res.changes > 0) imported++
+        else skipped++
+      }
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+    return { imported, skipped }
+  }
+
+  /**
+   * Batch-imports history visits in chunked transactions so huge histories stay fast and safe.
+   * Deduplicates exact (url, time) visits so re-importing the same profile is idempotent.
+   */
+  importHistory(items: readonly { url: string; title: string; time: number; typed?: boolean }[]): { imported: number; skipped: number } {
+    if (!items.length) return { imported: 0, skipped: 0 }
+    const CHUNK = 2000
+    let imported = 0
+    let skipped = 0
+    const hasVisit = this.db.prepare('SELECT 1 FROM visits WHERE url = ? AND time = ? LIMIT 1')
+    const insertVisit = this.db.prepare('INSERT INTO visits (url, time) VALUES (?, ?)')
+    const upsertUrl = this.db.prepare(
+      `INSERT INTO urls (url, title, visits, typed, last) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(url) DO UPDATE SET
+         visits = visits + excluded.visits,
+         typed = typed + excluded.typed,
+         last = MAX(last, excluded.last),
+         title = CASE WHEN excluded.title <> '' THEN excluded.title ELSE title END`
+    )
+
+    for (let offset = 0; offset < items.length; offset += CHUNK) {
+      const end = Math.min(offset + CHUNK, items.length)
+      const agg = new Map<string, { title: string; visits: number; typed: number; last: number }>()
+      this.db.exec('BEGIN')
+      try {
+        for (let i = offset; i < end; i++) {
+          const item = items[i]
+          if (!recordable(item.url) || !Number.isFinite(item.time) || item.time <= 0) {
+            skipped++
+            continue
+          }
+          const time = Math.floor(item.time)
+          if (hasVisit.get(item.url, time)) {
+            skipped++
+            continue
+          }
+          insertVisit.run(item.url, time)
+          imported++
+          const title = clip(item.title, MAX_TITLE)
+          const prev = agg.get(item.url)
+          if (prev) {
+            prev.visits++
+            if (item.typed) prev.typed++
+            if (time >= prev.last) {
+              prev.last = time
+              if (title) prev.title = title
+            } else if (!prev.title && title) {
+              prev.title = title
+            }
+          } else {
+            agg.set(item.url, { title, visits: 1, typed: item.typed ? 1 : 0, last: time })
+          }
+        }
+        for (const [url, row] of agg) {
+          upsertUrl.run(url, row.title, row.visits, row.typed, row.last)
+        }
+        this.db.exec('COMMIT')
+      } catch (err) {
+        this.db.exec('ROLLBACK')
+        throw err
+      }
+    }
+
+    return { imported, skipped }
+  }
+
   // ---- site permissions --------------------------------------------------------
 
   permissions(): SitePermission[] {
