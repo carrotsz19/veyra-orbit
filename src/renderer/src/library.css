@@ -1,0 +1,326 @@
+/* Address bar suggestions, the History and Bookmarks pages, and start page bookmarks. */
+
+/* ---- address bar suggestions ---------------------------------------------- */
+.omni-wrap {
+  flex: 1;
+  max-width: 720px;
+  margin: 0 auto;
+  position: relative;
+  -webkit-app-region: no-drag;
+}
+.omni-wrap .omni {
+  max-width: none;
+  margin: 0;
+}
+.omni-wrap.open .omni {
+  border-radius: 9px 9px 0 0;
+}
+.omni-star {
+  width: 24px;
+  height: 24px;
+  margin-right: -6px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--label-tertiary);
+  transition: color 0.15s, background 0.15s, transform var(--spring-bouncy-ms) var(--spring-bouncy);
+}
+.omni-star:hover {
+  background: var(--fill-hover);
+  color: var(--label-primary);
+}
+.omni-star.on {
+  color: var(--tint);
+}
+.omni-star:active {
+  transform: scale(0.85);
+}
+.omni-list {
+  position: absolute;
+  z-index: 20;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: var(--bg-elevated);
+  border-radius: 0 0 var(--r-card) var(--r-card);
+  box-shadow: var(--elev-2), 0 0 0 2px var(--tint-soft);
+  clip-path: inset(0 -40px -60px -40px);
+  animation: omni-in 0.22s var(--ease-out);
+}
+@keyframes omni-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.omni-list li {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--label-primary);
+}
+.omni-list li.sel {
+  background: var(--fill-tertiary);
+}
+.omni-list li.sel .omni-row-icon {
+  color: var(--tint);
+}
+.omni-row-icon {
+  flex: none;
+  color: var(--label-tertiary);
+}
+.omni-row-main {
+  min-width: 0;
+  flex: 0 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.omni-row-url {
+  min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--label-tertiary);
+  font-size: 12px;
+}
+.omni-row-url::before {
+  content: '— ';
+}
+.omni-row-side {
+  margin-left: auto;
+  flex: none;
+  font-size: 11px;
+  color: var(--label-tertiary);
+}
+/* The page's picture, in its place while the suggestions are open. */
+.page-shot {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* ---- history and bookmarks pages ------------------------------------------- */
+.lib {
+  height: 100%;
+  overflow-y: auto;
+  padding: 36px max(24px, calc((100% - 760px) / 2)) 48px;
+  user-select: text;
+  animation: rise 0.4s var(--ease-out);
+}
+.lib-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.lib-head h1 {
+  margin: 0 8px 0 0;
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 30px;
+}
+.lib-search {
+  flex: 1;
+  min-width: 200px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 12px;
+  border-radius: var(--r-control);
+  background: var(--bg-grouped);
+  color: var(--label-tertiary);
+  box-shadow: inset 0 0 0 1px var(--separator);
+}
+.lib-search:focus-within {
+  box-shadow: inset 0 0 0 1px var(--tint), 0 0 0 3px var(--tint-soft);
+}
+.lib-search input {
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--label-primary);
+}
+.lib-actions {
+  display: flex;
+}
+.lib-clear {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--label-secondary);
+}
+.btn.danger {
+  background: var(--tint-soft);
+  color: var(--tint);
+}
+.btn:disabled {
+  opacity: 0.45;
+}
+.icon-btn.small {
+  width: 26px;
+  height: 26px;
+}
+.lib-empty {
+  margin: 48px 0;
+  text-align: center;
+  color: var(--label-secondary);
+}
+.lib-empty svg {
+  vertical-align: -1px;
+}
+.lib-group {
+  margin: 0 0 20px;
+  padding: 0;
+  list-style: none;
+}
+.lib-group ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.lib-group h2 {
+  margin: 0 0 6px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--label-secondary);
+}
+.lib-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 38px;
+  padding: 0 6px 0 10px;
+  border-radius: var(--r-control);
+}
+.lib-row:hover {
+  background: var(--fill-tertiary);
+}
+.lib-row time {
+  width: 64px;
+  flex: none;
+  font-size: 12px;
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.lib-link {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  height: 100%;
+  align-items: center;
+  text-align: left;
+}
+.lib-title {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lib-link:hover .lib-title {
+  color: var(--tint);
+}
+.lib-host {
+  flex: none;
+  font-size: 12px;
+  color: var(--label-tertiary);
+}
+.lib-del {
+  opacity: 0;
+}
+.lib-row:hover .lib-del,
+.lib-del:focus-visible {
+  opacity: 1;
+}
+.lib-edit {
+  flex: 1;
+  display: flex;
+  gap: 6px;
+}
+.lib-edit input {
+  flex: 1;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  outline: 0;
+  background: var(--bg-grouped);
+  box-shadow: inset 0 0 0 1px var(--tint);
+}
+.lib-more {
+  display: block;
+  margin: 8px auto 0;
+}
+
+/* ---- start page bookmarks ---------------------------------------------------- */
+.start-marks {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: 600px;
+  margin-top: 22px;
+}
+.start-mark {
+  width: 132px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--r-control);
+  background: var(--bg-grouped);
+  text-align: left;
+  transition: background 0.15s, transform var(--spring-snappy-ms) var(--spring-snappy);
+}
+.start-mark:hover {
+  background: var(--fill-secondary);
+}
+.start-mark:active {
+  transform: scale(0.96);
+}
+.start-mark-initial {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--tint-soft);
+  color: var(--tint);
+  font-weight: 600;
+  font-size: 12px;
+}
+.start-mark-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+.start-links {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--label-tertiary);
+  font-size: 12px;
+}
+.start-links button:hover {
+  color: var(--tint);
+}

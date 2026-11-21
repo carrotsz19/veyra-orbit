@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Search } from 'lucide-react'
+import type { Bookmark } from '@shared/types'
 
 const api = window.veyra
 
@@ -11,9 +12,24 @@ function greeting(): string {
   return 'Good evening'
 }
 
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host.replace(/^www\./, '')
+  } catch {
+    return url
+  }
+}
+
 /** What a new tab shows. Later: today's tasks, the focus timer and recent notes from Veyra Study. */
 export function StartPage({ tabId }: { tabId: number }): React.JSX.Element {
   const [text, setText] = useState('')
+  const [marks, setMarks] = useState<Bookmark[]>([])
+  useEffect(() => {
+    const load = (): void => void api.bookmarks().then((b) => setMarks(b.slice(0, 8)))
+    load()
+    return api.onDataChanged(load)
+  }, [])
+
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
   return (
     <div className="start">
@@ -29,8 +45,28 @@ export function StartPage({ tabId }: { tabId: number }): React.JSX.Element {
         <Search size={18} />
         <input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="Search or type a web address" aria-label="Search or type a web address" />
       </form>
+      {marks.length > 0 && (
+        <nav className="start-marks" aria-label="Bookmarks">
+          {marks.map((b) => {
+            const name = b.title || hostOf(b.url)
+            return (
+              <button key={b.url} className="start-mark" title={b.url} onClick={() => api.navigate(tabId, b.url)}>
+                <span className="start-mark-initial" aria-hidden>
+                  {name.trim().charAt(0).toUpperCase()}
+                </span>
+                <span className="start-mark-name">{name}</span>
+              </button>
+            )
+          })}
+        </nav>
+      )}
       <p className="start-hint">
         <kbd>Ctrl L</kbd> address bar · <kbd>Ctrl T</kbd> new tab · <kbd>Ctrl Shift T</kbd> reopen a closed tab
+      </p>
+      <p className="start-links">
+        <button onClick={() => api.navigate(tabId, 'orbit://history')}>History</button>
+        <span aria-hidden>·</span>
+        <button onClick={() => api.navigate(tabId, 'orbit://bookmarks')}>Bookmarks</button>
       </p>
     </div>
   )

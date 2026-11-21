@@ -7,7 +7,7 @@ import { BrowserWindow, Menu, WebContentsView, clipboard, type Input, type WebCo
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { BrowserState, Rect, TabInfo } from '../shared/types'
-import { SEARCH_URL, isAllowedUrl, toUrl } from '../shared/url'
+import { INTERNAL_PAGES, SEARCH_URL, isAllowedUrl, isInternalUrl, toUrl } from '../shared/url'
 import { WEB_PARTITION } from './security'
 
 interface Tab {
@@ -15,6 +15,17 @@ interface Tab {
   view: WebContentsView
   /** A restored tab's address, loaded the first time the tab is opened. */
   pendingUrl?: string
+  /** The next page this tab opens was typed in the address bar (for history ranking). */
+  typed?: boolean
+}
+
+/** What the tabs tell the rest of the browser about, and ask it. */
+export interface TabHooks {
+  /** A page was opened in a tab. */
+  visit(url: string, title: string, typed: boolean): void
+  title(url: string, title: string): void
+  isBookmarked(url: string): boolean
+  toggleBookmark(url: string, title: string): void
 }
 
 interface SavedSession {
@@ -36,16 +47,19 @@ export class Tabs {
 
   /** Called when a tab closes or leaves its page, so its open permission questions can be dropped. */
   onTabGone: (id: number) => void = () => {}
+  /** While true, floating UI is open above the page, so the page view is taken out. */
+  private overlayOpen = false
 
   constructor(
     private win: BrowserWindow,
-    private sessionFile: string
+    private sessionFile: string,
+    private hooks: TabHooks
   ) {}
 
   // ---- reading ------------------------------------------------------------
 
   state(): BrowserState {
-    return { tabs: this.tabs.map((t) => ({ ...t.info })), activeId: this.activeId }
+    return { tabs: this.tabs.map((t) => ({ ...t.info, bookmarked: !!t.info.url && this.hooks.isBookmarked(t.info.url) })), activeId: this.activeId }
   }
 
   tabIdOf(wc: WebContents): number | null {
@@ -84,7 +98,16 @@ export class Tabs {
     const id = this.nextId++
     const tab: Tab = {
       view,
-      info: { id, url, title: opts.title ?? '', loading: false, canGoBack: false, canGoForward: false, pinned: !!opts.pinned }
+      info: {
+        id,
+        url,
+        title: opts.title ?? (isInternalUrl(url) ? INTERNAL_PAGES[url] : ''),
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        pinned: !!opts.pinned,
+        bookmarked: false
+      }
     }
     this.wire(tab)
 
@@ -143,17 +166,82 @@ export class Tabs {
     this.changed()
   }
 
-  navigate(id: number, input: string): void {
+  navigate(id: number, input: string, typed = false): void {
     const tab = this.get(id)
     const url = toUrl(input)
     if (!tab || !url) return
     tab.pendingUrl = undefined
     tab.info.url = url
     tab.info.error = undefined
+    if (isInternalUrl(url)) {
+      // One of Orbit's own pages: the UI draws it, the web view stays where it was.
+      tab.view.webContents.stop()
+      tab.info.title = INTERNAL_PAGES[url]
+      tab.info.favicon = undefined
+      tab.info.loading = false
+      // Back returns to the page that was open underneath.
+      tab.info.canGoBack = !!tab.view.webContents.getURL()
+      tab.info.canGoForward = false
+      this.layout()
+      this.win.webContents.focus()
+      this.changed()
+      return
+    }
+    tab.typed = typed
     void tab.view.webContents.loadURL(url).catch(() => {})
     this.layout()
     tab.view.webContents.focus()
     this.changed()
+  }
+
+  /** Opens one of Orbit's own pages, reusing a tab that already shows it. */
+  openInternal(url: keyof typeof INTERNAL_PAGES): void {
+    const open = this.tabs.find((t) => t.info.url === url)
+    if (open) return this.activate(open.info.id)
+    const blank = this.active && !this.active.info.url ? this.active : undefined
+    if (blank) this.navigate(blank.info.id, url)
+    else this.create(url)
+  }
+
+  toggleBookmark(): void {
+    const tab = this.active
+    if (!tab || !/^https?:/.test(tab.info.url) || tab.info.error) return
+    this.hooks.toggleBookmark(tab.info.url, tab.info.title)
+    this.changed()
+  }
+
+  /** Tells the UI to read state again (after a bookmark changed elsewhere). */
+  refresh(): void {
+    this.changed()
+  }
+
+  /**
+   * Floating UI opens or closes above the page. Opening returns a picture of the page (JPEG data
+   * URL) for the UI to show in its place while the real page is taken out.
+   */
+  async setOverlay(open: boolean): Promise<string | null> {
+    if (!open) {
+      this.overlayOpen = false
+      this.layout()
+      return null
+    }
+    const view = this.attached
+    let shot: string | null = null
+    if (view) {
+      try {
+        const img = await view.webContents.capturePage()
+        if (!img.isEmpty()) shot = 'data:image/jpeg;base64,' + img.toJPEG(82).toString('base64')
+      } catch {
+        shot = null
+      }
+    }
+    this.overlayOpen = true
+    return shot
+  }
+
+  /** Takes the page out once the UI is showing its picture (sent after setOverlay(true)). */
+  hidePageForOverlay(): void {
+    if (this.overlayOpen) this.layout()
   }
 
   togglePin(id: number): void {
@@ -181,8 +269,23 @@ export class Tabs {
   // ---- the active page ----------------------------------------------------
 
   back(): void {
-    const wc = this.active?.view.webContents
-    if (wc?.navigationHistory.canGoBack()) wc.navigationHistory.goBack()
+    const tab = this.active
+    const wc = tab?.view.webContents
+    if (!tab || !wc) return
+    if (isInternalUrl(tab.info.url)) {
+      // Leave the Orbit page for the web page underneath it, if there is one.
+      const under = wc.getURL()
+      if (!under) return
+      tab.info.url = under
+      tab.info.title = wc.getTitle()
+      tab.info.canGoBack = wc.navigationHistory.canGoBack()
+      tab.info.canGoForward = wc.navigationHistory.canGoForward()
+      this.layout()
+      wc.focus()
+      this.changed()
+      return
+    }
+    if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack()
   }
 
   forward(): void {
@@ -194,6 +297,7 @@ export class Tabs {
     const tab = this.active
     if (!tab) return
     if (tab.info.error) return this.navigate(tab.info.id, tab.info.error.url)
+    if (isInternalUrl(tab.info.url)) return
     if (hard) tab.view.webContents.reloadIgnoringCache()
     else tab.view.webContents.reload()
   }
@@ -215,13 +319,13 @@ export class Tabs {
 
   /** A tab shows its page once it has one that loaded; otherwise the UI shows the start or error page. */
   private showsPage(tab: Tab): boolean {
-    return !!tab.info.url && !tab.info.error
+    return !!tab.info.url && !tab.info.error && !isInternalUrl(tab.info.url)
   }
 
   /** Puts the active tab's page in the window (or takes it out), at the place the UI gave. */
   private layout(): void {
     const tab = this.active
-    const want = tab && this.bounds && this.showsPage(tab) ? tab.view : null
+    const want = tab && this.bounds && !this.overlayOpen && this.showsPage(tab) ? tab.view : null
     if (this.attached && this.attached !== want) {
       this.win.contentView.removeChildView(this.attached)
       this.attached = null
@@ -254,6 +358,9 @@ export class Tabs {
       if (key === 't') return run(() => this.create())
       if (key === 'w') return run(() => this.activeId !== null && this.close(this.activeId))
       if (key === 'l') return run(() => this.focusOmnibox())
+      if (key === 'h') return run(() => this.openInternal('orbit://history'))
+      if (key === 'o' && input.shift) return run(() => this.openInternal('orbit://bookmarks'))
+      if (key === 'd') return run(() => this.toggleBookmark())
       if (key === 'r') return run(() => this.reload(input.shift))
       if (key === 'tab') return run(() => this.cycle(input.shift ? -1 : 1))
       if (key === 'pagedown') return run(() => this.cycle(1))
@@ -292,6 +399,8 @@ export class Tabs {
     const info = tab.info
     const sync = (): void => {
       const url = wc.getURL()
+      // An Orbit page sits on top of whatever the tab had; the old page can't take its place.
+      if (isInternalUrl(info.url)) return this.changed()
       if (url) info.url = url
       info.canGoBack = wc.navigationHistory.canGoBack()
       info.canGoForward = wc.navigationHistory.canGoForward()
@@ -349,10 +458,19 @@ export class Tabs {
         this.onTabGone(info.id)
       }
     })
-    wc.on('did-navigate', sync)
-    wc.on('did-navigate-in-page', sync)
+    wc.on('did-navigate', (_e, url) => {
+      sync()
+      // Pages that answered (even with 404) count as a visit, as in Chrome; failed loads don't.
+      this.hooks.visit(url, wc.getTitle(), !!tab.typed)
+      tab.typed = false
+    })
+    wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
+      sync()
+      if (isMainFrame) this.hooks.visit(url, wc.getTitle(), false)
+    })
     wc.on('page-title-updated', (_e, title) => {
       info.title = title
+      this.hooks.title(wc.getURL(), title)
       this.changed()
     })
     wc.on('page-favicon-updated', (_e, icons) => {
@@ -464,7 +582,7 @@ export class Tabs {
     } catch {
       saved = null
     }
-    const tabs = (saved?.tabs ?? []).filter((t) => typeof t.url === 'string' && isAllowedUrl(t.url))
+    const tabs = (saved?.tabs ?? []).filter((t) => typeof t.url === 'string' && (isAllowedUrl(t.url) || isInternalUrl(t.url)))
     if (!tabs.length) {
       this.create()
       return
