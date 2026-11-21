@@ -4,6 +4,8 @@ All notable changes to Veyra Orbit are documented here.
 
 ## Unreleased
 
+## 26.11.3 — 2026-11-21
+
 - A new title bar like Veyra Study's: the Orbit mark and name, then File, Edit, View, History, Bookmarks, Workspaces and Help menus, with the address bar on the same row. Menus open above the page and work from the keyboard (Alt, arrows, Enter, Esc). In a narrow window they fold into one ☰ menu.
 - Choose Windows window buttons or Veyra's coloured dots in Settings → Appearance.
 - Workspaces: each has its own name, icon, colour and tabs. Switch at the bottom of the sidebar or with Ctrl+Alt+1–9. They share your sign-ins unless you choose "Keep sign-ins separate". Your tabs from before are in "Personal".
