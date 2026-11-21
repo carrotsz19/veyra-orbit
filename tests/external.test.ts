@@ -69,3 +69,9 @@ test('isSafeSubframeUrl permits web subframes and blocks OS protocol handlers', 
     assert.equal(isSafeSubframeUrl(bad), false, bad)
   }
 })
+
+test('the built-in PDF viewer may draw in a frame; no other extension may', () => {
+  assert.equal(isSafeSubframeUrl('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html'), true)
+  assert.equal(isSafeSubframeUrl('chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/index.html'), false)
+  assert.equal(isSafeSubframeUrl('chrome://settings'), false)
+})

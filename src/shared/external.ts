@@ -19,6 +19,8 @@ const EXTERNAL_SCHEMES: Readonly<Record<string, string>> = {
 
 const SUBFRAME_WEB_SCHEMES = new Set(['http:', 'https:', 'about:', 'blob:', 'data:', 'javascript:'])
 const MAX_URL_LEN = 4096
+/** The fixed ID of Chromium's PDF viewer extension, built into Electron. */
+const PDF_VIEWER_ID = 'mhjfbmdgcfjbbpaeojofohoefgiehjai'
 
 export interface ExternalAppTarget {
   url: string
@@ -66,7 +68,10 @@ export function isExternalAppUrl(raw: string): boolean {
  */
 export function isSafeSubframeUrl(raw: string): boolean {
   try {
-    return SUBFRAME_WEB_SCHEMES.has(new URL(raw).protocol.toLowerCase())
+    const u = new URL(raw)
+    // Chromium's built-in PDF viewer draws the document in a frame of its own (and only its own) extension.
+    if (u.protocol === 'chrome-extension:' && u.host === PDF_VIEWER_ID) return true
+    return SUBFRAME_WEB_SCHEMES.has(u.protocol.toLowerCase())
   } catch {
     return false
   }
