@@ -1,7 +1,7 @@
 {
   "name": "veyra-orbit",
   "productName": "Veyra Orbit",
-  "version": "0.1.0",
+  "version": "26.11.1",
   "description": "Veyra Orbit: a calm study browser from Veyra.",
   "main": "out/main/index.js",
   "private": true,
@@ -12,7 +12,8 @@
     "start": "electron-vite preview",
     "test": "node --test tests/url.test.ts tests/suggest.test.ts tests/store.test.ts tests/format.test.ts tests/downloads.test.ts tests/settings.test.ts tests/external.test.ts",
     "dist": "npm run build && electron-builder --win --publish never",
-    "postinstall": "node node_modules/electron/install.js"
+    "postinstall": "node node_modules/electron/install.js",
+    "dist:dev": "node tools/dist-dev.mjs"
   },
   "build": {
     "appId": "app.veyra.orbit",

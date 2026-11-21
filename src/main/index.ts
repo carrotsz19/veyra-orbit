@@ -10,11 +10,11 @@ import { SettingsStore } from './settings'
 import { ExternalApps, Permissions, cleanUserAgent, hardenAll, webSession } from './security'
 import { Downloads } from './downloads'
 
-const APP_NAME = 'Veyra Orbit'
+const APP_NAME = __CHANNEL__ === 'dev' ? 'Veyra Orbit Dev' : 'Veyra Orbit'
 app.setName(APP_NAME)
 // `npm run dev` and test runs keep their own profile, never the installed browser's.
 if (process.env.VEYRA_USERDATA) app.setPath('userData', process.env.VEYRA_USERDATA)
-else if (!app.isPackaged) app.setPath('userData', join(app.getPath('appData'), 'veyra-orbit-dev'))
+else if (!app.isPackaged) app.setPath('userData', join(app.getPath('appData'), 'veyra-orbit-local'))
 
 if (!app.requestSingleInstanceLock()) app.quit()
 

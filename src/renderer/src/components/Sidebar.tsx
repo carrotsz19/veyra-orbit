@@ -51,6 +51,7 @@ export function Sidebar({ state, downloads, downloadsOpen, onCloseDownloads }: P
         <span className="brand">
           <span className="brand-dot" />
           Veyra <span className="brand-sub">Orbit</span>
+          {__CHANNEL__ === 'dev' && <span className="brand-dev">DEV</span>}
         </span>
       </div>
 

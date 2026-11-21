@@ -11,7 +11,7 @@ Needs [Node.js](https://nodejs.org) 22 or newer.
 
 ```bash
 npm install
-npm run dev     # live reload, with its own profile (%APPDATA%\veyra-orbit-dev)
+npm run dev     # live reload, with its own profile (%APPDATA%\veyra-orbit-local)
 npm run build   # typecheck + production build
 npm test        # address bar tests
 ```

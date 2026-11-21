@@ -827,3 +827,13 @@ html[data-platform='darwin'] .caption-space {
   font-weight: 400;
   color: var(--label-secondary);
 }
+
+.brand-dev {
+  margin-left: 2px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--tint);
+  color: var(--on-tint);
+  font: 600 9px/1.4 -apple-system, 'Segoe UI', system-ui, sans-serif;
+  letter-spacing: 0.06em;
+}
