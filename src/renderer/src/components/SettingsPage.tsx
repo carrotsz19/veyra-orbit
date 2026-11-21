@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { FolderOpen, Monitor, Moon, RotateCcw, Shield, Sun, Trash2 } from 'lucide-react'
-import type { ClearDataRange, SearchEngineId, SettingsView, SitePermission, StartupBehavior, ThemeSource } from '@shared/types'
+import { FolderOpen, Monitor, Moon, RefreshCw, RotateCcw, Shield, Sun, Trash2 } from 'lucide-react'
+import type { ClearDataRange, SearchEngineId, SettingsView, SitePermission, StartupBehavior, ThemeSource, UpdateState } from '@shared/types'
 import { SEARCH_ENGINES } from '@shared/settings'
 import { permissionName } from '@shared/permissions'
 
@@ -32,8 +32,30 @@ function displayOrigin(origin: string): string {
   }
 }
 
-export function SettingsPage({ settings: initial }: { settings: SettingsView | null }): React.JSX.Element {
+function updateStatusText(u: UpdateState): string {
+  switch (u.status) {
+    case 'checking':
+      return 'Checking for updates…'
+    case 'downloading':
+      return u.availableVersion
+        ? `Downloading ${u.availableVersion}… ${u.progress ?? 0}%`
+        : `Downloading update… ${u.progress ?? 0}%`
+    case 'ready':
+      return u.availableVersion ? `Update ${u.availableVersion} ready — restart to update.` : 'Update ready — restart to update.'
+    case 'up-to-date':
+      return 'Up to date.'
+    case 'unavailable':
+      return u.note || 'Updates are only checked in installed builds.'
+    case 'error':
+      return u.note || "Couldn't check for updates right now."
+    default:
+      return 'Checks automatically in the background.'
+  }
+}
+
+export function SettingsPage({ settings: initial, update: initialUpdate }: { settings: SettingsView | null; update: UpdateState | null }): React.JSX.Element {
   const [settings, setSettings] = useState<SettingsView | null>(initial)
+  const [update, setUpdate] = useState<UpdateState | null>(initialUpdate)
   const [savedPerms, setSavedPerms] = useState<SitePermission[]>([])
   const [range, setRange] = useState<ClearDataRange>('hour')
   const [clearHistory, setClearHistory] = useState(true)
@@ -48,12 +70,19 @@ export function SettingsPage({ settings: initial }: { settings: SettingsView | n
   }, [initial])
 
   useEffect(() => {
+    if (initialUpdate) setUpdate(initialUpdate)
+  }, [initialUpdate])
+
+  useEffect(() => {
     void api.getSettings().then((s) => s && setSettings(s))
+    void api.getUpdateState().then((u) => u && setUpdate(u))
     void api.savedPermissions().then(setSavedPerms)
     const offSettings = api.onSettings(setSettings)
+    const offUpdate = api.onUpdateState(setUpdate)
     const offPerms = api.onSavedPermissions(setSavedPerms)
     return () => {
       offSettings()
+      offUpdate()
       offPerms()
     }
   }, [])
@@ -365,6 +394,40 @@ export function SettingsPage({ settings: initial }: { settings: SettingsView | n
               ))}
             </ul>
           )}
+        </div>
+      </section>
+
+      <section className="set-section" aria-labelledby="set-updates-h">
+        <h2 id="set-updates-h">Updates</h2>
+        <div className="set-card">
+          <div className="set-row">
+            <div className="set-row-info">
+              <div className="set-label">
+                {__CHANNEL__ === 'dev' ? 'Veyra Orbit Dev' : 'Veyra Orbit'}
+                {update?.currentVersion && <span className="set-version">Version {update.currentVersion}</span>}
+              </div>
+              <div className={`set-desc ${update?.status === 'ready' ? 'set-update-ready' : ''}`}>
+                {update ? updateStatusText(update) : 'Loading update status…'}
+              </div>
+            </div>
+            <div className="set-row-actions">
+              {update?.status === 'ready' ? (
+                <button type="button" className="btn primary" onClick={() => api.installUpdate()}>
+                  Restart
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn set-icon-btn"
+                  disabled={!update || update.status === 'checking' || update.status === 'downloading' || update.status === 'unavailable'}
+                  onClick={() => void api.checkForUpdates()}
+                >
+                  <RefreshCw size={14} className={update?.status === 'checking' ? 'spin' : undefined} aria-hidden />
+                  <span>{update?.status === 'checking' ? 'Checking…' : 'Check for updates'}</span>
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </section>
     </div>

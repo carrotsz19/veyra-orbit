@@ -1,6 +1,6 @@
 // The bridge for the browser's own UI. Web pages in tabs get no preload at all.
 import { contextBridge, ipcRenderer } from 'electron'
-import type { BrowserState, DownloadInfo, ExternalAppAsk, FindState, PermissionAsk, Rect, SettingsView, SitePermission, VeyraApi } from '../shared/types'
+import type { BrowserState, DownloadInfo, ExternalAppAsk, FindState, PermissionAsk, Rect, SettingsView, SitePermission, UpdateState, VeyraApi } from '../shared/types'
 
 function listen<T>(channel: string, cb: (v: T) => void): () => void {
   const f = (_e: Electron.IpcRendererEvent, v: T): void => cb(v)
@@ -66,7 +66,11 @@ const api: VeyraApi = {
   removeBookmark: (url) => ipcRenderer.invoke('bookmark:remove', url),
   renameBookmark: (url, title) => ipcRenderer.invoke('bookmark:rename', url, title),
   onDataChanged: (cb) => listen<void>('data-changed', () => cb()),
-  hidePageForOverlay: () => ipcRenderer.send('overlay:hide')
+  hidePageForOverlay: () => ipcRenderer.send('overlay:hide'),
+  onUpdateState: (cb) => listen<UpdateState>('update:state', cb),
+  getUpdateState: () => ipcRenderer.invoke('update:state'),
+  checkForUpdates: () => ipcRenderer.invoke('update:check'),
+  installUpdate: () => ipcRenderer.send('update:install')
 }
 
 contextBridge.exposeInMainWorld('veyra', api)

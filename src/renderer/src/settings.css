@@ -281,3 +281,13 @@
   flex: none;
   color: var(--label-tertiary);
 }
+.set-version {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.set-update-ready {
+  color: var(--positive);
+}

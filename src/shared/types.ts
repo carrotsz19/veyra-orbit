@@ -98,6 +98,7 @@ export interface Bookmark {
 
 export type { Suggestion } from './suggest'
 export type { SearchEngineId, Settings, SettingsView, StartupBehavior, ThemeSource } from './settings'
+export type { UpdateState, UpdateStatus } from './updates'
 
 export type ClearDataRange = 'hour' | 'day' | 'all'
 
@@ -173,4 +174,8 @@ export interface VeyraApi {
   onDataChanged(cb: () => void): () => void
   /** Sent once the UI shows the page's picture, so the real page can be taken out without a flash. */
   hidePageForOverlay(): void
+  onUpdateState(cb: (s: import('./updates').UpdateState) => void): () => void
+  getUpdateState(): Promise<import('./updates').UpdateState | null>
+  checkForUpdates(): Promise<import('./updates').UpdateState | null>
+  installUpdate(): void
 }

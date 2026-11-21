@@ -837,3 +837,55 @@ html[data-platform='darwin'] .caption-space {
   font: 600 9px/1.4 -apple-system, 'Segoe UI', system-ui, sans-serif;
   letter-spacing: 0.06em;
 }
+
+/* ---- update ready note ------------------------------------------------- */
+.update-note {
+  flex: none;
+  margin-top: 8px;
+  padding: 9px 10px;
+  border-radius: var(--r-control);
+  background: var(--bg-elevated);
+  box-shadow: var(--elev-1);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: perm-in var(--spring-bouncy-ms) var(--spring-bouncy);
+}
+.update-note-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.update-note-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--positive);
+}
+.update-note-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--label-primary);
+  line-height: 1.3;
+}
+.update-note-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.update-note-ver {
+  font-size: 11px;
+  color: var(--label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.update-note-btn {
+  height: 26px;
+  padding: 0 11px;
+  font-size: 12px;
+  margin-left: auto;
+}

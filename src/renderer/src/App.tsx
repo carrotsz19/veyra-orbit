@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { BrowserState, DownloadInfo, ExternalAppAsk, PermissionAsk, SettingsView, TabInfo } from '@shared/types'
+import type { BrowserState, DownloadInfo, ExternalAppAsk, PermissionAsk, SettingsView, TabInfo, UpdateState } from '@shared/types'
 import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
 import { StartPage } from './components/StartPage'
@@ -16,6 +16,8 @@ export function App(): React.JSX.Element {
   const [asks, setAsks] = useState<PermissionAsk[]>([])
   const [externalAsks, setExternalAsks] = useState<ExternalAppAsk[]>([])
   const [settings, setSettings] = useState<SettingsView | null>(null)
+  const [update, setUpdate] = useState<UpdateState | null>(null)
+  const [dismissedUpdateVer, setDismissedUpdateVer] = useState<string | null>(null)
   const [downloads, setDownloads] = useState<DownloadInfo[]>([])
   const [downloadsOpen, setDownloadsOpen] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
@@ -33,6 +35,7 @@ export function App(): React.JSX.Element {
       api.onPermission(setAsks),
       api.onExternalApps(setExternalAsks),
       api.onSettings(setSettings),
+      api.onUpdateState(setUpdate),
       api.onDownloads((items) => {
         setDownloads(items)
         const newest = items.reduce((m, d) => Math.max(m, d.id), 0)
@@ -87,9 +90,19 @@ export function App(): React.JSX.Element {
   const tabAsks = asks.filter((a) => a.tabId === null || a.tabId === state.activeId)
   const tabExternalAsks = externalAsks.filter((a) => a.tabId === null || a.tabId === state.activeId)
 
+  const updateKey = update?.availableVersion ?? (update?.status === 'ready' ? '__ready__' : null)
+  const showUpdateNote = update?.status === 'ready' && dismissedUpdateVer !== updateKey
+
   return (
     <div className={`shell ${pageFullscreen ? 'fullscreen' : ''}`}>
-      <Sidebar state={state} downloads={downloads} downloadsOpen={downloadsOpen} onCloseDownloads={() => setDownloadsOpen(false)} />
+      <Sidebar
+        state={state}
+        downloads={downloads}
+        downloadsOpen={downloadsOpen}
+        onCloseDownloads={() => setDownloadsOpen(false)}
+        update={showUpdateNote ? update : null}
+        onDismissUpdate={() => setDismissedUpdateVer(updateKey)}
+      />
       <main className="main">
         <Toolbar tab={active} onPageShot={setShot} />
         {tabAsks.length > 0 && <PermissionBar ask={tabAsks[0]} />}
@@ -99,7 +112,7 @@ export function App(): React.JSX.Element {
           {active && !active.url && <StartPage tabId={active.id} />}
           {active?.url === 'orbit://history' && <HistoryPage key={active.id} tabId={active.id} />}
           {active?.url === 'orbit://bookmarks' && <BookmarksPage key={active.id} tabId={active.id} />}
-          {active?.url === 'orbit://settings' && <SettingsPage key={active.id} settings={settings} />}
+          {active?.url === 'orbit://settings' && <SettingsPage key={active.id} settings={settings} update={update} />}
           {active?.error && <ErrorPage tab={active} />}
           {shot && <img className="page-shot" src={shot} alt="" />}
         </div>
