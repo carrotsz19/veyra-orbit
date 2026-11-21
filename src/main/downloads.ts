@@ -25,7 +25,7 @@ export class Downloads {
   private nextId = 1
   private items: TrackedDownload[] = []
   private inFlight = new Set<string>()
-  private attached: Session | null = null
+  private attached = new Set<Session>()
   private emitTimer: NodeJS.Timeout | null = null
   private lastEmit = 0
 
@@ -39,16 +39,16 @@ export class Downloads {
   ) {}
 
   attach(sess: Session): void {
-    this.detach()
-    this.attached = sess
+    if (this.attached.has(sess)) return
+    this.attached.add(sess)
     sess.on('will-download', this.onWillDownload)
   }
 
   detach(): void {
-    if (this.attached) {
-      this.attached.off('will-download', this.onWillDownload)
-      this.attached = null
+    for (const sess of this.attached) {
+      sess.off('will-download', this.onWillDownload)
     }
+    this.attached.clear()
     if (this.emitTimer) {
       clearTimeout(this.emitTimer)
       this.emitTimer = null
