@@ -3,8 +3,9 @@
  * Only http(s) pages are recorded; nothing here ever leaves the computer.
  */
 import { DatabaseSync } from 'node:sqlite'
-import type { Bookmark, HistoryEntry } from '../shared/types'
+import type { Bookmark, HistoryEntry, SitePermission } from '../shared/types'
 import type { Candidate } from '../shared/suggest'
+import { isAskablePermission, normalizePermissionOrigin } from '../shared/permissions.ts'
 import { isAllowedUrl } from '../shared/url.ts'
 
 const MAX_URL = 4096
@@ -39,6 +40,13 @@ export class Store {
         url TEXT PRIMARY KEY,
         title TEXT NOT NULL DEFAULT '',
         created INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS permissions (
+        origin TEXT NOT NULL,
+        permission TEXT NOT NULL,
+        allow INTEGER NOT NULL,
+        updated INTEGER NOT NULL,
+        PRIMARY KEY (origin, permission)
       );
     `)
   }
@@ -157,5 +165,32 @@ export class Store {
 
   renameBookmark(url: string, title: string): void {
     this.db.prepare('UPDATE bookmarks SET title = ? WHERE url = ?').run(clip(title.trim(), MAX_TITLE), url)
+  }
+
+  // ---- site permissions --------------------------------------------------------
+
+  permissions(): SitePermission[] {
+    const rows = this.db
+      .prepare('SELECT origin, permission, allow, updated FROM permissions ORDER BY origin ASC, permission ASC')
+      .all() as { origin: string; permission: string; allow: number; updated: number }[]
+    return rows.map((r) => ({ origin: r.origin, permission: r.permission, allow: !!r.allow, updated: r.updated }))
+  }
+
+  setPermission(origin: string, permission: string, allow: boolean, now = Date.now()): boolean {
+    const norm = normalizePermissionOrigin(origin)
+    if (!norm || !isAskablePermission(permission)) return false
+    this.db
+      .prepare(
+        `INSERT INTO permissions (origin, permission, allow, updated) VALUES (?, ?, ?, ?)
+         ON CONFLICT(origin, permission) DO UPDATE SET allow = excluded.allow, updated = excluded.updated`
+      )
+      .run(norm, permission, allow ? 1 : 0, now)
+    return true
+  }
+
+  removePermission(origin: string, permission: string): void {
+    const norm = normalizePermissionOrigin(origin)
+    if (!norm) return
+    this.db.prepare('DELETE FROM permissions WHERE origin = ? AND permission = ?').run(norm, permission)
   }
 }

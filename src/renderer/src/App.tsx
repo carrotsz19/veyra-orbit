@@ -1,18 +1,21 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { BrowserState, DownloadInfo, PermissionAsk, TabInfo } from '@shared/types'
+import type { BrowserState, DownloadInfo, ExternalAppAsk, PermissionAsk, SettingsView, TabInfo } from '@shared/types'
 import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
 import { StartPage } from './components/StartPage'
 import { ErrorPage } from './components/ErrorPage'
-import { PermissionBar } from './components/PermissionBar'
+import { ExternalAppBar, PermissionBar } from './components/PermissionBar'
 import { FindBar } from './components/FindBar'
 import { BookmarksPage, HistoryPage } from './components/Library'
+import { SettingsPage } from './components/SettingsPage'
 
 const api = window.veyra
 
 export function App(): React.JSX.Element {
   const [state, setState] = useState<BrowserState>({ tabs: [], activeId: null })
   const [asks, setAsks] = useState<PermissionAsk[]>([])
+  const [externalAsks, setExternalAsks] = useState<ExternalAppAsk[]>([])
+  const [settings, setSettings] = useState<SettingsView | null>(null)
   const [downloads, setDownloads] = useState<DownloadInfo[]>([])
   const [downloadsOpen, setDownloadsOpen] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
@@ -26,6 +29,8 @@ export function App(): React.JSX.Element {
     const offs = [
       api.onState(setState),
       api.onPermission(setAsks),
+      api.onExternalApps(setExternalAsks),
+      api.onSettings(setSettings),
       api.onDownloads((items) => {
         setDownloads(items)
         const newest = items.reduce((m, d) => Math.max(m, d.id), 0)
@@ -67,6 +72,7 @@ export function App(): React.JSX.Element {
 
   const active: TabInfo | undefined = state.tabs.find((t) => t.id === state.activeId)
   const tabAsks = asks.filter((a) => a.tabId === null || a.tabId === state.activeId)
+  const tabExternalAsks = externalAsks.filter((a) => a.tabId === null || a.tabId === state.activeId)
 
   return (
     <div className="shell">
@@ -74,11 +80,13 @@ export function App(): React.JSX.Element {
       <main className="main">
         <Toolbar tab={active} onPageShot={setShot} />
         {tabAsks.length > 0 && <PermissionBar ask={tabAsks[0]} />}
+        {tabExternalAsks.length > 0 && <ExternalAppBar ask={tabExternalAsks[0]} />}
         <FindBar open={findOpen} focusTick={findFocusTick} onClose={() => setFindOpen(false)} />
         <div className="page" ref={pageRef}>
           {active && !active.url && <StartPage tabId={active.id} />}
           {active?.url === 'orbit://history' && <HistoryPage key={active.id} tabId={active.id} />}
           {active?.url === 'orbit://bookmarks' && <BookmarksPage key={active.id} tabId={active.id} />}
+          {active?.url === 'orbit://settings' && <SettingsPage key={active.id} settings={settings} />}
           {active?.error && <ErrorPage tab={active} />}
           {shot && <img className="page-shot" src={shot} alt="" />}
         </div>

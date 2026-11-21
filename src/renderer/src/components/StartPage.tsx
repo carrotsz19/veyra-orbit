@@ -67,6 +67,8 @@ export function StartPage({ tabId }: { tabId: number }): React.JSX.Element {
         <button onClick={() => api.navigate(tabId, 'orbit://history')}>History</button>
         <span aria-hidden>·</span>
         <button onClick={() => api.navigate(tabId, 'orbit://bookmarks')}>Bookmarks</button>
+        <span aria-hidden>·</span>
+        <button onClick={() => api.navigate(tabId, 'orbit://settings')}>Settings</button>
       </p>
     </div>
   )

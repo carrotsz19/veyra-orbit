@@ -30,6 +30,25 @@ export interface PermissionAsk {
   permission: string
 }
 
+/** A remembered Allow / Block decision for one site and permission. */
+export interface SitePermission {
+  origin: string
+  permission: string
+  allow: boolean
+  /** ms since 1970 */
+  updated: number
+}
+
+/** A page asking to launch an external app (mailto:, zoommtg:, ...). Opens only after the user clicks Open. */
+export interface ExternalAppAsk {
+  id: number
+  tabId: number | null
+  origin: string
+  scheme: string
+  appName: string
+  url: string
+}
+
 /** Where the active page sits inside the window, in CSS pixels. */
 export interface Rect {
   x: number
@@ -75,11 +94,24 @@ export interface Bookmark {
 }
 
 export type { Suggestion } from './suggest'
+export type { SearchEngineId, Settings, SettingsView, StartupBehavior, ThemeSource } from './settings'
+
+export type ClearDataRange = 'hour' | 'day' | 'all'
+
+export interface ClearDataRequest {
+  range: ClearDataRange
+  history: boolean
+  siteData: boolean
+  cache: boolean
+}
 
 export interface VeyraApi {
   onState(cb: (s: BrowserState) => void): () => void
   onFocusOmnibox(cb: () => void): () => void
   onPermission(cb: (asks: PermissionAsk[]) => void): () => void
+  onExternalApps(cb: (asks: ExternalAppAsk[]) => void): () => void
+  onSettings(cb: (s: import('./settings').SettingsView) => void): () => void
+  onSavedPermissions(cb: (list: SitePermission[]) => void): () => void
   onDownloads(cb: (items: DownloadInfo[]) => void): () => void
   onToggleDownloads(cb: () => void): () => void
   onFindOpen(cb: () => void): () => void
@@ -98,7 +130,8 @@ export interface VeyraApi {
   togglePin(id: number): void
   move(id: number, toIndex: number): void
   setBounds(r: Rect | null): void
-  answerPermission(id: number, allow: boolean): void
+  answerPermission(id: number, allow: boolean, remember?: boolean): void
+  answerExternalApp(id: number, open: boolean): void
   find(text: string, opts?: { forward?: boolean; findNext?: boolean }): void
   stopFind(): void
   pauseDownload(id: number): void
@@ -107,6 +140,13 @@ export interface VeyraApi {
   openDownload(id: number): void
   showDownload(id: number): void
   clearFinishedDownloads(): void
+  getSettings(): Promise<import('./settings').SettingsView | null>
+  updateSettings(patch: Partial<import('./settings').Settings>): Promise<import('./settings').SettingsView | null>
+  chooseDownloadsDir(): Promise<import('./settings').SettingsView | null>
+  savedPermissions(): Promise<SitePermission[]>
+  setSavedPermission(origin: string, permission: string, allow: boolean): Promise<boolean>
+  removeSavedPermission(origin: string, permission: string): Promise<void>
+  clearBrowsingData(req: ClearDataRequest): Promise<void>
   /** Address bar suggestions for what's typed. */
   suggest(input: string): Promise<import('./suggest').Suggestion[]>
   /**

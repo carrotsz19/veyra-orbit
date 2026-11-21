@@ -7,7 +7,8 @@ import { BrowserWindow, Menu, WebContentsView, clipboard, type Input, type WebCo
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { BrowserState, Rect, TabInfo } from '../shared/types'
-import { INTERNAL_PAGES, SEARCH_URL, isAllowedUrl, isInternalUrl, toUrl } from '../shared/url'
+import { INTERNAL_PAGES, buildSearchUrl, isAllowedUrl, isInternalUrl, toUrl } from '../shared/url'
+import { isSafeSubframeUrl, parseExternalAppUrl } from '../shared/external'
 import { clampZoomLevel, zoomPercent } from '../shared/format'
 import { WEB_PARTITION } from './security'
 
@@ -27,6 +28,10 @@ export interface TabHooks {
   title(url: string, title: string): void
   isBookmarked(url: string): boolean
   toggleBookmark(url: string, title: string): void
+  /** Current search engine URL prefix. */
+  searchUrl(): string
+  /** A page tried to open an allowlisted external app scheme (mailto:, zoommtg:, ...). */
+  externalApp(tabId: number, pageUrl: string, targetUrl: string): void
 }
 
 interface SavedSession {
@@ -174,7 +179,7 @@ export class Tabs {
 
   navigate(id: number, input: string, typed = false): void {
     const tab = this.get(id)
-    const url = toUrl(input)
+    const url = toUrl(input, this.hooks.searchUrl())
     if (!tab || !url) return
     tab.pendingUrl = undefined
     tab.info.url = url
@@ -443,6 +448,7 @@ export class Tabs {
       if (key === 'j') return run(() => this.toggleDownloads())
       if (key === 'h') return run(() => this.openInternal('orbit://history'))
       if (key === 'o' && input.shift) return run(() => this.openInternal('orbit://bookmarks'))
+      if (key === ',') return run(() => this.openInternal('orbit://settings'))
       if (key === 'd') return run(() => this.toggleBookmark())
       if (key === 'r') return run(() => this.reload(input.shift))
       if (key === 'tab') return run(() => this.cycle(input.shift ? -1 : 1))
@@ -499,18 +505,34 @@ export class Tabs {
       this.zoom(direction === 'in' ? ZOOM_STEP : -ZOOM_STEP, tab)
     })
 
-    // Only web addresses: no file:, javascript:, chrome: and the like.
+    // Only web addresses: no file:, javascript:, chrome: and the like. Allowlisted external apps ask first.
     wc.on('will-navigate', (e, url) => {
-      if (!isAllowedUrl(url)) e.preventDefault()
+      if (!isAllowedUrl(url)) {
+        e.preventDefault()
+        if (parseExternalAppUrl(url)) this.hooks.externalApp(info.id, wc.getURL(), url)
+      }
     })
     wc.on('will-redirect', (e, url) => {
-      if (!isAllowedUrl(url)) e.preventDefault()
+      if (!isAllowedUrl(url)) {
+        e.preventDefault()
+        if (parseExternalAppUrl(url)) this.hooks.externalApp(info.id, wc.getURL(), url)
+      }
+    })
+    wc.on('will-frame-navigate', (details) => {
+      if (details.isMainFrame) return
+      if (!isSafeSubframeUrl(details.url)) {
+        details.preventDefault()
+        if (parseExternalAppUrl(details.url)) this.hooks.externalApp(info.id, wc.getURL(), details.url)
+      }
     })
 
     // Links that open a new tab become a tab here. Real pop-ups (window.open with a size, used by
     // "Sign in with ..." buttons) stay pop-ups, so the page that opened them can hear back.
     wc.setWindowOpenHandler(({ url, disposition }) => {
-      if (!isAllowedUrl(url)) return { action: 'deny' }
+      if (!isAllowedUrl(url)) {
+        if (parseExternalAppUrl(url)) this.hooks.externalApp(info.id, wc.getURL(), url)
+        return { action: 'deny' }
+      }
       if (disposition === 'new-window') {
         return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true, width: 520, height: 680 } }
       }
@@ -519,10 +541,20 @@ export class Tabs {
     })
     wc.on('did-create-window', (popup) => {
       popup.webContents.on('will-navigate', (e, url) => {
-        if (!isAllowedUrl(url)) e.preventDefault()
+        if (!isAllowedUrl(url)) {
+          e.preventDefault()
+          if (parseExternalAppUrl(url)) this.hooks.externalApp(info.id, popup.webContents.getURL() || wc.getURL(), url)
+        }
+      })
+      popup.webContents.on('will-redirect', (e, url) => {
+        if (!isAllowedUrl(url)) {
+          e.preventDefault()
+          if (parseExternalAppUrl(url)) this.hooks.externalApp(info.id, popup.webContents.getURL() || wc.getURL(), url)
+        }
       })
       popup.webContents.setWindowOpenHandler(({ url }) => {
         if (isAllowedUrl(url)) this.create(url, { after: info.id })
+        else if (parseExternalAppUrl(url)) this.hooks.externalApp(info.id, popup.webContents.getURL() || wc.getURL(), url)
         return { action: 'deny' }
       })
     })
@@ -629,7 +661,7 @@ export class Tabs {
     } else if (p.selectionText.trim()) {
       const text = p.selectionText.trim()
       const short = text.length > 24 ? text.slice(0, 24) + '…' : text
-      items.push({ role: 'copy' }, { label: `Search for “${short}”`, click: () => this.create(SEARCH_URL + encodeURIComponent(text), { after: tab.info.id }) })
+      items.push({ role: 'copy' }, { label: `Search for “${short}”`, click: () => this.create(buildSearchUrl(text, this.hooks.searchUrl()), { after: tab.info.id }) })
       gap()
     }
     if (!p.linkURL && !p.isEditable && !p.selectionText.trim()) {

@@ -2,6 +2,11 @@
 
 export const SEARCH_URL = 'https://www.google.com/search?q='
 
+/** Builds a search URL for `query` using the given search URL prefix (default Google). */
+export function buildSearchUrl(query: string, searchUrl: string = SEARCH_URL): string {
+  return searchUrl + encodeURIComponent(query)
+}
+
 const SCHEME = /^([a-z][a-z0-9+.-]*):/i
 // localhost, an IPv4 address or a dotted name ending in a letter TLD, then an optional port and path.
 const HOSTLIKE = /^(localhost|\d{1,3}(?:\.\d{1,3}){3}|(?:[a-z0-9-]+\.)+[a-z]{2,63})(:\d{1,5})?([/?#].*)?$/i
@@ -24,7 +29,8 @@ export function isAllowedUrl(url: string): boolean {
  */
 export const INTERNAL_PAGES = {
   'orbit://history': 'History',
-  'orbit://bookmarks': 'Bookmarks'
+  'orbit://bookmarks': 'Bookmarks',
+  'orbit://settings': 'Settings'
 } as const
 export type InternalUrl = keyof typeof INTERNAL_PAGES
 
@@ -33,7 +39,7 @@ export function isInternalUrl(url: string): url is InternalUrl {
 }
 
 /** Turns address bar input into a URL to load. Empty input gives null. */
-export function toUrl(input: string): string | null {
+export function toUrl(input: string, searchUrl: string = SEARCH_URL): string | null {
   const text = input.trim()
   if (!text) return null
   const internal = text.toLowerCase().replace(/\/$/, '')
@@ -47,7 +53,7 @@ export function toUrl(input: string): string | null {
     const scheme = SCHEME.exec(text)
     if (scheme && isAllowedUrl(text)) return new URL(text).href
   }
-  return SEARCH_URL + encodeURIComponent(text)
+  return buildSearchUrl(text, searchUrl)
 }
 
 /** The address as shown when you're not editing it: no https://, no www., no lone trailing slash. */
