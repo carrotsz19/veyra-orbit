@@ -17,6 +17,7 @@ import { SLEEP_MINUTES_OPTIONS } from '@shared/sleep'
 import { pickActiveSection } from '@shared/compact'
 import { permissionName } from '@shared/permissions'
 import { ImportSection } from './ImportCard'
+import { SettingsExtensions } from './SettingsExtensions'
 
 const api = window.veyra
 
@@ -58,6 +59,7 @@ const SETTING_SECTIONS = [
   { id: 'set-downloads', label: 'Downloads' },
   { id: 'set-privacy', label: 'Privacy & data' },
   { id: 'set-permissions', label: 'Site permissions' },
+  { id: 'set-extensions', label: 'Extensions' },
   { id: 'set-updates', label: 'Updates' }
 ]
 
@@ -652,6 +654,8 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
               )}
             </div>
           </section>
+
+          <SettingsExtensions />
 
           <section className="set-section" id="set-updates" aria-labelledby="set-updates-h">
             <h2 id="set-updates-h">Updates</h2>

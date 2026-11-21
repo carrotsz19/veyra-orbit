@@ -3,6 +3,7 @@ import type {
   BrowserState,
   CompactRevealState,
   DownloadInfo,
+  ExtensionInstallAsk,
   ExternalAppAsk,
   PermissionAsk,
   SettingsView,
@@ -14,11 +15,13 @@ import { DEFAULT_SPLIT_RATIO, computeSplitLayout, findSplitGroup, ratioFromPoint
 import './library.css'
 import './settings.css'
 import './import-private.css'
+import './extensions.css'
 import { Sidebar } from './components/Sidebar'
 import { TitleBar } from './components/TitleBar'
 import { StartPage } from './components/StartPage'
 import { ErrorPage } from './components/ErrorPage'
 import { ExternalAppBar, PermissionBar } from './components/PermissionBar'
+import { ExtensionInstallBar } from './components/ExtensionInstallBar'
 import { FindBar } from './components/FindBar'
 import { BookmarksPage, HistoryPage } from './components/Library'
 import { SettingsPage } from './components/SettingsPage'
@@ -56,6 +59,7 @@ export function App(): React.JSX.Element {
   const [state, setState] = useState<BrowserState>(INITIAL_STATE)
   const [asks, setAsks] = useState<PermissionAsk[]>([])
   const [externalAsks, setExternalAsks] = useState<ExternalAppAsk[]>([])
+  const [extInstallAsks, setExtInstallAsks] = useState<ExtensionInstallAsk[]>([])
   const [settings, setSettings] = useState<SettingsView | null>(null)
   const [update, setUpdate] = useState<UpdateState | null>(null)
   const [dismissedUpdateVer, setDismissedUpdateVer] = useState<string | null>(null)
@@ -87,6 +91,7 @@ export function App(): React.JSX.Element {
       api.onState(setState),
       api.onPermission(setAsks),
       api.onExternalApps(setExternalAsks),
+      api.extensions.onInstallAsk(setExtInstallAsks),
       api.onSettings(setSettings),
       api.onUpdateState(setUpdate),
       api.onCompactState(setCompact),
@@ -311,6 +316,7 @@ export function App(): React.JSX.Element {
       <main className="main">
         {tabAsks.length > 0 && <PermissionBar ask={tabAsks[0]} />}
         {tabExternalAsks.length > 0 && <ExternalAppBar ask={tabExternalAsks[0]} />}
+        {extInstallAsks.length > 0 && <ExtensionInstallBar ask={extInstallAsks[0]} />}
         <FindBar open={findOpen} focusTick={findFocusTick} onClose={() => setFindOpen(false)} />
         <div
           className={`page ${isSplitView ? 'split' : ''}`}

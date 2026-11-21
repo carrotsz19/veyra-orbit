@@ -117,3 +117,25 @@ test('WEBAUTHN_CONDITIONAL_SHIM disables conditional mediation while keeping exp
     if (origNav) Object.defineProperty(globalThis, 'navigator', origNav)
   }
 })
+
+test('the Google sign-in Firefox shape only acts on accounts.google.com', async () => {
+  const { GOOGLE_AUTH_FIREFOX_SHAPE } = await import('../src/shared/compat.ts')
+  const run = (hostname: string) => {
+    class Nav {}
+    Object.defineProperty(Nav.prototype, 'userAgentData', { get: () => ({ brands: [] }), configurable: true })
+    Object.defineProperty(Nav.prototype, 'vendor', { get: () => 'Google Inc.', configurable: true })
+    const win: Record<string, unknown> = { chrome: {} }
+    const fn = new Function('location', 'Navigator', 'window', GOOGLE_AUTH_FIREFOX_SHAPE)
+    fn({ hostname }, Nav, win)
+    const nav = new Nav() as { userAgentData?: unknown; vendor?: string }
+    return { uad: nav.userAgentData, vendor: nav.vendor, chrome: win.chrome }
+  }
+  const google = run('accounts.google.com')
+  assert.equal(google.uad, undefined)
+  assert.equal(google.vendor, '')
+  assert.equal(google.chrome, undefined)
+  const other = run('www.youtube.com')
+  assert.deepEqual(other.uad, { brands: [] })
+  assert.equal(other.vendor, 'Google Inc.')
+  assert.deepEqual(other.chrome, {})
+})

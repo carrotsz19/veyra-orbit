@@ -128,6 +128,14 @@ export type { PaletteItem, PaletteMode, PaletteOpenState, PaletteResultsPayload 
 export type { PeekAction, PeekState } from './peek'
 export type { InternalUrl } from './url'
 export type { ImportBrowserId, ImportProfile, ImportRequest, ImportResult, ImportStatus } from './importer'
+export type {
+  ExtensionActionView,
+  ExtensionInstallAsk,
+  ExtensionPermissionDetail,
+  ExtensionSource,
+  ExtensionSummary,
+  ExtensionsState
+} from './extensions'
 
 export type CompactPinKind = 'omnibox' | 'sidebar'
 export type CompactEdgeKind = 'sidebar' | 'toolbar'
@@ -196,6 +204,9 @@ export interface VeyraCompactPanelApi {
   requestNewWorkspace(): void
   openSettingsSection(sectionId: string): void
   setOmniboxOpen(open: boolean): void
+  startWindowDrag(): void
+  moveWindowDrag(): void
+  endWindowDrag(): void
 }
 
 export type ClearDataRange = 'hour' | 'day' | 'all'
@@ -315,4 +326,23 @@ export interface VeyraApi {
   getImportStatus(): Promise<import('./importer').ImportStatus>
   runImport(req: import('./importer').ImportRequest): Promise<import('./importer').ImportResult>
   dismissImportPrompt(): Promise<void>
+  extensions: ExtensionsApi
+}
+
+export interface ExtensionsApi {
+  onState(cb: (state: import('./extensions').ExtensionsState) => void): () => void
+  onActions(cb: (actions: import('./extensions').ExtensionActionView[]) => void): () => void
+  onInstallAsk(cb: (asks: import('./extensions').ExtensionInstallAsk[]) => void): () => void
+  getState(): Promise<import('./extensions').ExtensionsState>
+  getActions(): Promise<import('./extensions').ExtensionActionView[]>
+  setEnabled(id: string, enabled: boolean): Promise<boolean>
+  setPinned(id: string, pinned: boolean): Promise<boolean>
+  installFromStore(idOrUrl: string): Promise<{ ok: boolean; error?: string }>
+  installUnpacked(): Promise<{ ok: boolean; error?: string; canceled?: boolean }>
+  uninstall(id: string): Promise<boolean>
+  openOptions(id: string): void
+  setDeveloperMode(enabled: boolean): Promise<boolean>
+  clickAction(id: string, anchorRect: Rect): void
+  contextMenuAction(id: string, anchorRect: Rect): void
+  answerInstall(requestId: string, allow: boolean): void
 }

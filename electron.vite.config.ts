@@ -1,8 +1,22 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import { resolveDevFeedToken } from './src/shared/updates'
+
+function copyExtensionPreloads() {
+  return {
+    name: 'copy-extension-preloads',
+    writeBundle() {
+      const outDir = resolve('out/preload')
+      mkdirSync(outDir, { recursive: true })
+      const src = resolve('node_modules/electron-chrome-extensions/dist/chrome-extension-api.preload.js')
+      if (existsSync(src)) {
+        copyFileSync(src, resolve(outDir, 'chrome-extension-api.preload.js'))
+      }
+    }
+  }
+}
 
 // Which Orbit this build is: "dev" for Veyra Orbit Dev test builds (tools/dist-dev.mjs), "prod" otherwise.
 const channelName = process.env.VEYRA_CHANNEL === 'dev' ? 'dev' : 'prod'
@@ -24,6 +38,7 @@ export default defineConfig({
     build: { rollupOptions: { external: ['node:sqlite'] } }
   },
   preload: {
+    plugins: [copyExtensionPreloads()],
     build: {
       rollupOptions: {
         input: {
@@ -31,7 +46,9 @@ export default defineConfig({
           floating: resolve('src/preload/floating.ts'),
           compact: resolve('src/preload/compact.ts'),
           palette: resolve('src/preload/palette.ts'),
-          peek: resolve('src/preload/peek.ts')
+          peek: resolve('src/preload/peek.ts'),
+          'ext-compat': resolve('src/preload/ext-compat.ts'),
+          webstore: resolve('src/preload/webstore.ts')
         }
       }
     }

@@ -15,7 +15,14 @@ import type {
 } from '../shared/types'
 import { isAllowedUrl, isInternalUrl, toUrl } from '../shared/url'
 import { suggest, type Candidate } from '../shared/suggest'
-import { computeCompactZones } from '../shared/compact'
+import {
+  computeCompactWindowDrag,
+  computeCompactZones,
+  computeEdgeSnap,
+  computeRestoreDragBounds,
+  type ScreenPoint,
+  type WindowBounds
+} from '../shared/compact'
 import { resolveSleepTimeoutMs } from '../shared/sleep'
 import { WORKSPACE_ACCENTS } from '../shared/workspaces'
 import {
@@ -26,6 +33,7 @@ import {
   type PaletteMode
 } from '../shared/palette'
 import { PEEK_TAB_ID, isPeekAction } from '../shared/peek'
+import { shouldLoadExtensionsForPartition } from '../shared/extensions'
 import { Tabs } from './tabs'
 import { Store } from './store'
 import { SettingsStore } from './settings'
@@ -35,6 +43,7 @@ import { Downloads } from './downloads'
 import { Updater } from './updater'
 import { CompactPanel, MenuPopup, PalettePopup, PeekPopup } from './floating'
 import { BrowserImporter } from './importer'
+import { ExtensionManager } from './extensions'
 
 const APP_NAME = __CHANNEL__ === 'dev' ? 'Veyra Orbit Dev' : 'Veyra Orbit'
 app.setName(APP_NAME)
@@ -82,11 +91,19 @@ let store: Store | null = null
 let settings: SettingsStore | null = null
 let updater: Updater | null = null
 let importer: BrowserImporter | null = null
+let extManager: ExtensionManager | null = null
 
 /** Compact mode runtime state for the active window. */
 let compactState: CompactRevealState = { enabled: false, sidebar: false, toolbar: false }
-let compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false }
+let compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false, dragging: false, extPopup: false }
 let compactHover = { sidebar: false, toolbar: false }
+let compactDrag: {
+  startCursor: ScreenPoint
+  startBounds: WindowBounds
+  wasMaximized: boolean
+  moved: boolean
+} | null = null
+let lastNormalBounds: WindowBounds = { x: 100, y: 100, width: 1360, height: 860 }
 let lastPolledCursor: { x: number; y: number } | null = null
 let compactPoller: NodeJS.Timeout | null = null
 let sideHideTimer: NodeJS.Timeout | null = null
@@ -104,7 +121,8 @@ function isAnyOrbitFocused(): boolean {
     !!palettePopup?.isFocused() ||
     !!peekPopup?.isFocused() ||
     !!compactSidebar?.isFocused() ||
-    !!compactTitlebar?.isFocused()
+    !!compactTitlebar?.isFocused() ||
+    !!extManager?.isPopupFocused()
   )
 }
 
@@ -201,7 +219,7 @@ function handleOrbitFocusBlur(): void {
   setTimeout(() => {
     if (!win || win.isDestroyed()) return
     sendWinState()
-    if (settings?.get().compactMode && !isAnyOrbitFocused() && !compactPins.menu && !compactPins.titleMenu) {
+    if (settings?.get().compactMode && !isAnyOrbitFocused() && !compactPins.menu && !compactPins.titleMenu && !compactPins.dragging && !compactPins.extPopup) {
       compactHover = { sidebar: false, toolbar: false }
       compactPins.omnibox = false
       compactState = { enabled: true, sidebar: false, toolbar: false }
@@ -246,7 +264,7 @@ function applyCompactTargets(wantSide: boolean, wantBar: boolean): void {
   } else if (compactState.toolbar && !barHideTimer) {
     barHideTimer = setTimeout(() => {
       barHideTimer = null
-      if (!compactPins.omnibox && !compactPins.titleMenu && !compactHover.toolbar && compactState.toolbar) {
+      if (!compactPins.omnibox && !compactPins.titleMenu && !compactPins.dragging && !compactPins.extPopup && !compactHover.toolbar && compactState.toolbar) {
         compactState = { ...compactState, toolbar: false }
         broadcastUi('compact:state', compactState)
         syncCompactPanels()
@@ -267,7 +285,7 @@ function sendCompactState(force = false, focusTarget?: 'sidebar' | 'toolbar', im
     ? {
         enabled: true,
         sidebar: compactState.sidebar || compactPins.sidebar || compactPins.menu || compactHover.sidebar,
-        toolbar: compactState.toolbar || compactPins.omnibox || compactPins.titleMenu || compactHover.toolbar
+        toolbar: compactState.toolbar || compactPins.omnibox || compactPins.titleMenu || compactPins.dragging || compactPins.extPopup || compactHover.toolbar
       }
     : { enabled: false, sidebar: false, toolbar: false }
 
@@ -324,16 +342,26 @@ function pollCompactCursor(): void {
   if (!zones.insideWindow && !moved) {
     applyCompactTargets(
       compactHover.sidebar || compactPins.sidebar || compactPins.menu,
-      compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu
+      compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu || compactPins.dragging || compactPins.extPopup
     )
     return
+  }
+
+  // Clear stale DOM mouseenter flags if the real OS cursor moved outside that panel's keep-open zone
+  // (child BrowserWindows on Windows can miss mouseleave when crossing onto a native WebContentsView).
+  if (!zones.insideWindow && moved) {
+    compactHover.sidebar = false
+    compactHover.toolbar = false
+  } else if (zones.insideWindow) {
+    if (!zones.wantSidebar && compactHover.sidebar) compactHover.sidebar = false
+    if (!zones.wantToolbar && compactHover.toolbar) compactHover.toolbar = false
   }
 
   // Only reveal newly when the window is focused; keep-open or pinned states still hold cleanly.
   const sideByCursor = focused ? zones.wantSidebar : compactState.sidebar && zones.wantSidebar
   const barByCursor = focused ? zones.wantToolbar : compactState.toolbar && zones.wantToolbar
   const wantSide = sideByCursor || compactHover.sidebar || compactPins.sidebar || compactPins.menu
-  const wantBar = barByCursor || compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu
+  const wantBar = barByCursor || compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu || compactPins.dragging || compactPins.extPopup
   applyCompactTargets(wantSide, wantBar)
 }
 
@@ -341,8 +369,9 @@ function syncCompactMode(): void {
   const enabled = !!settings?.get().compactMode
   if (!enabled) {
     stopCompactPoller()
+    compactDrag = null
     compactHover = { sidebar: false, toolbar: false }
-    compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false }
+    compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false, dragging: false, extPopup: false }
     compactOmniboxOpen = false
     compactState = { enabled: false, sidebar: false, toolbar: false }
     sendCompactState(true, undefined, true)
@@ -351,7 +380,7 @@ function syncCompactMode(): void {
   compactState = {
     enabled: true,
     sidebar: compactPins.sidebar || compactPins.menu || compactHover.sidebar,
-    toolbar: compactPins.omnibox || compactPins.titleMenu || compactHover.toolbar
+    toolbar: compactPins.omnibox || compactPins.titleMenu || compactPins.dragging || compactPins.extPopup || compactHover.toolbar
   }
   sendCompactState(true)
   if (!compactPoller) {
@@ -740,7 +769,14 @@ function createWindow(): void {
     if (configuredSessions.has(sess)) return sess
     configuredSessions.add(sess)
     perms.attach(sess)
-    attachSessionCompat(sess)
+    if (shouldLoadExtensionsForPartition(partition)) {
+      // Persistent web sessions use Orbit's hidden internal DNR `orbit-compat` extension
+      // instead of session.webRequest.onBeforeSendHeaders (which disables extension DNR).
+      void extManager?.attachSession(partition, sess)
+    } else {
+      // Private (in-memory, non-persistent) workspaces NEVER load extensions; keep webRequest compat.
+      attachSessionCompat(sess)
+    }
     // Alt+click peek intercepts link SaveLinkAs before Downloads records it.
     sess.on('will-download', onAltPeekDownload)
     d.attach(sess)
@@ -896,9 +932,66 @@ function createWindow(): void {
       })
       logSmoke('peek', { event: 'open', url, sourceTabId, visible: peekPopup.isOpen() })
     },
+    onTabViewCreated: (wc, _tabId, partition) => {
+      extManager?.addTab(partition, wc, w)
+    },
+    onTabViewDestroyed: (wc, _tabId, partition) => {
+      extManager?.removeTab(partition, wc)
+    },
+    onActiveTabChanged: (wc, partition) => {
+      extManager?.selectTab(partition, wc)
+    },
+    extensionContextMenuItems: (wc, params) => {
+      return extManager?.getContextMenuItems(wc, params) ?? []
+    },
+    isLoadedExtension: (partition, extId) => {
+      return extManager?.hasLoadedExtension(partition, extId) ?? false
+    },
     quit: () => app.quit()
   })
   const t = tabs
+
+  extManager?.dispose()
+  extManager = new ExtensionManager({
+    getWindow: () => (win && !win.isDestroyed() ? win : null),
+    activePartition: () => t.activePartition(),
+    activeWebContents: () => t.activeWebContents(),
+    tabDetailsForWebContents: (wc) => t.tabDetailsForWebContents(wc),
+    createTabFromExtension: (url, opts) => t.createExtensionTab(url, opts),
+    authorizeExtensionTabNavigation: (wc, extId) => t.authorizeExtensionTabNavigation(wc, extId),
+    activateTabByWebContents: (wc) => t.activateByWebContents(wc),
+    closeTabByWebContents: (wc) => t.closeByWebContents(wc),
+    openSettingsExtensions: () => {
+      t.openInternal('orbit://settings')
+      if (win && !win.isDestroyed()) win.webContents.send('ui:settings-section', 'set-extensions')
+    },
+    onStateChanged: (st) => {
+      if (win && !win.isDestroyed()) win.webContents.send('extensions:state', st)
+    },
+    onActionsChanged: (actions) => {
+      broadcastUi('extensions:actions', actions)
+    },
+    onInstallAsksChanged: (list) => {
+      if (win && !win.isDestroyed()) win.webContents.send('extensions:install-ask', list)
+    },
+    onBeforeOpenPopup: () => {
+      menuPopup?.close()
+      palettePopup?.close()
+      peekPopup?.close()
+    },
+    onPopupOpenChange: (open) => {
+      compactPins.extPopup = open
+      if (settings?.get().compactMode) {
+        applyCompactTargets(
+          compactHover.sidebar || compactPins.sidebar || compactPins.menu,
+          compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu || compactPins.dragging || compactPins.extPopup
+        )
+      }
+      sendWinState()
+    },
+    onPopupFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur())
+  })
+  const em = extManager
 
   perms = new Permissions(
     (wc) => (peekPopup?.isContentWebContents(wc) ? PEEK_TAB_ID : t.tabIdOf(wc)),
@@ -910,7 +1003,8 @@ function createWindow(): void {
     () => {
       if (!w.isDestroyed()) w.webContents.send('permissions:saved', perms?.listSaved() ?? [])
     },
-    (tabId) => t.isPrivateTab(tabId)
+    (tabId) => t.isPrivateTab(tabId),
+    (sess, url, permission) => em.isExtensionPermissionAllowed(sess, url, permission)
   )
   const p = perms
   t.onTabGone = (id) => {
@@ -942,7 +1036,15 @@ function createWindow(): void {
     sendWinState()
     syncCompactPanels()
   })
+  w.on('restore', () => {
+    sendWinState()
+    syncCompactPanels()
+  })
   w.on('move', () => {
+    if (!w.isMaximized() && !w.isFullScreen()) lastNormalBounds = w.getBounds()
+    if (settings?.get().compactMode) syncCompactPanels()
+  })
+  w.on('moved', () => {
     if (settings?.get().compactMode) syncCompactPanels()
   })
   w.on('enter-full-screen', () => {
@@ -964,16 +1066,23 @@ function createWindow(): void {
     if (settings?.get().compactMode) syncCompactPanels()
   })
   w.on('resize', () => {
+    if (!w.isMaximized() && !w.isFullScreen()) lastNormalBounds = w.getBounds()
     t.relayout()
+    if (settings?.get().compactMode) syncCompactPanels()
+  })
+  w.on('resized', () => {
     if (settings?.get().compactMode) syncCompactPanels()
   })
   w.on('close', () => t.save())
   w.on('closed', () => {
     stopCompactPoller()
-    compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false }
+    compactDrag = null
+    compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false, dragging: false, extPopup: false }
     compactHover = { sidebar: false, toolbar: false }
     compactOmniboxOpen = false
     compactState = { enabled: false, sidebar: false, toolbar: false }
+    em.dispose()
+    if (extManager === em) extManager = null
     compactSidebar?.destroy()
     compactSidebar = null
     compactTitlebar?.destroy()
@@ -1005,8 +1114,14 @@ function createWindow(): void {
   if (process.env.ELECTRON_RENDERER_URL) void w.loadURL(`${process.env.ELECTRON_RENDERER_URL}?${new URLSearchParams(query)}`)
   else void w.loadFile(join(__dirname, '../renderer/index.html'), { query })
 
-  t.restore(s.get().startup !== 'new-tab')
-  syncCompactMode()
+  // Wait for orbit-compat DNR rules (and initial extensions) on persist:web before restoring tabs
+  // so the very first navigation already has Google sign-in / Client Hints rules active.
+  void em.whenSessionReady(WEB_PARTITION).finally(() => {
+    if (!w.isDestroyed() && tabs === t) {
+      t.restore(s.get().startup !== 'new-tab')
+      syncCompactMode()
+    }
+  })
 
   if (!updater) {
     updater = new Updater((state) => {
@@ -1087,6 +1202,11 @@ on('ready', () => {
   sendWinState()
   win.webContents.send('page-fullscreen', tabs.isPageFullscreen())
   if (updater) win.webContents.send('update:state', updater.state())
+  if (extManager) {
+    win.webContents.send('extensions:state', extManager.getState())
+    win.webContents.send('extensions:actions', extManager.getToolbarActions())
+    win.webContents.send('extensions:install-ask', extManager.listInstallAsks())
+  }
 })
 
 // Compact-mode floating panel handshake and narrow panel-specific IPC.
@@ -1105,6 +1225,9 @@ ipcMain.on('compact-panel:ready', (e) => {
     fullscreen: !!win && !win.isDestroyed() && win.isFullScreen()
   })
   if (updater) panel.send('update:state', updater.state())
+  if (extManager && panel === compactTitlebar) {
+    panel.send('extensions:actions', extManager.getToolbarActions())
+  }
 })
 ipcMain.on('compact-panel:omnibox-open', (e, open: unknown) => {
   if (!compactTitlebar?.isSender(e.sender)) return
@@ -1134,6 +1257,65 @@ ipcMain.on('compact-panel:settings-section', (e, sectionId: unknown) => {
   if (!fromCompactPanel(e) || !str(sectionId) || !tabs) return
   tabs.openInternal('orbit://settings')
   if (win && !win.isDestroyed()) win.webContents.send('ui:settings-section', sectionId)
+})
+ipcMain.on('compact-panel:drag-start', (e) => {
+  if (!compactTitlebar?.isSender(e.sender) || !win || win.isDestroyed() || win.isFullScreen()) return
+  menuPopup?.close()
+  const wasMaximized = win.isMaximized()
+  const bounds = win.getBounds()
+  if (!wasMaximized) lastNormalBounds = bounds
+  compactDrag = {
+    startCursor: screen.getCursorScreenPoint(),
+    startBounds: bounds,
+    wasMaximized,
+    moved: false
+  }
+  compactPins.dragging = true
+})
+ipcMain.on('compact-panel:drag-move', (e) => {
+  if (!compactTitlebar?.isSender(e.sender) || !compactDrag || !win || win.isDestroyed() || win.isFullScreen()) return
+  const cursor = screen.getCursorScreenPoint()
+  const dist = Math.hypot(cursor.x - compactDrag.startCursor.x, cursor.y - compactDrag.startCursor.y)
+  if (!compactDrag.moved && dist < 4) return
+
+  if (compactDrag.wasMaximized) {
+    const maxBounds = compactDrag.startBounds
+    win.unmaximize()
+    const restoredSize = { width: lastNormalBounds.width || 1200, height: lastNormalBounds.height || 800 }
+    const next = computeRestoreDragBounds(maxBounds, restoredSize, cursor)
+    win.setBounds(next)
+    compactDrag = {
+      startCursor: cursor,
+      startBounds: win.getBounds(),
+      wasMaximized: false,
+      moved: true
+    }
+    syncCompactPanels()
+    return
+  }
+
+  compactDrag.moved = true
+  const next = computeCompactWindowDrag(compactDrag.startBounds, compactDrag.startCursor, cursor)
+  win.setBounds(next)
+  syncCompactPanels()
+})
+ipcMain.on('compact-panel:drag-end', (e) => {
+  if (!compactTitlebar?.isSender(e.sender)) return
+  const drag = compactDrag
+  compactDrag = null
+  compactPins.dragging = false
+  if (drag?.moved && win && !win.isDestroyed() && !win.isFullScreen()) {
+    const cursor = screen.getCursorScreenPoint()
+    const workArea = screen.getDisplayNearestPoint(cursor).workArea
+    const snap = computeEdgeSnap(cursor, workArea)
+    if (snap.kind === 'maximize') {
+      win.maximize()
+    } else if (snap.kind === 'bounds') {
+      win.setBounds(snap.bounds)
+    }
+    syncCompactPanels()
+    sendWinState()
+  }
 })
 
 onSurface('tab:new', (t, input?: unknown) => {
@@ -1477,7 +1659,12 @@ handle('privacy:clear', async (req) => {
   const partitions = new Set<string>([WEB_PARTITION, ...(tabs?.workspacePartitions() ?? [])])
   for (const part of partitions) {
     const sess = sessionForPartition(part)
-    if (r.siteData === true) await sess.clearStorageData()
+    if (r.siteData === true) {
+      // Omit 'serviceworkers' so clearing browsing data doesn't tear down installed MV3 extension service workers.
+      await sess.clearStorageData({
+        storages: ['cookies', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'cachestorage']
+      })
+    }
     if (r.cache === true) await sess.clearCache()
   }
 })
@@ -1521,6 +1708,60 @@ onSurface('update:install', () => updater?.install())
 
 handle('import:status', () => importer?.status() ?? { profiles: [], showFirstRunPrompt: false })
 handle('import:dismiss-prompt', () => importer?.dismissPrompt())
+
+// Chrome extensions IPC: strictly gated to Orbit's own UI / compact titlebar.
+handle('extensions:get-state', () => extManager?.getState() ?? { extensions: [], developerMode: false })
+handleSurface('extensions:get-actions', () => extManager?.getToolbarActions() ?? [])
+handle('extensions:set-enabled', (id, enabled) => {
+  if (!str(id) || !extManager) return false
+  return extManager.setEnabled(id, enabled === true)
+})
+handleSurface('extensions:set-pinned', (id, pinned) => {
+  if (!str(id) || !extManager) return false
+  return extManager.setPinned(id, pinned === true)
+})
+handle('extensions:install-store', (idOrUrl) => {
+  if (!str(idOrUrl) || !extManager) return { ok: false, error: 'Invalid extension ID.' }
+  return extManager.installFromStoreById(idOrUrl)
+})
+handle('extensions:install-unpacked', async () => {
+  if (!extManager || !win || win.isDestroyed()) return { ok: false, error: 'Window unavailable.' }
+  if (!extManager.getState().developerMode) return { ok: false, error: 'Enable Developer mode first.' }
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Load unpacked extension',
+    properties: ['openDirectory']
+  })
+  if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true }
+  return extManager.loadUnpackedFromDirectory(result.filePaths[0])
+})
+handle('extensions:uninstall', (id) => {
+  if (!str(id) || !extManager) return false
+  return extManager.uninstall(id)
+})
+on('extensions:open-options', (_t, id: unknown) => {
+  if (str(id)) extManager?.openOptions(id)
+})
+handle('extensions:set-dev-mode', (enabled) => {
+  if (!extManager) return false
+  return extManager.setDeveloperMode(enabled === true)
+})
+on('extensions:install-answer', (_t, requestId: unknown, allow: unknown) => {
+  if (str(requestId)) extManager?.answerInstallAsk(requestId, allow === true)
+})
+ipcMain.on('extensions:action-click', (e, id: unknown, rawRect: unknown) => {
+  if (!fromUiSurface(e) || !str(id) || !extManager) return
+  const r = rawRect as Partial<Rect> | null
+  if (!r || !num(r.x) || !num(r.y) || !num(r.width) || !num(r.height)) return
+  const offset = compactTitlebar?.isSender(e.sender) ? compactTitlebar.offsetCss() : { x: 0, y: 0 }
+  extManager.activateAction(id, { x: r.x + offset.x, y: r.y + offset.y, width: r.width, height: r.height })
+})
+ipcMain.on('extensions:action-context-menu', (e, id: unknown, rawRect: unknown) => {
+  if (!fromUiSurface(e) || !str(id) || !extManager) return
+  const r = rawRect as Partial<Rect> | null
+  if (!r || !num(r.x) || !num(r.y) || !num(r.width) || !num(r.height)) return
+  const offset = compactTitlebar?.isSender(e.sender) ? compactTitlebar.offsetCss() : { x: 0, y: 0 }
+  extManager.openActionContextMenu(id, { x: r.x + offset.x, y: r.y + offset.y, width: r.width, height: r.height })
+})
 handle('import:run', (raw) => {
   if (!importer || !store || !raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return {

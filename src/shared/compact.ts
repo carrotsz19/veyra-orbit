@@ -58,6 +58,93 @@ export function computeCompactZones(input: CompactZoneInput): CompactZoneResult 
   return { insideWindow: true, wantSidebar, wantToolbar }
 }
 
+export interface WindowBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface ScreenPoint {
+  x: number
+  y: number
+}
+
+/**
+ * Computes the next main-window bounds while dragging from the floating compact titlebar.
+ * Preserves the exact initial width and height so Windows DPI scaling never drifts window size.
+ */
+export function computeCompactWindowDrag(
+  startBounds: WindowBounds,
+  startCursor: ScreenPoint,
+  cursor: ScreenPoint
+): WindowBounds {
+  const dx = Math.round(cursor.x - startCursor.x)
+  const dy = Math.round(cursor.y - startCursor.y)
+  return {
+    x: Math.round(startBounds.x + dx),
+    y: Math.round(startBounds.y + dy),
+    width: Math.round(startBounds.width),
+    height: Math.round(startBounds.height)
+  }
+}
+
+/**
+ * Computes where a restored window should be positioned when the user starts dragging
+ * a maximized window by the compact titlebar: keeps the cursor at the same horizontal
+ * proportion across the titlebar and near the top bar vertically.
+ */
+export function computeRestoreDragBounds(
+  maximizedBounds: WindowBounds,
+  restoredSize: { width: number; height: number },
+  cursor: ScreenPoint,
+  titlebarOffsetY = 20
+): WindowBounds {
+  const maxW = Math.max(1, maximizedBounds.width)
+  const ratio = Math.min(0.92, Math.max(0.08, (cursor.x - maximizedBounds.x) / maxW))
+  return {
+    x: Math.round(cursor.x - restoredSize.width * ratio),
+    y: Math.round(cursor.y - titlebarOffsetY),
+    width: Math.round(restoredSize.width),
+    height: Math.round(restoredSize.height)
+  }
+}
+
+export type EdgeSnapResult =
+  | { kind: 'none' }
+  | { kind: 'maximize' }
+  | { kind: 'bounds'; bounds: WindowBounds }
+
+/**
+ * Evaluates Aero-style screen-edge snap when releasing a compact-titlebar window drag:
+ * top edge maximizes, left edge snaps left half, right edge snaps right half.
+ */
+export function computeEdgeSnap(
+  cursor: ScreenPoint,
+  workArea: WindowBounds,
+  thresholdPx = 4
+): EdgeSnapResult {
+  if (workArea.width <= 0 || workArea.height <= 0) return { kind: 'none' }
+  if (cursor.y <= workArea.y + thresholdPx) {
+    return { kind: 'maximize' }
+  }
+  if (cursor.x <= workArea.x + thresholdPx) {
+    const half = Math.floor(workArea.width / 2)
+    return {
+      kind: 'bounds',
+      bounds: { x: workArea.x, y: workArea.y, width: half, height: workArea.height }
+    }
+  }
+  if (cursor.x >= workArea.x + workArea.width - thresholdPx) {
+    const half = Math.floor(workArea.width / 2)
+    return {
+      kind: 'bounds',
+      bounds: { x: workArea.x + workArea.width - half, y: workArea.y, width: half, height: workArea.height }
+    }
+  }
+  return { kind: 'none' }
+}
+
 export interface ScrollSection {
   id: string
   /** Section top relative to the scroll container's visible top edge (px). */

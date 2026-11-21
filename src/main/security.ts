@@ -36,7 +36,8 @@ export class Permissions {
     private publish: (asks: PermissionAsk[]) => void,
     private store?: PermissionStore,
     private onSavedChanged: () => void = () => {},
-    private isPrivateTab: (tabId: number | null) => boolean = () => false
+    private isPrivateTab: (tabId: number | null) => boolean = () => false,
+    private isExtensionPermissionAllowed: (sess: Session, url: string, permission: string) => boolean = () => false
   ) {
     if (store) {
       for (const row of store.permissions()) {
@@ -47,8 +48,12 @@ export class Permissions {
 
   attach(sess: Session): void {
     sess.setPermissionRequestHandler((wc, permission, callback, details) => {
-      const origin = normalizePermissionOrigin(details.requestingUrl || wc.getURL())
+      const reqUrl = details.requestingUrl || wc.getURL()
       if (ALWAYS.has(permission)) return callback(true)
+      if (reqUrl.startsWith('chrome-extension://')) {
+        return callback(this.isExtensionPermissionAllowed(sess, reqUrl, permission))
+      }
+      const origin = normalizePermissionOrigin(reqUrl)
       if (!origin || !ASKABLE.has(permission)) return callback(false)
       const tabId = this.tabIdOf(wc)
       const isPrivate = this.isPrivateTab(tabId)
@@ -69,6 +74,9 @@ export class Permissions {
     })
     sess.setPermissionCheckHandler((wc, permission, requestingOrigin) => {
       if (ALWAYS.has(permission)) return true
+      if (requestingOrigin.startsWith('chrome-extension://')) {
+        return this.isExtensionPermissionAllowed(sess, requestingOrigin, permission)
+      }
       if (wc && this.isPrivateTab(this.tabIdOf(wc))) return false
       return this.answers.get(`${normalizePermissionOrigin(requestingOrigin)}|${permission}`) === true
     })

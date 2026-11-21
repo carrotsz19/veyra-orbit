@@ -1,6 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { computeCompactZones, pickActiveSection } from '../src/shared/compact.ts'
+import {
+  computeCompactWindowDrag,
+  computeCompactZones,
+  computeEdgeSnap,
+  computeRestoreDragBounds,
+  pickActiveSection
+} from '../src/shared/compact.ts'
 
 test('computeCompactZones triggers sidebar at left edge and toolbar at top edge with hysteresis', () => {
   // Middle of page: nothing revealed
@@ -61,4 +67,36 @@ test('pickActiveSection picks section nearest top and picks last section when sc
     { id: 'set-appearance', top: 320 }
   ]
   assert.equal(pickActiveSection(atTop, 0, 760, 2000, 56), 'set-general')
+})
+
+test('computeCompactWindowDrag moves window by screen delta while preserving exact size', () => {
+  const start = { x: 100, y: 80, width: 1280, height: 820 }
+  assert.deepEqual(
+    computeCompactWindowDrag(start, { x: 400, y: 100 }, { x: 560, y: 145 }),
+    { x: 260, y: 125, width: 1280, height: 820 }
+  )
+  assert.deepEqual(
+    computeCompactWindowDrag(start, { x: 400, y: 100 }, { x: 250, y: 50 }),
+    { x: -50, y: 30, width: 1280, height: 820 }
+  )
+})
+
+test('computeRestoreDragBounds centers restored window proportionally under cursor', () => {
+  const maxBounds = { x: 0, y: 0, width: 1920, height: 1040 }
+  const restored = computeRestoreDragBounds(maxBounds, { width: 1200, height: 800 }, { x: 960, y: 24 }, 20)
+  assert.deepEqual(restored, { x: 360, y: 4, width: 1200, height: 800 })
+})
+
+test('computeEdgeSnap detects top maximize and left/right half-screen snaps', () => {
+  const wa = { x: 0, y: 0, width: 1920, height: 1040 }
+  assert.deepEqual(computeEdgeSnap({ x: 800, y: 2 }, wa), { kind: 'maximize' })
+  assert.deepEqual(computeEdgeSnap({ x: 2, y: 400 }, wa), {
+    kind: 'bounds',
+    bounds: { x: 0, y: 0, width: 960, height: 1040 }
+  })
+  assert.deepEqual(computeEdgeSnap({ x: 1918, y: 400 }, wa), {
+    kind: 'bounds',
+    bounds: { x: 960, y: 0, width: 960, height: 1040 }
+  })
+  assert.deepEqual(computeEdgeSnap({ x: 900, y: 400 }, wa), { kind: 'none' })
 })

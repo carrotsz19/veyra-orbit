@@ -219,6 +219,31 @@ html.compact-panel-win #root {
   grid-column: auto;
   -webkit-app-region: no-drag;
 }
+.wb-win-btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  flex: none;
+  -webkit-app-region: no-drag;
+}
+.wb-win-btn {
+  width: 30px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--label-secondary);
+  transition: background-color 0.12s, color 0.12s;
+}
+.wb-win-btn:hover {
+  background: var(--fill-hover);
+  color: var(--label-primary);
+}
+.wb-win-btn.close:hover {
+  background: #c42b1c;
+  color: #fff;
+}
 .compact-float-bar .omni-list {
   z-index: 100;
 }

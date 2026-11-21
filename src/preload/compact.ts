@@ -8,6 +8,8 @@ import type {
   CompactPinKind,
   CompactRevealState,
   DownloadInfo,
+  ExtensionActionView,
+  Rect,
   SettingsView,
   UpdateState,
   VeyraCompactPanelApi,
@@ -87,6 +89,13 @@ const uiSubset = {
     onPicked: (cb: (id: string) => void) => listen<string>('menu:picked', cb),
     onClosed: (cb: () => void) => listen<void>('menu:closed', () => cb()),
     onStep: (cb: (by: -1 | 1) => void) => listen<-1 | 1>('menu:step', cb)
+  },
+  extensions: {
+    onActions: (cb: (actions: ExtensionActionView[]) => void) => listen<ExtensionActionView[]>('extensions:actions', cb),
+    getActions: () => ipcRenderer.invoke('extensions:get-actions') as Promise<ExtensionActionView[]>,
+    setPinned: (id: string, pinned: boolean) => ipcRenderer.invoke('extensions:set-pinned', id, pinned) as Promise<boolean>,
+    clickAction: (id: string, anchorRect: Rect) => ipcRenderer.send('extensions:action-click', id, anchorRect),
+    contextMenuAction: (id: string, anchorRect: Rect) => ipcRenderer.send('extensions:action-context-menu', id, anchorRect)
   }
 }
 
@@ -96,7 +105,10 @@ const panelApi: VeyraCompactPanelApi = {
   onNewWorkspace: (cb) => listen<void>('ui:new-workspace', () => cb()),
   requestNewWorkspace: () => ipcRenderer.send('compact-panel:new-workspace'),
   openSettingsSection: (sectionId) => ipcRenderer.send('compact-panel:settings-section', sectionId),
-  setOmniboxOpen: (open) => ipcRenderer.send('compact-panel:omnibox-open', open)
+  setOmniboxOpen: (open) => ipcRenderer.send('compact-panel:omnibox-open', open),
+  startWindowDrag: () => ipcRenderer.send('compact-panel:drag-start'),
+  moveWindowDrag: () => ipcRenderer.send('compact-panel:drag-move'),
+  endWindowDrag: () => ipcRenderer.send('compact-panel:drag-end')
 }
 
 contextBridge.exposeInMainWorld('veyra', uiSubset)

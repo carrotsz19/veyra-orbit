@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BrowserState, DownloadInfo, SettingsView, TabInfo, UpdateState, WindowState } from '@shared/types'
+import '../extensions.css'
 import { Sidebar } from './Sidebar'
 import { TitleBar } from './TitleBar'
 
@@ -27,6 +28,7 @@ export function CompactSidebarWindow(): React.JSX.Element {
   const [update, setUpdate] = useState<UpdateState | null>(null)
   const [dismissedUpdateVer, setDismissedUpdateVer] = useState<string | null>(null)
   const [sidebarEditing, setSidebarEditing] = useState(false)
+  const [draggingTab, setDraggingTab] = useState(false)
   const [newWorkspaceTick, setNewWorkspaceTick] = useState(0)
   const [visible, setVisible] = useState(false)
   const maxDownloadId = useRef(0)
@@ -59,8 +61,8 @@ export function CompactSidebarWindow(): React.JSX.Element {
   }, [panel])
 
   useEffect(() => {
-    api.setCompactPin('sidebar', downloadsOpen || sidebarEditing)
-  }, [downloadsOpen, sidebarEditing])
+    api.setCompactPin('sidebar', downloadsOpen || sidebarEditing || draggingTab)
+  }, [downloadsOpen, sidebarEditing, draggingTab])
 
   const activeWorkspace = state.workspaces.find((w) => w.id === state.activeWorkspaceId)
   const updateKey = update?.availableVersion ?? (update?.status === 'ready' ? '__ready__' : null)
@@ -81,6 +83,7 @@ export function CompactSidebarWindow(): React.JSX.Element {
           onDismissUpdate={() => setDismissedUpdateVer(updateKey)}
           onEditorOpenChange={setSidebarEditing}
           onPointerEdge={(inside) => api.setCompactHover('sidebar', inside)}
+          onDragTabChange={(id) => setDraggingTab(id !== null)}
           openNewWorkspaceTick={newWorkspaceTick}
         />
       </div>
@@ -122,6 +125,54 @@ export function CompactTitlebarWindow(): React.JSX.Element {
   const active: TabInfo | undefined = state.tabs.find((t) => t.id === state.activeId)
   const activeWorkspace = state.workspaces.find((w) => w.id === state.activeWorkspaceId)
   const noopShot = useCallback((): void => {}, [])
+  const draggingRef = useRef(false)
+  const moveRafRef = useRef(0)
+
+  useEffect(() => {
+    const finishDrag = (): void => {
+      if (!draggingRef.current) return
+      draggingRef.current = false
+      if (moveRafRef.current) {
+        cancelAnimationFrame(moveRafRef.current)
+        moveRafRef.current = 0
+      }
+      panel.endWindowDrag()
+    }
+    const onPointerMove = (): void => {
+      if (!draggingRef.current) return
+      if (!moveRafRef.current) {
+        moveRafRef.current = requestAnimationFrame(() => {
+          moveRafRef.current = 0
+          if (draggingRef.current) panel.moveWindowDrag()
+        })
+      }
+    }
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', finishDrag)
+    window.addEventListener('pointercancel', finishDrag)
+    window.addEventListener('blur', finishDrag)
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', finishDrag)
+      window.removeEventListener('pointercancel', finishDrag)
+      window.removeEventListener('blur', finishDrag)
+      finishDrag()
+    }
+  }, [panel])
+
+  const handleCompactDragStart = useCallback(
+    (e: React.PointerEvent<HTMLElement>): void => {
+      e.preventDefault()
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId)
+      } catch {
+        /* ignore if capture unavailable */
+      }
+      draggingRef.current = true
+      panel.startWindowDrag()
+    },
+    [panel]
+  )
 
   return (
     <div
@@ -141,6 +192,9 @@ export function CompactTitlebarWindow(): React.JSX.Element {
           onPointerEdge={(inside) => api.setCompactHover('toolbar', inside)}
           onNewWorkspace={() => panel.requestNewWorkspace()}
           onOpenSettingsSection={(sectionId) => panel.openSettingsSection(sectionId)}
+          inCompactPanel
+          onCompactDragStart={handleCompactDragStart}
+          onCompactDragDoubleClick={() => api.winCmd('maximize')}
         />
       </div>
     </div>
