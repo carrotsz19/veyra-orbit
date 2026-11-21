@@ -4,6 +4,8 @@ All notable changes to Veyra Orbit are documented here.
 
 ## Unreleased
 
+## 26.11.5 — 2026-11-21
+
 - Extensions: install Chrome extensions from the Chrome Web Store ("Add to Veyra Orbit"). Orbit shows what an extension can do, in plain words, before adding it. Extensions work straight away, have buttons in the title bar, and are managed in Settings → Extensions (on/off, remove, permissions, memory use). Private workspaces never run extensions. Some extensions won't fully work, because Orbit doesn't support every Chrome feature (for example side panels).
 - Compact mode: you can drag the window by the title bar that slides in, double-click it to maximise, and its window buttons work.
 - Google sign-in: a brand-new install may be turned away the first time or two; trying again works.
