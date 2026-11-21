@@ -44,10 +44,14 @@ These are planned for, not surprises:
 - [x] Tabs restored on launch, loading only when opened
 - [x] Address bar suggestions (searches, open tabs, bookmarks, history). The page is swapped for a snapshot while they're open.
 - [x] History (orbit://history, Ctrl+H)
-- [ ] Downloads panel (for now, Electron's own Save dialog)
+- [x] Downloads panel in the sidebar (Ctrl+J): pause, resume, cancel, open, show in folder. Programs and scripts are only ever shown in their folder.
 - [x] Bookmarks (star, Ctrl+D, orbit://bookmarks)
-- [ ] Find in page (Ctrl+F)
-- [ ] Settings page (search engine, theme)
+- [x] Find in page (Ctrl+F, F3) and zoom indicator
+- [ ] Settings page, orbit://settings: search engine, theme, what opens at start, downloads folder, and clearing cookies, cache and site data
+- [ ] Remember permission answers per site, with a way to change them in Settings
+- [ ] Full screen video (the sidebar and toolbar hide), tab sound indicator and mute
+- [ ] Print (Ctrl+P) and the built-in PDF viewer
+- [ ] Ask before a page opens another app (mailto:, zoommtg:, ...)
 - [x] Electron fuses: cookie encryption on, RunAsNode, NODE_OPTIONS and `--inspect` off, only-load-from-asar and asar integrity on (`build.electronFuses`). File-protocol privileges stay on until the UI moves to a custom protocol.
 - [ ] Dev/Prod channels and auto-update, like Veyra Study, each with its own token
 - [ ] Check Google sign-in, YouTube, Google Docs and Classroom
