@@ -6,9 +6,26 @@ const q = new URLSearchParams(location.search)
 document.documentElement.dataset.material = q.get('material') === 'acrylic' ? 'acrylic' : 'solid'
 document.documentElement.dataset.platform = q.get('platform') ?? 'win32'
 
-if (q.get('view') === 'menu') {
+const view = q.get('view')
+if (view === 'menu') {
   void import('./components/MenuWindow').then(({ MenuWindow }) => {
     createRoot(document.getElementById('root')!).render(<MenuWindow />)
+  })
+} else if (view === 'compact-sidebar') {
+  void import('./components/CompactPanels').then(({ CompactSidebarWindow }) => {
+    createRoot(document.getElementById('root')!).render(<CompactSidebarWindow />)
+  })
+} else if (view === 'compact-titlebar') {
+  void import('./components/CompactPanels').then(({ CompactTitlebarWindow }) => {
+    createRoot(document.getElementById('root')!).render(<CompactTitlebarWindow />)
+  })
+} else if (view === 'palette') {
+  void import('./components/PaletteWindow').then(({ PaletteWindow }) => {
+    createRoot(document.getElementById('root')!).render(<PaletteWindow />)
+  })
+} else if (view === 'peek') {
+  void import('./components/PeekWindow').then(({ PeekWindow }) => {
+    createRoot(document.getElementById('root')!).render(<PeekWindow />)
   })
 } else {
   if (__CHANNEL__ === 'dev') document.title = 'Veyra Orbit Dev'

@@ -12,11 +12,15 @@ const api = window.veyra
 export function Omnibox({
   tab,
   onPageShot,
-  onEditingChange
+  onEditingChange,
+  onOpenChange,
+  useOverlay = true
 }: {
   tab?: TabInfo
-  onPageShot: (shot: string | null) => void
+  onPageShot: (shots: Record<number, string> | null) => void
   onEditingChange?: (editing: boolean) => void
+  onOpenChange?: (open: boolean) => void
+  useOverlay?: boolean
 }): React.JSX.Element {
   const input = useRef<HTMLInputElement>(null)
   const [editing, setEditing] = useState(false)
@@ -51,14 +55,19 @@ export function Omnibox({
 
   const open = editing && list.length > 0
 
+  useEffect(() => {
+    onOpenChange?.(open)
+  }, [open, onOpenChange])
+
   // Take the page out (showing its picture) while the list is open; put it back after.
   useEffect(() => {
+    if (!useOverlay) return
     wantOverlay.current = open
     if (open && !overlayOn.current) {
       overlayOn.current = true
-      void api.overlay(true).then((shot) => {
+      void api.overlay(true).then((shots) => {
         if (!wantOverlay.current) return
-        onPageShot(shot)
+        onPageShot(shots)
         // Two frames: the picture is on screen before the real page goes.
         requestAnimationFrame(() => requestAnimationFrame(() => wantOverlay.current && api.hidePageForOverlay()))
       })
@@ -66,7 +75,7 @@ export function Omnibox({
       overlayOn.current = false
       void api.overlay(false).then(() => onPageShot(null))
     }
-  }, [open, onPageShot])
+  }, [open, onPageShot, useOverlay])
 
   const lookup = (value: string): void => {
     const n = ++query.current

@@ -16,6 +16,7 @@ export const SEARCH_ENGINES = [
 export type SearchEngineId = (typeof SEARCH_ENGINES)[number]['id']
 export type ThemeSource = 'system' | 'light' | 'dark'
 export type StartupBehavior = 'restore' | 'new-tab'
+export type NewTabBehavior = 'start-page' | 'command-bar'
 export type WindowButtonsStyle = 'windows' | 'dots'
 export type { SleepMinutes }
 
@@ -23,6 +24,8 @@ export interface Settings {
   searchEngine: SearchEngineId
   theme: ThemeSource
   startup: StartupBehavior
+  /** What Ctrl+T / New tab opens: the start page or the floating Ctrl+K command bar. */
+  newTabBehavior: NewTabBehavior
   /** Custom downloads folder path, or '' to use the system Downloads folder. */
   downloadsDir: string
   askWhereToSave: boolean
@@ -51,6 +54,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   searchEngine: 'google',
   theme: 'system',
   startup: 'restore',
+  newTabBehavior: 'start-page',
   downloadsDir: '',
   askWhereToSave: false,
   compactMode: false,
@@ -62,6 +66,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
 const ENGINE_MAP = new Map<string, string>(SEARCH_ENGINES.map((e) => [e.id, e.url]))
 const THEMES = new Set<string>(['system', 'light', 'dark'])
 const STARTUPS = new Set<string>(['restore', 'new-tab'])
+const NEW_TAB_BEHAVIORS = new Set<string>(['start-page', 'command-bar'])
 const SLEEP_SET = new Set<number>(SLEEP_MINUTES_OPTIONS)
 const WINDOW_BUTTONS = new Set<string>(['windows', 'dots'])
 
@@ -75,6 +80,10 @@ export function isThemeSource(v: unknown): v is ThemeSource {
 
 export function isStartupBehavior(v: unknown): v is StartupBehavior {
   return typeof v === 'string' && STARTUPS.has(v)
+}
+
+export function isNewTabBehavior(v: unknown): v is NewTabBehavior {
+  return typeof v === 'string' && NEW_TAB_BEHAVIORS.has(v)
 }
 
 export function isSleepMinutes(v: unknown): v is SleepMinutes {
@@ -105,6 +114,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     searchEngine: isSearchEngineId(raw.searchEngine) ? raw.searchEngine : DEFAULT_SETTINGS.searchEngine,
     theme: isThemeSource(raw.theme) ? raw.theme : DEFAULT_SETTINGS.theme,
     startup: isStartupBehavior(raw.startup) ? raw.startup : DEFAULT_SETTINGS.startup,
+    newTabBehavior: isNewTabBehavior(raw.newTabBehavior) ? raw.newTabBehavior : DEFAULT_SETTINGS.newTabBehavior,
     downloadsDir: isValidPath(raw.downloadsDir) ? raw.downloadsDir.trim() : DEFAULT_SETTINGS.downloadsDir,
     askWhereToSave: typeof raw.askWhereToSave === 'boolean' ? raw.askWhereToSave : DEFAULT_SETTINGS.askWhereToSave,
     compactMode: typeof raw.compactMode === 'boolean' ? raw.compactMode : DEFAULT_SETTINGS.compactMode,
@@ -122,6 +132,7 @@ export function mergeSettings(current: Settings, patch: unknown): Settings {
   if (own('searchEngine') && isSearchEngineId(patch.searchEngine)) next.searchEngine = patch.searchEngine
   if (own('theme') && isThemeSource(patch.theme)) next.theme = patch.theme
   if (own('startup') && isStartupBehavior(patch.startup)) next.startup = patch.startup
+  if (own('newTabBehavior') && isNewTabBehavior(patch.newTabBehavior)) next.newTabBehavior = patch.newTabBehavior
   if (own('downloadsDir') && isValidPath(patch.downloadsDir)) next.downloadsDir = patch.downloadsDir.trim()
   if (own('askWhereToSave') && typeof patch.askWhereToSave === 'boolean') next.askWhereToSave = patch.askWhereToSave
   if (own('compactMode') && typeof patch.compactMode === 'boolean') next.compactMode = patch.compactMode

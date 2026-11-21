@@ -1,5 +1,16 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { BrowserState, CompactRevealState, DownloadInfo, ExternalAppAsk, PermissionAsk, SettingsView, TabInfo, UpdateState, WindowState } from '@shared/types'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type {
+  BrowserState,
+  CompactRevealState,
+  DownloadInfo,
+  ExternalAppAsk,
+  PermissionAsk,
+  SettingsView,
+  TabInfo,
+  UpdateState,
+  WindowState
+} from '@shared/types'
+import { DEFAULT_SPLIT_RATIO, computeSplitLayout, findSplitGroup, ratioFromPointer } from '@shared/split'
 import './library.css'
 import './settings.css'
 import { Sidebar } from './components/Sidebar'
@@ -16,11 +27,27 @@ const api = window.veyra
 const INITIAL_STATE: BrowserState = {
   tabs: [],
   activeId: null,
+  splits: [],
   workspaces: [],
   activeWorkspaceId: 'personal',
   tabCounts: {},
   workspaceSwitchDir: 0,
   canReopenClosed: false
+}
+
+function renderTabSurface(
+  tab: TabInfo,
+  settings: SettingsView | null,
+  update: UpdateState | null,
+  shot?: string
+): React.JSX.Element | null {
+  if (!tab.url) return <StartPage tabId={tab.id} />
+  if (tab.url === 'orbit://history') return <HistoryPage key={tab.id} tabId={tab.id} />
+  if (tab.url === 'orbit://bookmarks') return <BookmarksPage key={tab.id} tabId={tab.id} />
+  if (tab.url === 'orbit://settings') return <SettingsPage key={tab.id} settings={settings} update={update} />
+  if (tab.error) return <ErrorPage tab={tab} />
+  if (shot) return <img className="page-shot" src={shot} alt="" />
+  return null
 }
 
 export function App(): React.JSX.Element {
@@ -40,11 +67,18 @@ export function App(): React.JSX.Element {
   const [findOpen, setFindOpen] = useState(false)
   const [findFocusTick, setFindFocusTick] = useState(0)
   const [pageFullscreen, setPageFullscreen] = useState(false)
-  /** A picture of the page, shown in its place while floating UI (suggestions) is open over it. */
-  const [shot, setShot] = useState<string | null>(null)
+  /** Screenshots of visible panes while an in-window overlay (omnibox list or tab-drag drop zone) is open. */
+  const [shots, setShots] = useState<Record<number, string> | null>(null)
+  const [pageSize, setPageSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 })
+  const [dragTabId, setDragTabId] = useState<number | null>(null)
+  const [dropSide, setDropSide] = useState<'left' | 'right' | null>(null)
+  const [resizingKind, setResizingKind] = useState<'col' | 'row' | null>(null)
   const pageRef = useRef<HTMLDivElement>(null)
   const pageFullscreenRef = useRef(false)
   const maxDownloadId = useRef(0)
+  const dragOverlayActive = useRef(false)
+  const dragTabRef = useRef<number | null>(null)
+  dragTabRef.current = dragTabId
 
   useEffect(() => {
     const offs = [
@@ -71,7 +105,12 @@ export function App(): React.JSX.Element {
         setFindFocusTick((n) => n + 1)
       }),
       api.onFindClose(() => setFindOpen(false)),
-      api.onPageFullscreen(setPageFullscreen)
+      api.onPageFullscreen(setPageFullscreen),
+      api.onNewWorkspaceRequest(() => setNewWorkspaceTick((n) => n + 1)),
+      api.onOpenSettingsSection((sectionId) => {
+        sessionStorage.setItem('orbit.settingsSection', sectionId)
+        window.dispatchEvent(new CustomEvent('orbit:settings-section', { detail: sectionId }))
+      })
     ]
     api.ready()
     return () => offs.forEach((off) => off())
@@ -86,11 +125,29 @@ export function App(): React.JSX.Element {
     api.setCompactPin('omnibox', omniboxEditing)
   }, [omniboxEditing])
 
+  // While dragging a tab from the sidebar, temporarily swap native page views for screenshots
+  // so HTML5 dragover/drop events reach `.page` cleanly to split left or right.
+  useEffect(() => {
+    if (dragTabId !== null && !dragOverlayActive.current) {
+      dragOverlayActive.current = true
+      void api.overlay(true).then((captured) => {
+        if (dragTabRef.current === null) return
+        setShots(captured)
+        requestAnimationFrame(() => requestAnimationFrame(() => dragTabRef.current !== null && api.hidePageForOverlay()))
+      })
+    } else if (dragTabId === null && dragOverlayActive.current) {
+      dragOverlayActive.current = false
+      setDropSide(null)
+      void api.overlay(false).then(() => setShots(null))
+    }
+  }, [dragTabId])
+
   const sendBounds = useCallback((): void => {
     if (pageFullscreenRef.current) return
     const el = pageRef.current
     if (!el) return
     const r = el.getBoundingClientRect()
+    setPageSize((prev) => (prev.width === Math.round(r.width) && prev.height === Math.round(r.height) ? prev : { width: Math.round(r.width), height: Math.round(r.height) }))
     api.setBounds({ x: r.left, y: r.top, width: r.width, height: r.height })
   }, [])
 
@@ -112,12 +169,32 @@ export function App(): React.JSX.Element {
     pageFullscreenRef.current = pageFullscreen
     if (pageFullscreen) return
     sendBounds()
-  }, [pageFullscreen, compact.enabled, compact.sidebar, compact.toolbar, sendBounds])
+  }, [pageFullscreen, compact.enabled, sendBounds])
 
   const active: TabInfo | undefined = state.tabs.find((t) => t.id === state.activeId)
+  const activeSplit = useMemo(() => findSplitGroup(state.splits, state.activeId), [state.splits, state.activeId])
+  const visiblePanes: TabInfo[] = useMemo(() => {
+    if (!active) return []
+    if (!activeSplit) return [active]
+    const byId = new Map(state.tabs.map((t) => [t.id, t]))
+    const list = activeSplit.tabIds.map((id) => byId.get(id)).filter((t): t is TabInfo => !!t)
+    return list.length >= 2 ? list : [active]
+  }, [active, activeSplit, state.tabs])
+  const isSplitView = visiblePanes.length >= 2 && !!activeSplit && !pageFullscreen
+
+  const splitLayout = useMemo(() => {
+    if (!isSplitView || !activeSplit || pageSize.width <= 0 || pageSize.height <= 0) return null
+    return computeSplitLayout(
+      { x: 0, y: 0, width: pageSize.width, height: pageSize.height },
+      visiblePanes.length,
+      { colRatio: activeSplit.colRatio, rowRatio: activeSplit.rowRatio }
+    )
+  }, [isSplitView, activeSplit, pageSize.width, pageSize.height, visiblePanes.length])
+
+  const visibleTabIds = useMemo(() => new Set(visiblePanes.map((t) => t.id)), [visiblePanes])
   const activeWorkspace = state.workspaces.find((w) => w.id === state.activeWorkspaceId)
-  const tabAsks = asks.filter((a) => a.tabId === null || a.tabId === state.activeId)
-  const tabExternalAsks = externalAsks.filter((a) => a.tabId === null || a.tabId === state.activeId)
+  const tabAsks = asks.filter((a) => a.tabId === null || a.tabId === -1 || visibleTabIds.has(a.tabId))
+  const tabExternalAsks = externalAsks.filter((a) => a.tabId === null || a.tabId === -1 || visibleTabIds.has(a.tabId))
 
   const updateKey = update?.availableVersion ?? (update?.status === 'ready' ? '__ready__' : null)
   const showUpdateNote = update?.status === 'ready' && dismissedUpdateVer !== updateKey
@@ -132,35 +209,85 @@ export function App(): React.JSX.Element {
     window.dispatchEvent(new CustomEvent('orbit:settings-section', { detail: sectionId }))
   }, [])
 
-  const compactClasses = compact.enabled
-    ? `compact ${compact.sidebar ? 'reveal-side' : ''} ${compact.toolbar ? 'reveal-bar' : ''}`
-    : ''
+  const startDividerDrag = (e: React.PointerEvent<HTMLDivElement>, groupId: string, kind: 'col' | 'row'): void => {
+    if (e.button !== 0 || !pageRef.current) return
+    e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    setResizingKind(kind)
+    const rect = pageRef.current.getBoundingClientRect()
+    const updateFromEvent = (ev: PointerEvent): void => {
+      const next =
+        kind === 'col'
+          ? ratioFromPointer(ev.clientX, rect.left, rect.width)
+          : ratioFromPointer(ev.clientY, rect.top, rect.height)
+      api.setSplitRatio(groupId, kind, next)
+    }
+    const onMove = (ev: PointerEvent): void => updateFromEvent(ev)
+    const onUp = (): void => {
+      setResizingKind(null)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+  }
+
+  const handlePageDragOver = (e: React.DragEvent<HTMLDivElement>): void => {
+    if (dragTabId === null || state.activeId === null) return
+    if (dragTabId === state.activeId && !activeSplit) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    const rect = e.currentTarget.getBoundingClientRect()
+    const side: 'left' | 'right' = e.clientX - rect.left < rect.width / 2 ? 'left' : 'right'
+    if (side !== dropSide) setDropSide(side)
+  }
+
+  const handlePageDrop = (e: React.DragEvent<HTMLDivElement>): void => {
+    e.preventDefault()
+    const raw = e.dataTransfer.getData('text/x-orbit-tab')
+    const droppedId = dragTabId ?? (raw ? Number(raw) : null)
+    const side = dropSide ?? 'right'
+    setDropSide(null)
+    setDragTabId(null)
+    if (droppedId === null || !Number.isFinite(droppedId) || state.activeId === null) return
+    if (droppedId === state.activeId) {
+      if (activeSplit) api.swapSplit(activeSplit.id)
+      return
+    }
+    api.splitWith(state.activeId, droppedId, side)
+  }
+
+  // In compact mode, the main window always keeps the page full-size; sidebar and titlebar
+  // float above the page in dedicated overlay windows so the page never jumps or resizes.
+  const compactClasses = compact.enabled ? 'compact' : ''
 
   return (
     <div
       className={`shell ${pageFullscreen ? 'fullscreen' : ''} ${compactClasses}`}
       data-ws-accent={activeWorkspace?.accent ?? 'clay'}
     >
-      {compact.enabled && !pageFullscreen && !compact.sidebar && (
-        <div
-          className="compact-edge compact-edge-left"
-          aria-hidden
-          onMouseEnter={() => api.setCompactHover('sidebar', true)}
-        />
-      )}
-      {compact.enabled && !pageFullscreen && !compact.toolbar && (
-        <div
-          className="compact-edge compact-edge-top"
-          aria-hidden
-          onMouseEnter={() => api.setCompactHover('toolbar', true)}
-        />
+      {compact.enabled && !pageFullscreen && (
+        <>
+          <div
+            className="compact-edge compact-edge-left"
+            aria-hidden
+            onMouseEnter={() => api.setCompactHover('sidebar', true)}
+          />
+          <div
+            className="compact-edge compact-edge-top"
+            aria-hidden
+            onMouseEnter={() => api.setCompactHover('toolbar', true)}
+          />
+        </>
       )}
       <TitleBar
         state={state}
         tab={active}
         settings={settings}
         winState={winState}
-        onPageShot={setShot}
+        onPageShot={setShots}
         onEditingChange={setOmniboxEditing}
         onPointerEdge={compact.enabled ? (inside) => api.setCompactHover('toolbar', inside) : undefined}
         onNewWorkspace={handleNewWorkspace}
@@ -175,6 +302,7 @@ export function App(): React.JSX.Element {
         onDismissUpdate={() => setDismissedUpdateVer(updateKey)}
         onEditorOpenChange={setSidebarEditing}
         onPointerEdge={compact.enabled ? (inside) => api.setCompactHover('sidebar', inside) : undefined}
+        onDragTabChange={setDragTabId}
         openNewWorkspaceTick={newWorkspaceTick}
       />
       <main className="main">
@@ -182,20 +310,75 @@ export function App(): React.JSX.Element {
         {tabExternalAsks.length > 0 && <ExternalAppBar ask={tabExternalAsks[0]} />}
         <FindBar open={findOpen} focusTick={findFocusTick} onClose={() => setFindOpen(false)} />
         <div
-          className="page"
+          className={`page ${isSplitView ? 'split' : ''}`}
           ref={pageRef}
           onMouseEnter={() => {
             if (!compact.enabled) return
             api.setCompactHover('sidebar', false)
             api.setCompactHover('toolbar', false)
           }}
+          onDragOver={handlePageDragOver}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropSide(null)
+          }}
+          onDrop={handlePageDrop}
         >
-          {active && !active.url && <StartPage tabId={active.id} />}
-          {active?.url === 'orbit://history' && <HistoryPage key={active.id} tabId={active.id} />}
-          {active?.url === 'orbit://bookmarks' && <BookmarksPage key={active.id} tabId={active.id} />}
-          {active?.url === 'orbit://settings' && <SettingsPage key={active.id} settings={settings} update={update} />}
-          {active?.error && <ErrorPage tab={active} />}
-          {shot && <img className="page-shot" src={shot} alt="" />}
+          {isSplitView && splitLayout && activeSplit ? (
+            <>
+              {visiblePanes.map((pane, idx) => {
+                const slot = splitLayout.panes[idx]
+                if (!slot) return null
+                const focused = pane.id === state.activeId
+                return (
+                  <div
+                    key={pane.id}
+                    className={`split-pane ${focused ? 'focused' : ''}`}
+                    style={{
+                      left: slot.frame.x,
+                      top: slot.frame.y,
+                      width: slot.frame.width,
+                      height: slot.frame.height
+                    }}
+                    onMouseDown={() => {
+                      if (!focused) api.activate(pane.id)
+                    }}
+                  >
+                    <div className="split-pane-inner">{renderTabSurface(pane, settings, update, shots?.[pane.id])}</div>
+                  </div>
+                )
+              })}
+              {splitLayout.dividers.map((div) => (
+                <div
+                  key={div.kind}
+                  role="separator"
+                  aria-orientation={div.orientation}
+                  aria-label={div.kind === 'col' ? 'Resize panes horizontally' : 'Resize panes vertically'}
+                  title="Drag to resize · Double-click to reset"
+                  className={`split-divider ${div.orientation} ${resizingKind === div.kind ? 'dragging' : ''}`}
+                  style={{
+                    left: div.rect.x,
+                    top: div.rect.y,
+                    width: div.rect.width,
+                    height: div.rect.height
+                  }}
+                  onPointerDown={(e) => startDividerDrag(e, activeSplit.id, div.kind)}
+                  onDoubleClick={() => api.setSplitRatio(activeSplit.id, div.kind, DEFAULT_SPLIT_RATIO)}
+                >
+                  <span className="split-divider-pill" aria-hidden />
+                </div>
+              ))}
+            </>
+          ) : (
+            active && renderTabSurface(active, settings, update, shots?.[active.id])
+          )}
+
+          {dragTabId !== null && dropSide && (
+            <div className={`split-drop-zone ${dropSide}`} aria-hidden>
+              <div className="split-drop-card">
+                <span>{dropSide === 'left' ? 'Split left' : 'Split right'}</span>
+              </div>
+            </div>
+          )}
         </div>
       </main>
     </div>

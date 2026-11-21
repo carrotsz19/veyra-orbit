@@ -13,10 +13,19 @@ import type {
   WorkspaceCreateInput,
   WorkspaceUpdateInput
 } from '../shared/types'
-import { isInternalUrl, toUrl } from '../shared/url'
+import { isAllowedUrl, isInternalUrl, toUrl } from '../shared/url'
 import { suggest, type Candidate } from '../shared/suggest'
 import { computeCompactZones } from '../shared/compact'
 import { resolveSleepTimeoutMs } from '../shared/sleep'
+import { WORKSPACE_ACCENTS } from '../shared/workspaces'
+import {
+  buildPaletteResults,
+  resolveTypedPaletteText,
+  type PaletteAction,
+  type PaletteContext,
+  type PaletteMode
+} from '../shared/palette'
+import { PEEK_TAB_ID, isPeekAction } from '../shared/peek'
 import { Tabs } from './tabs'
 import { Store } from './store'
 import { SettingsStore } from './settings'
@@ -24,7 +33,7 @@ import { ExternalApps, Permissions, WEB_PARTITION, cleanUserAgent, hardenAll, se
 import { attachSessionCompat } from './compat'
 import { Downloads } from './downloads'
 import { Updater } from './updater'
-import { MenuPopup } from './floating'
+import { CompactPanel, MenuPopup, PalettePopup, PeekPopup } from './floating'
 
 const APP_NAME = __CHANNEL__ === 'dev' ? 'Veyra Orbit Dev' : 'Veyra Orbit'
 app.setName(APP_NAME)
@@ -40,6 +49,10 @@ hardenAll()
 const isWin = process.platform === 'win32'
 /** Acrylic needs Windows 11 22H2 (build 22621) or newer. */
 const acrylic = isWin && Number(release().split('.')[2] ?? 0) >= 22621
+const smokeLog = !app.isPackaged && process.env.VEYRA_SMOKE_LOG === '1'
+function logSmoke(tag: string, data: unknown): void {
+  if (smokeLog) console.log(`[smoke:${tag}] ${JSON.stringify(data)}`)
+}
 const TITLE_BAR_H = 40
 const HOUR_MS = 3_600_000
 const CLEAR_RANGES = new Set<ClearDataRange>(['hour', 'day', 'all'])
@@ -53,6 +66,11 @@ function overlay(): Electron.TitleBarOverlayOptions {
 
 let win: BrowserWindow | null = null
 let menuPopup: MenuPopup | null = null
+let palettePopup: PalettePopup | null = null
+let peekPopup: PeekPopup | null = null
+let compactSidebar: CompactPanel | null = null
+let compactTitlebar: CompactPanel | null = null
+let compactOmniboxOpen = false
 let tabs: Tabs | null = null
 let perms: Permissions | null = null
 let externalApps: ExternalApps | null = null
@@ -72,14 +90,123 @@ let compactPoller: NodeJS.Timeout | null = null
 let sideHideTimer: NodeJS.Timeout | null = null
 let barHideTimer: NodeJS.Timeout | null = null
 
+const COMPACT_SIDEBAR_W = 264
+const COMPACT_TITLEBAR_H = 52
+const COMPACT_TITLEBAR_OPEN_H = 380
+const COMPACT_MARGIN = 6
+
+function isAnyOrbitFocused(): boolean {
+  return (
+    !!(win && !win.isDestroyed() && win.isFocused()) ||
+    !!menuPopup?.isFocused() ||
+    !!palettePopup?.isFocused() ||
+    !!peekPopup?.isFocused() ||
+    !!compactSidebar?.isFocused() ||
+    !!compactTitlebar?.isFocused()
+  )
+}
+
+function broadcastUi(channel: string, payload?: unknown): void {
+  if (win && !win.isDestroyed()) {
+    if (payload === undefined) win.webContents.send(channel)
+    else win.webContents.send(channel, payload)
+  }
+  compactSidebar?.send(channel, payload)
+  compactTitlebar?.send(channel, payload)
+}
+
+function compactSidebarGeometry(): { offset: { x: number; y: number }; size: { width: number; height: number } } {
+  const cb = win && !win.isDestroyed() ? win.getContentBounds() : { width: 1200, height: 800 }
+  const z = win && !win.isDestroyed() ? win.webContents.getZoomFactor() : 1
+  const cw = Math.round(cb.width / z)
+  const ch = Math.round(cb.height / z)
+  const top = compactState.toolbar ? COMPACT_TITLEBAR_H + 2 : COMPACT_MARGIN
+  return {
+    offset: { x: COMPACT_MARGIN, y: top },
+    size: { width: Math.min(COMPACT_SIDEBAR_W, Math.max(220, cw - COMPACT_MARGIN * 2)), height: Math.max(200, ch - top - COMPACT_MARGIN) }
+  }
+}
+
+function compactTitlebarGeometry(): { offset: { x: number; y: number }; size: { width: number; height: number } } {
+  const cb = win && !win.isDestroyed() ? win.getContentBounds() : { width: 1200, height: 800 }
+  const z = win && !win.isDestroyed() ? win.webContents.getZoomFactor() : 1
+  const cw = Math.round(cb.width / z)
+  const ch = Math.round(cb.height / z)
+  const h = compactOmniboxOpen ? Math.min(COMPACT_TITLEBAR_OPEN_H, Math.max(COMPACT_TITLEBAR_H, ch - COMPACT_MARGIN * 2)) : COMPACT_TITLEBAR_H
+  return {
+    offset: { x: COMPACT_MARGIN, y: COMPACT_MARGIN },
+    size: { width: Math.max(320, cw - COMPACT_MARGIN * 2), height: h }
+  }
+}
+
+function syncCompactPanels(focusTarget?: 'sidebar' | 'toolbar', immediateHide = false): void {
+  const enabled = !!settings?.get().compactMode && !tabs?.isPageFullscreen() && !!win && !win.isDestroyed() && !win.isMinimized()
+  if (!enabled) {
+    compactOmniboxOpen = false
+    compactSidebar?.hide(true)
+    compactTitlebar?.hide(true)
+    return
+  }
+
+  if (compactState.toolbar) {
+    const geom = compactTitlebarGeometry()
+    if (compactTitlebar?.isRevealed()) {
+      compactTitlebar.reposition(geom.offset, geom.size)
+      if (focusTarget === 'toolbar') compactTitlebar.focus()
+    } else {
+      compactTitlebar?.show(geom.offset, geom.size, focusTarget === 'toolbar')
+    }
+  } else {
+    compactOmniboxOpen = false
+    compactTitlebar?.hide(immediateHide)
+  }
+
+  if (compactState.sidebar) {
+    const geom = compactSidebarGeometry()
+    if (compactSidebar?.isRevealed()) {
+      compactSidebar.reposition(geom.offset, geom.size)
+      if (focusTarget === 'sidebar') compactSidebar.focus()
+    } else {
+      compactSidebar?.show(geom.offset, geom.size, focusTarget === 'sidebar')
+    }
+  } else {
+    compactSidebar?.hide(immediateHide)
+  }
+
+  logSmoke('compact', {
+    enabled,
+    sidebar: compactState.sidebar,
+    toolbar: compactState.toolbar,
+    sidebarVisible: !!compactSidebar?.isVisible(),
+    toolbarVisible: !!compactTitlebar?.isVisible(),
+    viewBounds: tabs?.attachedViewBounds() ?? []
+  })
+}
+
 function sendWinState(): void {
   if (!win || win.isDestroyed()) return
   const payload: WindowState = {
-    focused: win.isFocused() || !!menuPopup?.isFocused(),
+    focused: isAnyOrbitFocused(),
     maximized: win.isMaximized(),
     fullscreen: win.isFullScreen()
   }
-  win.webContents.send('win:state', payload)
+  broadcastUi('win:state', payload)
+}
+
+function handleOrbitFocusBlur(): void {
+  sendWinState()
+  // Defer slightly so focus handoff between main window, floating panels, and menus settles first.
+  setTimeout(() => {
+    if (!win || win.isDestroyed()) return
+    sendWinState()
+    if (settings?.get().compactMode && !isAnyOrbitFocused() && !compactPins.menu && !compactPins.titleMenu) {
+      compactHover = { sidebar: false, toolbar: false }
+      compactPins.omnibox = false
+      compactState = { enabled: true, sidebar: false, toolbar: false }
+      broadcastUi('compact:state', compactState)
+      syncCompactPanels(undefined, false)
+    }
+  }, 60)
 }
 
 function applyCompactTargets(wantSide: boolean, wantBar: boolean): void {
@@ -99,7 +226,8 @@ function applyCompactTargets(wantSide: boolean, wantBar: boolean): void {
       sideHideTimer = null
       if (!compactPins.sidebar && !compactPins.menu && !compactHover.sidebar && compactState.sidebar) {
         compactState = { ...compactState, sidebar: false }
-        if (win && !win.isDestroyed()) win.webContents.send('compact:state', compactState)
+        broadcastUi('compact:state', compactState)
+        syncCompactPanels()
       }
     }, COMPACT_HIDE_DELAY_MS)
   }
@@ -118,17 +246,19 @@ function applyCompactTargets(wantSide: boolean, wantBar: boolean): void {
       barHideTimer = null
       if (!compactPins.omnibox && !compactPins.titleMenu && !compactHover.toolbar && compactState.toolbar) {
         compactState = { ...compactState, toolbar: false }
-        if (win && !win.isDestroyed()) win.webContents.send('compact:state', compactState)
+        broadcastUi('compact:state', compactState)
+        syncCompactPanels()
       }
     }, COMPACT_HIDE_DELAY_MS)
   }
 
   if (changed && win && !win.isDestroyed()) {
-    win.webContents.send('compact:state', compactState)
+    broadcastUi('compact:state', compactState)
+    syncCompactPanels()
   }
 }
 
-function sendCompactState(force = false): void {
+function sendCompactState(force = false, focusTarget?: 'sidebar' | 'toolbar', immediateHide = false): void {
   if (!win || win.isDestroyed()) return
   const enabled = !!settings?.get().compactMode
   const next: CompactRevealState = enabled
@@ -140,10 +270,12 @@ function sendCompactState(force = false): void {
     : { enabled: false, sidebar: false, toolbar: false }
 
   if (!force && next.enabled === compactState.enabled && next.sidebar === compactState.sidebar && next.toolbar === compactState.toolbar) {
+    if (focusTarget) syncCompactPanels(focusTarget, immediateHide)
     return
   }
   compactState = next
-  win.webContents.send('compact:state', compactState)
+  broadcastUi('compact:state', compactState)
+  syncCompactPanels(focusTarget, immediateHide)
 }
 
 function clearCompactTimers(): void {
@@ -170,7 +302,7 @@ function pollCompactCursor(): void {
   if (!win || win.isDestroyed() || !settings?.get().compactMode) return
   if (tabs?.isPageFullscreen() || win.isMinimized() || !win.isVisible()) return
 
-  const focused = win.isFocused()
+  const focused = isAnyOrbitFocused()
   const cursor = screen.getCursorScreenPoint()
   const moved = lastPolledCursor !== null && (cursor.x !== lastPolledCursor.x || cursor.y !== lastPolledCursor.y)
   lastPolledCursor = cursor
@@ -208,8 +340,10 @@ function syncCompactMode(): void {
   if (!enabled) {
     stopCompactPoller()
     compactHover = { sidebar: false, toolbar: false }
+    compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false }
+    compactOmniboxOpen = false
     compactState = { enabled: false, sidebar: false, toolbar: false }
-    sendCompactState(true)
+    sendCompactState(true, undefined, true)
     return
   }
   compactState = {
@@ -226,11 +360,11 @@ function syncCompactMode(): void {
 /** History and bookmarks changed: the UI re-reads them (the Library page, the star). */
 function dataChanged(): void {
   tabs?.refresh()
-  if (win && !win.isDestroyed()) win.webContents.send('data-changed')
+  broadcastUi('data-changed')
 }
 
 function sendSettings(): void {
-  if (win && !win.isDestroyed() && settings) win.webContents.send('settings', settings.view())
+  if (settings) broadcastUi('settings', settings.view())
 }
 
 function toggleCompactMode(): void {
@@ -238,6 +372,233 @@ function toggleCompactMode(): void {
   settings.update({ compactMode: !settings.get().compactMode })
   sendSettings()
   syncCompactMode()
+}
+
+function buildPaletteContext(query: string, mode: PaletteMode): PaletteContext | null {
+  if (!tabs || !store || !settings || !win || win.isDestroyed()) return null
+  const st = tabs.state()
+  const wsNameById = new Map(st.workspaces.map((w) => [w.id, w.name]))
+  const all = tabs.allTabs()
+  const activeTab = all.find((t) => t.id === st.activeId) ?? null
+  const trimmed = query.trim()
+
+  let candidates: Candidate[] = []
+  if (trimmed) {
+    candidates = store.candidates(trimmed, 120)
+  } else {
+    const bookmarks = store.bookmarks().slice(0, 12)
+    const recent = store.history('', null, 16)
+    const bmUrls = new Set(bookmarks.map((b) => b.url))
+    candidates = [
+      ...bookmarks.map((b) => ({ url: b.url, title: b.title, visits: 0, typed: 0, last: b.created, bookmarked: true })),
+      ...recent
+        .filter((h) => !bmUrls.has(h.url))
+        .map((h) => ({ url: h.url, title: h.title, visits: 1, typed: 0, last: h.time, bookmarked: false }))
+    ]
+  }
+
+  return {
+    mode,
+    tabs: all.map((t) => ({
+      id: t.id,
+      workspaceId: t.workspaceId,
+      workspaceName: wsNameById.get(t.workspaceId) ?? 'Personal',
+      url: t.url,
+      title: t.title,
+      bookmarked: t.bookmarked,
+      pinned: t.pinned,
+      muted: t.muted,
+      active: t.id === st.activeId
+    })),
+    candidates,
+    workspaces: st.workspaces.map((w) => ({
+      id: w.id,
+      name: w.name,
+      active: w.id === st.activeWorkspaceId
+    })),
+    activeTab: activeTab
+      ? {
+          id: activeTab.id,
+          url: activeTab.url,
+          hasError: !!activeTab.error,
+          pinned: activeTab.pinned,
+          muted: activeTab.muted,
+          bookmarked: activeTab.bookmarked,
+          zoom: activeTab.zoom
+        }
+      : null,
+    isSplit: !!activeTab && st.splits.some((g) => g.tabIds.includes(activeTab.id)),
+    compactMode: settings.get().compactMode,
+    isFullscreen: win.isFullScreen(),
+    canReopenClosed: st.canReopenClosed,
+    theme: settings.get().theme,
+    searchUrl: settings.searchUrl()
+  }
+}
+
+function activeWorkspaceAccentHex(): string {
+  const dark = nativeTheme.shouldUseDarkColors
+  const st = tabs?.state()
+  const ws = st?.workspaces.find((w) => w.id === st.activeWorkspaceId)
+  const entry = WORKSPACE_ACCENTS.find((a) => a.id === ws?.accent) ?? WORKSPACE_ACCENTS[0]
+  return dark ? entry.dark : entry.light
+}
+
+function openOrTogglePalette(mode: PaletteMode): void {
+  if (!palettePopup || !tabs) return
+  if (palettePopup.isOpen() && palettePopup.currentMode() === mode) {
+    palettePopup.dismiss()
+    return
+  }
+  menuPopup?.close()
+  peekPopup?.close()
+  if (tabs.isPageFullscreen()) tabs.exitPageFullscreen(true)
+  const ctx = buildPaletteContext('', mode)
+  if (!ctx) return
+  const { items, actions } = buildPaletteResults('', ctx)
+  palettePopup.open({
+    mode,
+    dark: nativeTheme.shouldUseDarkColors,
+    accent: activeWorkspaceAccentHex(),
+    items,
+    actions
+  })
+  logSmoke('palette', { event: 'open', mode, count: items.length, visible: palettePopup.isOpen() })
+}
+
+function openNewWorkspaceEditor(): void {
+  if (settings?.get().compactMode) {
+    if (sideHideTimer) {
+      clearTimeout(sideHideTimer)
+      sideHideTimer = null
+    }
+    compactState = { ...compactState, sidebar: true }
+    sendCompactState(true, 'sidebar')
+    compactSidebar?.send('ui:new-workspace')
+  } else if (win && !win.isDestroyed()) {
+    win.webContents.send('ui:new-workspace')
+  }
+}
+
+function executePaletteAction(action: PaletteAction, openInNewTab: boolean): void {
+  if (!tabs || !win || win.isDestroyed()) return
+  switch (action.type) {
+    case 'switch-tab':
+      tabs.activate(action.tabId)
+      return
+    case 'switch-workspace':
+      tabs.switchWorkspace(action.workspaceId)
+      return
+    case 'settings-section':
+      tabs.openInternal('orbit://settings')
+      win.webContents.send('ui:settings-section', action.sectionId)
+      return
+    case 'navigate': {
+      if (!isAllowedUrl(action.url) && !isInternalUrl(action.url)) return
+      const activeId = tabs.state().activeId
+      if (openInNewTab || activeId === null) tabs.create(action.url)
+      else tabs.navigate(activeId, action.url, true)
+      return
+    }
+    case 'command': {
+      const st = tabs.state()
+      switch (action.cmd) {
+        case 'new-tab':
+          tabs.create('')
+          return
+        case 'new-workspace':
+          openNewWorkspaceEditor()
+          return
+        case 'toggle-compact':
+          toggleCompactMode()
+          return
+        case 'split-next':
+          tabs.splitWithNext()
+          return
+        case 'unsplit':
+          tabs.unsplit()
+          return
+        case 'reopen-closed':
+          tabs.reopenClosed()
+          return
+        case 'reload':
+          tabs.reload(false)
+          return
+        case 'hard-reload':
+          tabs.reload(true)
+          return
+        case 'duplicate-tab':
+          if (st.activeId !== null) tabs.duplicate(st.activeId)
+          return
+        case 'pin-tab':
+          if (st.activeId !== null) tabs.togglePin(st.activeId)
+          return
+        case 'mute-tab':
+          if (st.activeId !== null) tabs.toggleMute(st.activeId)
+          return
+        case 'sleep-tab':
+          if (st.activeId !== null) tabs.sleepTab(st.activeId, true)
+          return
+        case 'close-tab':
+          if (st.activeId !== null) tabs.close(st.activeId)
+          return
+        case 'toggle-bookmark':
+          tabs.toggleBookmark()
+          return
+        case 'zoom-in':
+          tabs.zoomIn()
+          return
+        case 'zoom-out':
+          tabs.zoomOut()
+          return
+        case 'zoom-reset':
+          tabs.resetZoom()
+          return
+        case 'print':
+          tabs.print()
+          return
+        case 'find':
+          tabs.openFind()
+          return
+        case 'toggle-downloads':
+          tabs.toggleDownloads()
+          return
+        case 'devtools':
+          tabs.toggleDevTools()
+          return
+        case 'fullscreen':
+          win.setFullScreen(!win.isFullScreen())
+          return
+        case 'open-history':
+          tabs.openInternal('orbit://history')
+          return
+        case 'open-bookmarks':
+          tabs.openInternal('orbit://bookmarks')
+          return
+        case 'open-settings':
+          tabs.openInternal('orbit://settings')
+          return
+        case 'clear-history-hour':
+          store?.clear(Date.now() - HOUR_MS)
+          dataChanged()
+          return
+        case 'clear-history-day':
+          store?.clear(Date.now() - 24 * HOUR_MS)
+          dataChanged()
+          return
+        case 'theme-light':
+        case 'theme-dark':
+        case 'theme-system': {
+          if (!settings) return
+          const theme = action.cmd === 'theme-light' ? 'light' : action.cmd === 'theme-dark' ? 'dark' : 'system'
+          settings.update({ theme })
+          nativeTheme.themeSource = theme
+          sendSettings()
+          return
+        }
+      }
+    }
+  }
 }
 
 function createWindow(): void {
@@ -273,7 +634,39 @@ function createWindow(): void {
   // Orbit draws its own title bar and menus; remove Electron's default menu bar so Alt never shows it.
   w.setMenu(null)
 
-  // Reusable floating acrylic window for title-bar menus (sits above native WebContentsViews).
+  const panelExtraQuery = {
+    buttons: activeButtons,
+    version: app.getVersion()
+  }
+
+  // Floating overlay panels for compact mode (sidebar & titlebar slide over the page without moving it).
+  compactSidebar?.destroy()
+  compactSidebar = new CompactPanel(w, {
+    view: 'compact-sidebar',
+    preload: join(__dirname, '../preload/compact.js'),
+    extraQuery: panelExtraQuery,
+    width: COMPACT_SIDEBAR_W,
+    height: 760,
+    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur()),
+    onBeforeInput: (e, input) => {
+      if (tabs?.shortcut(input)) e.preventDefault()
+    }
+  })
+
+  compactTitlebar?.destroy()
+  compactTitlebar = new CompactPanel(w, {
+    view: 'compact-titlebar',
+    preload: join(__dirname, '../preload/compact.js'),
+    extraQuery: panelExtraQuery,
+    width: 1200,
+    height: COMPACT_TITLEBAR_H,
+    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur()),
+    onBeforeInput: (e, input) => {
+      if (tabs?.shortcut(input)) e.preventDefault()
+    }
+  })
+
+  // Reusable floating acrylic window for title-bar menus (sits above native WebContentsViews and compact panels).
   menuPopup?.destroy()
   menuPopup = new MenuPopup(w, {
     preload: join(__dirname, '../preload/floating.js'),
@@ -288,7 +681,15 @@ function createWindow(): void {
       }
       sendWinState()
     },
-    onFocusChange: () => sendWinState()
+    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur())
+  })
+
+  // Reusable floating acrylic window for the Ctrl+K command palette.
+  palettePopup?.destroy()
+  palettePopup = new PalettePopup(w, {
+    preload: join(__dirname, '../preload/palette.js'),
+    acrylic,
+    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur())
   })
 
   // The browser's own UI never navigates and never opens windows; pages do that in tabs.
@@ -308,13 +709,20 @@ function createWindow(): void {
   downloads = new Downloads(
     () => ({ dir: s.effectiveDownloadsDir(), askWhereToSave: s.get().askWhereToSave }),
     (list) => {
-      if (!w.isDestroyed()) w.webContents.send('downloads', list)
+      broadcastUi('downloads', list)
     }
   )
   const d = downloads
 
   const configuredSessions = new Set<Session>()
-  const onDownload = (_e: Electron.Event, _item: Electron.DownloadItem, wc: Electron.WebContents): void => tabs?.downloadStarted(wc)
+  const onAltPeekDownload = (e: Electron.Event, item: Electron.DownloadItem, wc: Electron.WebContents): void => {
+    if (tabs?.consumeAltPeek(wc, item.getURL())) {
+      e.preventDefault()
+    }
+  }
+  const onDownload = (e: Electron.Event, _item: Electron.DownloadItem, wc: Electron.WebContents): void => {
+    if (!e.defaultPrevented) tabs?.downloadStarted(wc)
+  }
 
   /**
    * Single setup path for every web session partition (the shared persist:web partition and every
@@ -329,15 +737,35 @@ function createWindow(): void {
     configuredSessions.add(sess)
     perms.attach(sess)
     attachSessionCompat(sess)
+    // Alt+click peek intercepts link SaveLinkAs before Downloads records it.
+    sess.on('will-download', onAltPeekDownload)
     d.attach(sess)
     sess.on('will-download', onDownload)
     return sess
   }
 
+  // Reusable floating Link Preview ("Peek") window hosting a sandboxed WebContentsView.
+  peekPopup?.destroy()
+  peekPopup = new PeekPopup(w, {
+    preload: join(__dirname, '../preload/peek.js'),
+    acrylic,
+    ensureSession: (partition) => {
+      setupWebSession(partition)
+    },
+    onExternalApp: (tabId, pageUrl, targetUrl) => {
+      ext.request(tabId, pageUrl, targetUrl)
+    },
+    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur()),
+    onClosed: () => {
+      perms?.dropTab(PEEK_TAB_ID)
+      ext.dropTab(PEEK_TAB_ID)
+    }
+  })
+
   tabs = new Tabs(w, join(app.getPath('userData'), 'session.json'), {
     visit: (url, title, typed) => {
       db.visit(url, title, typed)
-      if (win) win.webContents.send('data-changed')
+      broadcastUi('data-changed')
     },
     title: (url, title) => db.title(url, title),
     isBookmarked: (url) => db.isBookmarked(url),
@@ -366,14 +794,16 @@ function createWindow(): void {
       if (settings?.get().compactMode) sendCompactState()
     },
     onFocusOmnibox: () => {
-      if (!settings?.get().compactMode) return
+      if (!settings?.get().compactMode) return false
       if (barHideTimer) {
         clearTimeout(barHideTimer)
         barHideTimer = null
       }
       compactPins.omnibox = true
       compactState = { ...compactState, toolbar: true }
-      sendCompactState(true)
+      sendCompactState(true, 'toolbar')
+      compactTitlebar?.send('focus-omnibox')
+      return true
     },
     onFocusMenuBar: () => {
       if (w.isDestroyed()) return
@@ -383,17 +813,73 @@ function createWindow(): void {
           barHideTimer = null
         }
         compactState = { ...compactState, toolbar: true }
-        sendCompactState(true)
+        sendCompactState(true, 'toolbar')
+        compactTitlebar?.send('menu:focus-bar')
+        return
       }
       w.webContents.focus()
       w.webContents.send('menu:focus-bar')
+    },
+    onState: (st) => {
+      compactSidebar?.send('state', st)
+      compactTitlebar?.send('state', st)
+      logSmoke('state', {
+        activeId: st.activeId,
+        tabCount: st.tabs.length,
+        splits: st.splits,
+        viewBounds: tabs?.attachedViewBounds() ?? []
+      })
+    },
+    onToggleDownloads: () => {
+      if (!settings?.get().compactMode) return false
+      if (sideHideTimer) {
+        clearTimeout(sideHideTimer)
+        sideHideTimer = null
+      }
+      compactState = { ...compactState, sidebar: true }
+      sendCompactState(true, 'sidebar')
+      compactSidebar?.send('downloads:toggle')
+      return true
+    },
+    onPageFullscreen: (on) => {
+      if (on) {
+        compactSidebar?.hide(true)
+        compactTitlebar?.hide(true)
+        palettePopup?.close()
+        peekPopup?.close()
+      } else if (settings?.get().compactMode) {
+        syncCompactPanels()
+      }
+    },
+    onTogglePalette: (mode) => openOrTogglePalette(mode),
+    onNewTabShortcut: () => {
+      if (settings?.get().newTabBehavior === 'command-bar') {
+        openOrTogglePalette('new-tab')
+        return true
+      }
+      return false
+    },
+    openPeek: (url, sourceTabId, workspaceId, partition) => {
+      if (!peekPopup || !isAllowedUrl(url)) return
+      menuPopup?.close()
+      palettePopup?.close()
+      if (tabs?.isPageFullscreen()) tabs.exitPageFullscreen(true)
+      peekPopup.open({
+        url,
+        sourceTabId,
+        workspaceId,
+        partition,
+        dark: nativeTheme.shouldUseDarkColors,
+        accent: activeWorkspaceAccentHex()
+      })
+      logSmoke('peek', { event: 'open', url, sourceTabId, visible: peekPopup.isOpen() })
     },
     quit: () => app.quit()
   })
   const t = tabs
 
   perms = new Permissions(
-    (wc) => t.tabIdOf(wc),
+    (wc) => (peekPopup?.isContentWebContents(wc) ? PEEK_TAB_ID : t.tabIdOf(wc)),
     (list) => {
       asks = list
       if (!w.isDestroyed()) w.webContents.send('permissions', list)
@@ -420,9 +906,22 @@ function createWindow(): void {
   // Windows flickers acrylic on a full-screen window, so full screen is solid; and a page in
   // full screen leaves it when the window does (Esc, F11).
   w.on('focus', sendWinState)
-  w.on('blur', sendWinState)
-  w.on('maximize', sendWinState)
-  w.on('unmaximize', sendWinState)
+  w.on('blur', handleOrbitFocusBlur)
+  w.on('minimize', () => {
+    compactSidebar?.hide(true)
+    compactTitlebar?.hide(true)
+  })
+  w.on('maximize', () => {
+    sendWinState()
+    syncCompactPanels()
+  })
+  w.on('unmaximize', () => {
+    sendWinState()
+    syncCompactPanels()
+  })
+  w.on('move', () => {
+    if (settings?.get().compactMode) syncCompactPanels()
+  })
   w.on('enter-full-screen', () => {
     if (acrylic) {
       w.setBackgroundMaterial('none')
@@ -430,6 +929,7 @@ function createWindow(): void {
     }
     sendWinState()
     t.relayout()
+    if (settings?.get().compactMode) syncCompactPanels()
   })
   w.on('leave-full-screen', () => {
     if (acrylic) {
@@ -438,17 +938,33 @@ function createWindow(): void {
     }
     sendWinState()
     t.exitPageFullscreen()
+    if (settings?.get().compactMode) syncCompactPanels()
   })
-  w.on('resize', () => t.relayout())
+  w.on('resize', () => {
+    t.relayout()
+    if (settings?.get().compactMode) syncCompactPanels()
+  })
   w.on('close', () => t.save())
   w.on('closed', () => {
     stopCompactPoller()
     compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false }
     compactHover = { sidebar: false, toolbar: false }
+    compactOmniboxOpen = false
     compactState = { enabled: false, sidebar: false, toolbar: false }
+    compactSidebar?.destroy()
+    compactSidebar = null
+    compactTitlebar?.destroy()
+    compactTitlebar = null
+    palettePopup?.destroy()
+    palettePopup = null
+    peekPopup?.destroy()
+    peekPopup = null
     menuPopup?.destroy()
     menuPopup = null
-    for (const sess of configuredSessions) sess.off('will-download', onDownload)
+    for (const sess of configuredSessions) {
+      sess.off('will-download', onAltPeekDownload)
+      sess.off('will-download', onDownload)
+    }
     configuredSessions.clear()
     d.detach()
     if (downloads === d) downloads = null
@@ -471,20 +987,40 @@ function createWindow(): void {
 
   if (!updater) {
     updater = new Updater((state) => {
-      if (win && !win.isDestroyed()) win.webContents.send('update:state', state)
+      broadcastUi('update:state', state)
     })
     updater.start()
   }
 }
 
-/** Only the browser's own main UI may call app/tab/settings IPC; pages have no preload. */
+/** Only the browser's own main UI may call privileged IPC (settings, privacy, bounds, overlay); pages have no preload. */
 function fromUi(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
   return !!win && e.sender === win.webContents
+}
+
+/** Only the floating compact-mode sidebar or titlebar panels may call compact-panel channels. */
+function fromCompactPanel(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  return !!compactSidebar?.isSender(e.sender) || !!compactTitlebar?.isSender(e.sender)
+}
+
+/** Main UI or floating compact-mode panels (for shared Sidebar/TitleBar actions). */
+function fromUiSurface(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  return fromUi(e) || fromCompactPanel(e)
 }
 
 /** Only the floating menu window may call menu-popup return channels. */
 function fromMenu(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
   return !!menuPopup && menuPopup.isSender(e.sender)
+}
+
+/** Only the floating Ctrl+K command palette window may call palette:* return channels. */
+function fromPalette(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  return !!palettePopup && palettePopup.isSender(e.sender)
+}
+
+/** Only the floating Link Preview ("Peek") toolbar window may call peek:* return channels. */
+function fromPeek(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  return !!peekPopup && peekPopup.isSender(e.sender)
 }
 
 const WIN_CMDS = new Set<WinCmd>([
@@ -507,6 +1043,12 @@ function on<A extends unknown[]>(channel: string, f: (t: Tabs, ...args: A) => vo
   })
 }
 
+function onSurface<A extends unknown[]>(channel: string, f: (t: Tabs, ...args: A) => void): void {
+  ipcMain.on(channel, (e, ...args) => {
+    if (fromUiSurface(e) && tabs) f(tabs, ...(args as A))
+  })
+}
+
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 const str = (v: unknown): v is string => typeof v === 'string' && v.length < 8192
 
@@ -523,29 +1065,86 @@ on('ready', () => {
   win.webContents.send('page-fullscreen', tabs.isPageFullscreen())
   if (updater) win.webContents.send('update:state', updater.state())
 })
-on('tab:new', (t, input?: unknown) => t.create((str(input) && toUrl(input, settings?.searchUrl())) || ''))
-on('tab:close', (t, id: unknown) => num(id) && t.close(id))
-on('tab:reopen', (t) => t.reopenClosed())
-on('tab:print', (t) => t.print())
-on('tab:devtools', (t) => t.toggleDevTools())
-on('tab:open-internal', (t, url: unknown) => {
+
+// Compact-mode floating panel handshake and narrow panel-specific IPC.
+ipcMain.on('compact-panel:ready', (e) => {
+  if (!fromCompactPanel(e) || !tabs) return
+  const panel = compactSidebar?.isSender(e.sender) ? compactSidebar : compactTitlebar
+  if (!panel) return
+  panel.markReady()
+  panel.send('state', tabs.state())
+  panel.send('downloads', downloads?.list() ?? [])
+  if (settings) panel.send('settings', settings.view())
+  panel.send('compact:state', compactState)
+  panel.send('win:state', {
+    focused: isAnyOrbitFocused(),
+    maximized: !!win && !win.isDestroyed() && win.isMaximized(),
+    fullscreen: !!win && !win.isDestroyed() && win.isFullScreen()
+  })
+  if (updater) panel.send('update:state', updater.state())
+})
+ipcMain.on('compact-panel:omnibox-open', (e, open: unknown) => {
+  if (!compactTitlebar?.isSender(e.sender)) return
+  const next = open === true
+  if (compactOmniboxOpen === next) return
+  compactOmniboxOpen = next
+  if (compactTitlebar.isRevealed()) {
+    const geom = compactTitlebarGeometry()
+    compactTitlebar.reposition(geom.offset, geom.size)
+  }
+})
+ipcMain.on('compact-panel:new-workspace', (e) => {
+  if (!fromCompactPanel(e)) return
+  if (settings?.get().compactMode) {
+    if (sideHideTimer) {
+      clearTimeout(sideHideTimer)
+      sideHideTimer = null
+    }
+    compactState = { ...compactState, sidebar: true }
+    sendCompactState(true, 'sidebar')
+    compactSidebar?.send('ui:new-workspace')
+  } else if (win && !win.isDestroyed()) {
+    win.webContents.send('ui:new-workspace')
+  }
+})
+ipcMain.on('compact-panel:settings-section', (e, sectionId: unknown) => {
+  if (!fromCompactPanel(e) || !str(sectionId) || !tabs) return
+  tabs.openInternal('orbit://settings')
+  if (win && !win.isDestroyed()) win.webContents.send('ui:settings-section', sectionId)
+})
+
+onSurface('tab:new', (t, input?: unknown) => {
+  if (input === undefined && settings?.get().newTabBehavior === 'command-bar') {
+    openOrTogglePalette('new-tab')
+    return
+  }
+  t.create((str(input) && toUrl(input, settings?.searchUrl())) || '')
+})
+onSurface('tab:close', (t, id: unknown) => num(id) && t.close(id))
+onSurface('tab:reopen', (t) => t.reopenClosed())
+onSurface('tab:print', (t) => t.print())
+onSurface('tab:devtools', (t) => t.toggleDevTools())
+onSurface('tab:open-internal', (t, url: unknown) => {
   if (str(url) && isInternalUrl(url)) t.openInternal(url)
 })
-on('downloads:toggle', (t) => t.toggleDownloads())
-on('find:open', (t) => t.openFind())
-on('tab:activate', (t, id: unknown) => num(id) && t.activate(id))
+onSurface('downloads:toggle', (t) => t.toggleDownloads())
+onSurface('find:open', (t) => t.openFind())
+onSurface('palette:open-request', (_t, mode?: unknown) => {
+  openOrTogglePalette(mode === 'new-tab' ? 'new-tab' : 'command')
+})
+onSurface('tab:activate', (t, id: unknown) => num(id) && t.activate(id))
 // Everything the UI navigates to was typed (address bar, start page), which history ranks higher.
-on('tab:navigate', (t, id: unknown, input: unknown) => num(id) && str(input) && t.navigate(id, input, true))
-on('tab:pin', (t, id: unknown) => num(id) && t.togglePin(id))
-on('tab:move', (t, id: unknown, to: unknown) => num(id) && num(to) && t.move(id, to))
-on('nav:back', (t) => t.back())
-on('nav:forward', (t) => t.forward())
-on('nav:reload', (t) => t.reload())
-on('nav:stop', (t) => t.stop())
-on('nav:zoom-in', (t) => t.zoomIn())
-on('nav:zoom-out', (t) => t.zoomOut())
-on('nav:zoom-reset', (t) => t.resetZoom())
-on('win:cmd', (t, cmd: unknown) => {
+onSurface('tab:navigate', (t, id: unknown, input: unknown) => num(id) && str(input) && t.navigate(id, input, true))
+onSurface('tab:pin', (t, id: unknown) => num(id) && t.togglePin(id))
+onSurface('tab:move', (t, id: unknown, to: unknown) => num(id) && num(to) && t.move(id, to))
+onSurface('nav:back', (t) => t.back())
+onSurface('nav:forward', (t) => t.forward())
+onSurface('nav:reload', (t) => t.reload())
+onSurface('nav:stop', (t) => t.stop())
+onSurface('nav:zoom-in', (t) => t.zoomIn())
+onSurface('nav:zoom-out', (t) => t.zoomOut())
+onSurface('nav:zoom-reset', (t) => t.resetZoom())
+onSurface('win:cmd', (t, cmd: unknown) => {
   if (!str(cmd) || !WIN_CMDS.has(cmd as WinCmd) || !win || win.isDestroyed()) return
   switch (cmd as WinCmd) {
     case 'minimize':
@@ -579,12 +1178,14 @@ on('app:relaunch', (t) => {
   app.relaunch()
   app.quit()
 })
-// Floating title-bar menu IPC: main UI asks to open/close; menu window reports size/pick/step/dismiss.
+// Floating title-bar menu IPC: main UI or compact titlebar asks to open/close; menu window reports size/pick/step/dismiss.
 ipcMain.on('menu:open', (e, spec: unknown) => {
-  if (fromUi(e)) menuPopup?.open(spec)
+  if (!fromUiSurface(e)) return
+  const offset = compactTitlebar?.isSender(e.sender) ? compactTitlebar.offsetCss() : { x: 0, y: 0 }
+  menuPopup?.open(spec, e.sender, offset)
 })
 ipcMain.on('menu:close', (e) => {
-  if (fromUi(e)) menuPopup?.close()
+  if (fromUiSurface(e)) menuPopup?.close()
 })
 ipcMain.on('menu:ready', (e) => {
   if (fromMenu(e)) menuPopup?.markReady()
@@ -601,12 +1202,101 @@ ipcMain.on('menu:step', (e, by: unknown) => {
 ipcMain.on('menu:dismiss', (e) => {
   if (fromMenu(e)) menuPopup?.dismiss()
 })
-on('tab:mute', (t, id: unknown) => num(id) && t.toggleMute(id))
-on('tab:sleep', (t, id: unknown) => num(id) && t.sleepTab(id, true))
-on('tab:menu', (t, id: unknown) => num(id) && t.tabMenu(id))
-on('workspace:switch', (t, id: unknown) => str(id) && t.switchWorkspace(id))
-on('compact:toggle', () => toggleCompactMode())
-on('compact:pin', (_t, kind: unknown, pinned: unknown) => {
+
+// Floating Ctrl+K command palette IPC: strict sender check + main-side ID/URL validation.
+ipcMain.on('palette:ready', (e) => {
+  if (fromPalette(e)) palettePopup?.markReady()
+})
+ipcMain.on('palette:query', (e, text: unknown) => {
+  if (!fromPalette(e) || !palettePopup || !str(text)) return
+  const ctx = buildPaletteContext(text, palettePopup.currentMode())
+  if (!ctx) return
+  const { items, actions } = buildPaletteResults(text, ctx)
+  palettePopup.updateResults(text.trim(), items, actions)
+})
+ipcMain.on('palette:pick', (e, id: unknown, openInNewTab: unknown) => {
+  if (!fromPalette(e) || !palettePopup) return
+  const action = palettePopup.consumePick(id)
+  if (!action) return
+  executePaletteAction(action, openInNewTab === true)
+})
+ipcMain.on('palette:submit-text', (e, text: unknown, openInNewTab: unknown) => {
+  if (!fromPalette(e) || !palettePopup || !settings) return
+  const url = resolveTypedPaletteText(text, settings.searchUrl())
+  palettePopup.close()
+  if (url) executePaletteAction({ type: 'navigate', url }, openInNewTab === true)
+})
+ipcMain.on('palette:size', (e, height: unknown) => {
+  if (fromPalette(e) && num(height)) palettePopup?.applyHeight(height)
+})
+ipcMain.on('palette:dismiss', (e) => {
+  if (fromPalette(e)) palettePopup?.dismiss()
+})
+
+// Floating Link Preview ("Peek") toolbar IPC: strict sender check + fixed action allowlist (never accepts URLs).
+ipcMain.on('peek:ready', (e) => {
+  if (fromPeek(e)) peekPopup?.markReady()
+})
+ipcMain.on('peek:action', (e, act: unknown) => {
+  if (!fromPeek(e) || !peekPopup || !tabs || !isPeekAction(act)) return
+  switch (act) {
+    case 'back':
+      peekPopup.back()
+      return
+    case 'reload':
+      peekPopup.reload()
+      return
+    case 'close':
+      peekPopup.dismiss()
+      return
+    case 'open-tab': {
+      const target = peekPopup.currentTarget()
+      peekPopup.close()
+      if (target && isAllowedUrl(target.url)) {
+        tabs.create(target.url, { after: target.sourceTabId, workspaceId: target.workspaceId, activate: true })
+      }
+      return
+    }
+    case 'open-split': {
+      const target = peekPopup.currentTarget()
+      peekPopup.close()
+      if (target && isAllowedUrl(target.url)) {
+        const st = tabs.state()
+        const anchorId = st.tabs.some((tab) => tab.id === target.sourceTabId)
+          ? target.sourceTabId
+          : st.activeId
+        const newId = tabs.create(target.url, { after: anchorId ?? undefined, workspaceId: target.workspaceId, activate: false })
+        if (anchorId !== null && anchorId !== newId) {
+          tabs.splitTabs(anchorId, newId, 'right', newId)
+        } else {
+          tabs.activate(newId)
+        }
+      }
+      return
+    }
+  }
+})
+onSurface('tab:mute', (t, id: unknown) => num(id) && t.toggleMute(id))
+onSurface('tab:sleep', (t, id: unknown) => num(id) && t.sleepTab(id, true))
+onSurface('tab:menu', (t, id: unknown) => num(id) && t.tabMenu(id))
+onSurface('split:with', (t, anchorId: unknown, otherId: unknown, placement?: unknown) => {
+  if (!num(anchorId) || !num(otherId)) return
+  const side = placement === 'left' ? 'left' : 'right'
+  t.splitTabs(anchorId, otherId, side, otherId)
+})
+onSurface('split:next', (t) => t.splitWithNext())
+onSurface('split:unsplit', (t, tabId?: unknown) => t.unsplit(num(tabId) ? tabId : undefined))
+on('split:ratio', (t, groupId: unknown, kind: unknown, ratio: unknown) => {
+  if (str(groupId) && (kind === 'col' || kind === 'row') && num(ratio)) {
+    t.setSplitRatio(groupId, kind, ratio)
+  }
+})
+on('split:swap', (t, groupId: unknown) => {
+  if (str(groupId)) t.swapSplit(groupId)
+})
+onSurface('workspace:switch', (t, id: unknown) => str(id) && t.switchWorkspace(id))
+onSurface('compact:toggle', () => toggleCompactMode())
+onSurface('compact:pin', (_t, kind: unknown, pinned: unknown) => {
   if (kind !== 'omnibox' && kind !== 'sidebar') return
   const k = kind as CompactPinKind
   compactPins[k] = pinned === true
@@ -617,7 +1307,7 @@ on('compact:pin', (_t, kind: unknown, pinned: unknown) => {
     )
   }
 })
-on('compact:hover', (_t, edge: unknown, hovering: unknown) => {
+onSurface('compact:hover', (_t, edge: unknown, hovering: unknown) => {
   if (edge !== 'sidebar' && edge !== 'toolbar') return
   compactHover[edge] = hovering === true
   if (settings?.get().compactMode && !tabs?.isPageFullscreen()) {
@@ -633,7 +1323,7 @@ on('bounds', (t, r: unknown) => {
   if (rect && num(rect.x) && num(rect.y) && num(rect.width) && num(rect.height)) t.setBounds(rect)
 })
 
-/** Calls from the UI that answer back. Pages can't reach these either. */
+/** Calls from the main UI only (privileged settings/privacy/permissions/overlay). */
 function handle(channel: string, f: (...args: unknown[]) => unknown): void {
   ipcMain.handle(channel, (e, ...args) => {
     if (!fromUi(e)) throw new Error('not allowed')
@@ -641,7 +1331,15 @@ function handle(channel: string, f: (...args: unknown[]) => unknown): void {
   })
 }
 
-handle('workspace:create', (input) => {
+/** Calls from either the main UI or the floating compact-mode panels (workspaces, suggest, read-only history/bookmarks). */
+function handleSurface(channel: string, f: (...args: unknown[]) => unknown): void {
+  ipcMain.handle(channel, (e, ...args) => {
+    if (!fromUiSurface(e)) throw new Error('not allowed')
+    return f(...args)
+  })
+}
+
+handleSurface('workspace:create', (input) => {
   if (!tabs || !input || typeof input !== 'object' || Array.isArray(input)) return null
   const raw = input as Record<string, unknown>
   const req: WorkspaceCreateInput = {
@@ -653,7 +1351,7 @@ handle('workspace:create', (input) => {
   return tabs.createWorkspace(req)
 })
 
-handle('workspace:update', (id, patch) => {
+handleSurface('workspace:update', (id, patch) => {
   if (!tabs || !str(id) || !patch || typeof patch !== 'object' || Array.isArray(patch)) return null
   const raw = patch as Record<string, unknown>
   const req: WorkspaceUpdateInput = {}
@@ -664,12 +1362,12 @@ handle('workspace:update', (id, patch) => {
   return tabs.updateWorkspace(id, req)
 })
 
-handle('workspace:delete', (id) => {
+handleSurface('workspace:delete', (id) => {
   if (!tabs || !str(id)) return false
   return tabs.deleteWorkspace(id)
 })
 
-handle('suggest', (input) => {
+handleSurface('suggest', (input) => {
   if (!str(input) || !store || !tabs) return []
   const open: Candidate[] = tabs
     .allTabs()
@@ -679,7 +1377,7 @@ handle('suggest', (input) => {
 })
 handle('overlay', (open) => tabs?.setOverlay(open === true) ?? null)
 on('overlay:hide', (t) => t.hidePageForOverlay())
-handle('history:list', (query, before) => store?.history(str(query) ? query : '', num(before) ? before : null) ?? [])
+handleSurface('history:list', (query, before) => store?.history(str(query) ? query : '', num(before) ? before : null) ?? [])
 handle('history:delete', (id) => {
   if (num(id)) store?.deleteVisit(id)
   dataChanged()
@@ -689,8 +1387,8 @@ handle('history:clear', (msAgo) => {
   store?.clear(msAgo === 0 ? 0 : Date.now() - msAgo)
   dataChanged()
 })
-handle('bookmarks:list', () => store?.bookmarks() ?? [])
-on('bookmark:toggle', (t) => t.toggleBookmark())
+handleSurface('bookmarks:list', () => store?.bookmarks() ?? [])
+onSurface('bookmark:toggle', (t) => t.toggleBookmark())
 handle('bookmark:remove', (url) => {
   if (str(url)) store?.removeBookmark(url)
   dataChanged()
@@ -772,27 +1470,27 @@ on('find:start', (t, text: unknown, opts: unknown) => {
   })
 })
 on('find:stop', (t) => t.stopFind())
-on('download:pause', (_t, id: unknown) => {
+onSurface('download:pause', (_t, id: unknown) => {
   if (num(id)) downloads?.pause(id)
 })
-on('download:resume', (_t, id: unknown) => {
+onSurface('download:resume', (_t, id: unknown) => {
   if (num(id)) downloads?.resume(id)
 })
-on('download:cancel', (_t, id: unknown) => {
+onSurface('download:cancel', (_t, id: unknown) => {
   if (num(id)) downloads?.cancel(id)
 })
-on('download:open', (_t, id: unknown) => {
+onSurface('download:open', (_t, id: unknown) => {
   if (num(id)) downloads?.open(id)
 })
-on('download:show', (_t, id: unknown) => {
+onSurface('download:show', (_t, id: unknown) => {
   if (num(id)) downloads?.show(id)
 })
-on('download:clear', () => {
+onSurface('download:clear', () => {
   downloads?.clearFinished()
 })
 handle('update:state', () => updater?.state() ?? null)
-handle('update:check', () => updater?.check(true) ?? null)
-on('update:install', () => updater?.install())
+handleSurface('update:check', () => updater?.check(true) ?? null)
+onSurface('update:install', () => updater?.install())
 
 nativeTheme.on('updated', () => {
   if (!win || win.isDestroyed()) return

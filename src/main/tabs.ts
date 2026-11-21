@@ -19,9 +19,22 @@ import {
   updateWorkspaceEntry,
   workspaceAtShortcut,
   workspacePartition,
-  type SavedSession
+  type SavedSession,
+  type SavedSplitGroup
 } from '../shared/workspaces'
+import {
+  MAX_SPLIT_PANES,
+  computeSplitLayout,
+  dissolveSplitGroup,
+  findSplitGroup,
+  joinSplitGroup,
+  keepSplitGroupsContiguous,
+  removeTabFromSplit,
+  updateSplitGroupRatio,
+  type SplitGroup
+} from '../shared/split'
 import { canSleepTab, type SleepPolicy } from '../shared/sleep'
+import { shouldPeekWindowOpen } from '../shared/peek'
 import { attachPageCompat } from './compat'
 
 interface Tab {
@@ -56,10 +69,22 @@ export interface TabHooks {
   toggleCompactMode(): void
   /** Notifies compact mode when a native context menu opens or closes. */
   onMenuOpen?(open: boolean): void
-  /** Notifies compact mode when the address bar is about to be focused. */
-  onFocusOmnibox?(): void
+  /** Notifies compact mode when the address bar is about to be focused. Returns true if handled externally. */
+  onFocusOmnibox?(): boolean | void
   /** Focuses the title-bar menu bar when standalone Alt is pressed and released. */
   onFocusMenuBar?(): void
+  /** Called whenever BrowserState is published, so floating UI panels receive the same state feed. */
+  onState?(state: BrowserState): void
+  /** Called when Downloads panel is toggled (Ctrl+J); returns true if handled by floating compact sidebar. */
+  onToggleDownloads?(): boolean | void
+  /** Called when a page enters or leaves HTML5 full screen. */
+  onPageFullscreen?(on: boolean): void
+  /** Opens or toggles the Ctrl+K command palette. */
+  onTogglePalette?(mode: 'command' | 'new-tab'): void
+  /** Called on Ctrl+T when no URL is given; returns true if handled (e.g. opening command bar in new-tab mode). */
+  onNewTabShortcut?(): boolean
+  /** Opens a link in the floating Peek preview window (Shift+click, Alt+click, or right-click "Peek link"). */
+  openPeek?(url: string, sourceTabId: number, workspaceId: string, partition: string): void
   /** Quits the application (Ctrl+Q). */
   quit?(): void
 }
@@ -72,6 +97,9 @@ export class Tabs {
   private workspaceActiveTab = new Map<string, number>()
   private workspaceSwitchDir: -1 | 0 | 1 = 0
   private tabs: Tab[] = []
+  /** Split groups per workspace ID (each group holds 2..4 tab IDs). */
+  private splits = new Map<string, SplitGroup[]>()
+  private nextSplitId = 1
   private activeId: number | null = null
   private nextId = 1
   private bounds: Rect | null = null
@@ -79,7 +107,7 @@ export class Tabs {
   private fullscreenTab: Tab | null = null
   /** True when Orbit put the window into full screen for the page (vs the user pressing F11 first). */
   private fullscreenByPage = false
-  private attached: WebContentsView | null = null
+  private attachedViews = new Set<WebContentsView>()
   private closed: { url: string; title: string; pinned: boolean; workspaceId: string }[] = []
   private emitQueued = false
   private saveTimer: NodeJS.Timeout | null = null
@@ -95,6 +123,10 @@ export class Tabs {
   private lastFocusTarget: 'ui' | 'page' = 'ui'
   /** Tracks a standalone Alt key press so Alt-release focuses the menu bar without clashing with Alt+Left/Tab. */
   private altStandalone = false
+  /** Tracks held Shift/Alt modifiers for Shift+click and Alt+click link preview ("peek"). */
+  private shiftHeld = false
+  private altHeld = false
+  private lastAltAt = 0
 
   constructor(
     private win: BrowserWindow,
@@ -107,6 +139,8 @@ export class Tabs {
     })
     this.win.on('blur', () => {
       this.altStandalone = false
+      this.shiftHeld = false
+      this.altHeld = false
     })
   }
 
@@ -120,12 +154,52 @@ export class Tabs {
     return {
       tabs: wsTabs.map((t) => ({ ...t.info, bookmarked: !!t.info.url && this.hooks.isBookmarked(t.info.url) })),
       activeId: this.activeId,
+      splits: this.workspaceSplits(this.activeWorkspaceId).map((g) => ({ ...g, tabIds: [...g.tabIds] })),
       workspaces: this.workspaces.map((w) => ({ ...w })),
       activeWorkspaceId: this.activeWorkspaceId,
       tabCounts,
       workspaceSwitchDir: this.workspaceSwitchDir,
       canReopenClosed: this.closed.length > 0
     }
+  }
+
+  private workspaceSplits(wsId = this.activeWorkspaceId): SplitGroup[] {
+    return this.splits.get(wsId) ?? []
+  }
+
+  private setWorkspaceSplits(wsId: string, groups: SplitGroup[]): void {
+    if (groups.length) this.splits.set(wsId, groups)
+    else this.splits.delete(wsId)
+  }
+
+  private splitGroupOf(tabId: number | null): SplitGroup | undefined {
+    if (tabId === null) return undefined
+    const tab = this.get(tabId)
+    if (!tab) return undefined
+    return findSplitGroup(this.workspaceSplits(tab.info.workspaceId), tabId)
+  }
+
+  /** Returns the currently visible tabs (1 for normal view, 2..4 when active tab is in a split group). */
+  private visibleTabs(): Tab[] {
+    const active = this.active
+    if (!active) return []
+    const group = this.splitGroupOf(active.info.id)
+    if (!group) return [active]
+    const panes = group.tabIds.map((id) => this.get(id)).filter((t): t is Tab => !!t && t.info.workspaceId === active.info.workspaceId)
+    return panes.length >= 2 ? panes : [active]
+  }
+
+  private isVisibleTab(tabId: number): boolean {
+    return this.visibleTabs().some((t) => t.info.id === tabId)
+  }
+
+  /** Returns the current bounds of all attached web views (useful for diagnostics/tests). */
+  attachedViewBounds(): Rect[] {
+    const out: Rect[] = []
+    for (const v of this.attachedViews) {
+      if (!v.webContents.isDestroyed()) out.push(v.getBounds())
+    }
+    return out
   }
 
   /** All tabs across all workspaces, for omnibox "Switch to tab" suggestions. */
@@ -198,9 +272,9 @@ export class Tabs {
     const view = tab.view
     if (!view) return
     tab.view = null
-    if (this.attached === view) {
+    if (this.attachedViews.has(view)) {
       if (!this.win.isDestroyed()) this.win.contentView.removeChildView(view)
-      this.attached = null
+      this.attachedViews.delete(view)
     }
     if (!view.webContents.isDestroyed()) view.webContents.close()
   }
@@ -214,7 +288,8 @@ export class Tabs {
     if (nextIdx < 0) return
 
     const dir: -1 | 1 = explicitDir ?? (nextIdx > prevIdx ? 1 : -1)
-    if (this.active) this.active.lastActiveAt = Date.now()
+    const now = Date.now()
+    for (const vt of this.visibleTabs()) vt.lastActiveAt = now
     this.stopFind(true)
     if (this.fullscreenTab) this.exitPageFullscreen(true)
 
@@ -255,7 +330,7 @@ export class Tabs {
           this.destroyView(tab)
         }
         if (currentUrl && isAllowedUrl(currentUrl) && !tab.info.error) {
-          if (tab.info.id === this.activeId) {
+          if (this.isVisibleTab(tab.info.id)) {
             tab.info.sleeping = false
             tab.pendingUrl = undefined
             const view = this.ensureView(tab)
@@ -290,6 +365,7 @@ export class Tabs {
       this.destroyView(tab)
     }
     this.tabs = this.tabs.filter((t) => t.info.workspaceId !== id)
+    this.splits.delete(id)
     this.closed = this.closed.filter((c) => c.workspaceId !== id)
     this.workspaceActiveTab.delete(id)
     this.workspaces = workspaces
@@ -372,6 +448,8 @@ export class Tabs {
     const wsId = tab.info.workspaceId
     const wsBefore = this.workspaceTabs(wsId)
     const wsIndex = wsBefore.findIndex((t) => t.info.id === id)
+    const prevGroup = this.splitGroupOf(id)
+    const siblingInGroup = prevGroup ? prevGroup.tabIds.find((tid) => tid !== id) : undefined
 
     if (this.activeId === id) this.stopFind(true)
     if (this.fullscreenTab?.info.id === id) {
@@ -384,6 +462,9 @@ export class Tabs {
 
     const globalIdx = this.tabs.indexOf(tab)
     if (globalIdx >= 0) this.tabs.splice(globalIdx, 1)
+    if (prevGroup) {
+      this.setWorkspaceSplits(wsId, removeTabFromSplit(this.workspaceSplits(wsId), id))
+    }
     if (tab.info.url) {
       this.closed.push({ url: tab.info.url, title: tab.info.title, pinned: tab.info.pinned, workspaceId: wsId })
       if (this.closed.length > 25) this.closed.shift()
@@ -392,16 +473,20 @@ export class Tabs {
     this.destroyView(tab)
 
     const wsAfter = this.workspaceTabs(wsId)
+    const preferredNext =
+      (siblingInGroup !== undefined ? wsAfter.find((t) => t.info.id === siblingInGroup) : undefined) ??
+      wsAfter[wsIndex] ??
+      wsAfter[wsIndex - 1]
     if (this.workspaceActiveTab.get(wsId) === id) {
-      const next = wsAfter[wsIndex] ?? wsAfter[wsIndex - 1]
-      if (next) this.workspaceActiveTab.set(wsId, next.info.id)
+      if (preferredNext) this.workspaceActiveTab.set(wsId, preferredNext.info.id)
       else this.workspaceActiveTab.delete(wsId)
     }
 
     if (this.activeId === id) {
-      const next = wsAfter[wsIndex] ?? wsAfter[wsIndex - 1]
       this.activeId = null
-      if (next) this.activate(next.info.id)
+      if (preferredNext) this.activate(preferredNext.info.id)
+    } else if (prevGroup && this.activeId !== null && prevGroup.tabIds.includes(this.activeId)) {
+      this.layout()
     }
 
     if (wsId === this.activeWorkspaceId && !wsAfter.length) {
@@ -425,12 +510,29 @@ export class Tabs {
     this.create(last.url, { pinned: last.pinned, title: last.title, workspaceId: this.activeWorkspaceId })
   }
 
+  private wakeTab(tab: Tab, now: number): void {
+    tab.lastActiveAt = now
+    if (tab.info.sleeping) {
+      tab.info.sleeping = false
+      if (!tab.pendingUrl && this.showsPage(tab)) tab.pendingUrl = tab.info.url
+    }
+    if (tab.pendingUrl) {
+      const url = tab.pendingUrl
+      tab.pendingUrl = undefined
+      if (isAllowedUrl(url)) {
+        const view = this.ensureView(tab)
+        void view.webContents.loadURL(url).catch(() => {})
+      }
+    }
+  }
+
   activate(id: number, keepSwitchDir = false): void {
     const tab = this.get(id)
     if (!tab) return
     const now = Date.now()
+    const prevVisible = this.visibleTabs()
     if (this.active && this.active.info.id !== id) {
-      this.active.lastActiveAt = now
+      for (const vt of prevVisible) vt.lastActiveAt = now
       this.stopFind(true)
       if (this.fullscreenTab) this.exitPageFullscreen(true)
     }
@@ -445,20 +547,9 @@ export class Tabs {
 
     this.activeId = id
     this.workspaceActiveTab.set(tab.info.workspaceId, id)
-    tab.lastActiveAt = now
 
-    if (tab.info.sleeping) {
-      tab.info.sleeping = false
-      if (!tab.pendingUrl && this.showsPage(tab)) tab.pendingUrl = tab.info.url
-    }
-
-    if (tab.pendingUrl) {
-      const url = tab.pendingUrl
-      tab.pendingUrl = undefined
-      if (isAllowedUrl(url)) {
-        const view = this.ensureView(tab)
-        void view.webContents.loadURL(url).catch(() => {})
-      }
+    for (const vt of this.visibleTabs()) {
+      this.wakeTab(vt, now)
     }
 
     this.layout()
@@ -467,6 +558,21 @@ export class Tabs {
     } else {
       this.focusOmnibox()
     }
+    this.changed()
+  }
+
+  /** Focuses another visible pane when the user clicks inside its WebContentsView. */
+  private focusPane(id: number): void {
+    const tab = this.get(id)
+    if (!tab || id === this.activeId || !this.isVisibleTab(id)) return
+    const now = Date.now()
+    if (this.active) this.active.lastActiveAt = now
+    this.stopFind(true)
+    this.activeId = id
+    this.workspaceActiveTab.set(tab.info.workspaceId, id)
+    tab.lastActiveAt = now
+    this.lastFocusTarget = 'page'
+    this.workspaceSwitchDir = 0
     this.changed()
   }
 
@@ -548,27 +654,29 @@ export class Tabs {
   }
 
   /**
-   * Floating UI opens or closes above the page. Opening returns a picture of the page (JPEG data
-   * URL) for the UI to show in its place while the real page is taken out.
+   * Floating UI opens or closes above the page. Opening returns a map of tabId -> JPEG data URL
+   * for every visible pane so the UI can show screenshots in their place while real views hide.
    */
-  async setOverlay(open: boolean): Promise<string | null> {
+  async setOverlay(open: boolean): Promise<Record<number, string> | null> {
     if (!open) {
       this.overlayOpen = false
       this.layout()
       return null
     }
-    const view = this.attached
-    let shot: string | null = null
-    if (view && !view.webContents.isDestroyed()) {
-      try {
-        const img = await view.webContents.capturePage()
-        if (!img.isEmpty()) shot = 'data:image/jpeg;base64,' + img.toJPEG(82).toString('base64')
-      } catch {
-        shot = null
+    const shots: Record<number, string> = {}
+    for (const tab of this.visibleTabs()) {
+      const view = tab.view
+      if (view && this.attachedViews.has(view) && !view.webContents.isDestroyed()) {
+        try {
+          const img = await view.webContents.capturePage()
+          if (!img.isEmpty()) shots[tab.info.id] = 'data:image/jpeg;base64,' + img.toJPEG(82).toString('base64')
+        } catch {
+          /* ignore capture failure */
+        }
       }
     }
     this.overlayOpen = true
-    return shot
+    return Object.keys(shots).length ? shots : null
   }
 
   /** Takes the page out once the UI is showing its picture (sent after setOverlay(true)). */
@@ -580,6 +688,15 @@ export class Tabs {
     const tab = this.get(id)
     if (!tab) return
     tab.info.pinned = !tab.info.pinned
+    if (tab.info.pinned) {
+      const wsId = tab.info.workspaceId
+      const prev = this.workspaceSplits(wsId)
+      const next = removeTabFromSplit(prev, id)
+      if (next.length !== prev.length || prev.some((g, i) => g.tabIds.length !== next[i]?.tabIds.length)) {
+        this.setWorkspaceSplits(wsId, next)
+        this.layout()
+      }
+    }
     this.sortPinned(tab.info.workspaceId)
     this.workspaceSwitchDir = 0
     this.changed()
@@ -594,17 +711,130 @@ export class Tabs {
     if (from < 0) return
     const [moved] = wsTabs.splice(from, 1)
     wsTabs.splice(Math.max(0, Math.min(toIndex, wsTabs.length)), 0, moved)
-    const sorted = [...wsTabs.filter((t) => t.info.pinned), ...wsTabs.filter((t) => !t.info.pinned)]
-    this.replaceWorkspaceTabs(wsId, sorted)
+    const pinned = wsTabs.filter((t) => t.info.pinned)
+    const unpinned = keepSplitGroupsContiguous(
+      wsTabs.filter((t) => !t.info.pinned),
+      (t) => t.info.id,
+      this.workspaceSplits(wsId)
+    )
+    this.replaceWorkspaceTabs(wsId, [...pinned, ...unpinned])
     this.workspaceSwitchDir = 0
     this.changed()
   }
 
-  /** Pinned tabs always sit at the top within each workspace, in the order they were in. */
+  /** Pinned tabs always sit at the top within each workspace, and split groups stay contiguous. */
   private sortPinned(wsId: string): void {
     const wsTabs = this.workspaceTabs(wsId)
-    const sorted = [...wsTabs.filter((t) => t.info.pinned), ...wsTabs.filter((t) => !t.info.pinned)]
-    this.replaceWorkspaceTabs(wsId, sorted)
+    const pinned = wsTabs.filter((t) => t.info.pinned)
+    const unpinned = keepSplitGroupsContiguous(
+      wsTabs.filter((t) => !t.info.pinned),
+      (t) => t.info.id,
+      this.workspaceSplits(wsId)
+    )
+    this.replaceWorkspaceTabs(wsId, [...pinned, ...unpinned])
+  }
+
+  // ---- split view ---------------------------------------------------------
+
+  /** Splits `anchorId` with `otherId` (or adds `otherId` to `anchorId`'s split group, up to 4 panes). */
+  splitTabs(anchorId: number, otherId: number, placement: 'left' | 'right' = 'right', focusId = otherId): boolean {
+    const anchor = this.get(anchorId)
+    const other = this.get(otherId)
+    if (!anchor || !other || anchorId === otherId) return false
+    if (anchor.info.workspaceId !== other.info.workspaceId) return false
+    const wsId = anchor.info.workspaceId
+
+    // Split panes live in the regular tab strip so combined rows stay clean.
+    if (anchor.info.pinned) anchor.info.pinned = false
+    if (other.info.pinned) other.info.pinned = false
+
+    const current = this.workspaceSplits(wsId)
+    const { groups, group } = joinSplitGroup(current, anchorId, otherId, placement, () => `split-${this.nextSplitId++}`)
+    if (!group) return false
+
+    this.setWorkspaceSplits(wsId, groups)
+    this.sortPinned(wsId)
+    if (this.fullscreenTab) this.exitPageFullscreen(true)
+    this.activate(focusId)
+    return true
+  }
+
+  /** Ctrl+Shift+\: splits the active tab with the next tab in the workspace, or unsplits if already split. */
+  splitWithNext(): void {
+    const active = this.active
+    if (!active) return
+    if (this.splitGroupOf(active.info.id)) {
+      this.unsplit(active.info.id)
+      return
+    }
+    const wsTabs = this.workspaceTabs(active.info.workspaceId).filter((t) => !t.info.pinned)
+    let partner: Tab | undefined
+    if (wsTabs.length >= 2) {
+      const idx = wsTabs.findIndex((t) => t.info.id === active.info.id)
+      partner = idx >= 0 ? wsTabs[(idx + 1) % wsTabs.length] : wsTabs[0]
+      if (partner?.info.id === active.info.id) partner = wsTabs.find((t) => t.info.id !== active.info.id)
+    }
+    if (!partner) {
+      const otherAny = this.workspaceTabs(active.info.workspaceId).find((t) => t.info.id !== active.info.id)
+      if (otherAny) {
+        partner = otherAny
+      } else {
+        const createdId = this.create('', { workspaceId: active.info.workspaceId, activate: false, after: active.info.id })
+        partner = this.get(createdId)
+      }
+    }
+    if (partner) this.splitTabs(active.info.id, partner.info.id, 'right', partner.info.id)
+  }
+
+  /** Dissolves the split group containing `tabId` (or the active tab). */
+  unsplit(tabId?: number): void {
+    const targetId = tabId ?? this.activeId
+    const group = this.splitGroupOf(targetId)
+    const tab = targetId !== null ? this.get(targetId) : undefined
+    if (!group || !tab) return
+    const wsId = tab.info.workspaceId
+    this.setWorkspaceSplits(wsId, dissolveSplitGroup(this.workspaceSplits(wsId), group.id))
+    this.layout()
+    this.workspaceSwitchDir = 0
+    this.changed()
+  }
+
+  /** Removes one tab from its split group without dissolving the remaining panes (when >2). */
+  removeFromSplit(tabId: number): void {
+    const tab = this.get(tabId)
+    if (!tab) return
+    const wsId = tab.info.workspaceId
+    const prev = this.workspaceSplits(wsId)
+    if (!findSplitGroup(prev, tabId)) return
+    this.setWorkspaceSplits(wsId, removeTabFromSplit(prev, tabId))
+    this.layout()
+    this.workspaceSwitchDir = 0
+    this.changed()
+  }
+
+  setSplitRatio(groupId: string, kind: 'col' | 'row', ratio: number): void {
+    const wsId = this.activeWorkspaceId
+    const prev = this.workspaceSplits(wsId)
+    if (!prev.some((g) => g.id === groupId)) return
+    this.setWorkspaceSplits(wsId, updateSplitGroupRatio(prev, groupId, kind, ratio))
+    this.layout()
+    this.workspaceSwitchDir = 0
+    this.changed()
+  }
+
+  swapSplit(groupId: string): void {
+    const wsId = this.activeWorkspaceId
+    const prev = this.workspaceSplits(wsId)
+    const idx = prev.findIndex((g) => g.id === groupId)
+    if (idx < 0) return
+    const next = prev.map((g, i) =>
+      i === idx ? { ...g, tabIds: [...g.tabIds.slice(1), g.tabIds[0]] } : { ...g, tabIds: [...g.tabIds] }
+    )
+    this.setWorkspaceSplits(wsId, next)
+    this.sortPinned(wsId)
+    this.layout()
+    this.workspaceSwitchDir = 0
+    this.changed()
   }
 
   private replaceWorkspaceTabs(wsId: string, ordered: Tab[]): void {
@@ -628,7 +858,7 @@ export class Tabs {
   private canSleep(tab: Tab, manual: boolean, now = Date.now()): boolean {
     return canSleepTab(
       {
-        isActive: tab.info.id === this.activeId,
+        isActive: this.isVisibleTab(tab.info.id),
         sleeping: tab.info.sleeping,
         hasLoadedWebView: !!tab.view && !tab.view.webContents.isDestroyed(),
         url: tab.info.url,
@@ -768,28 +998,47 @@ export class Tabs {
     return !!tab.info.url && !tab.info.error && !isInternalUrl(tab.info.url)
   }
 
-  /** Puts the active tab's page in the window (or takes it out), at the place the UI gave. */
+  /** Puts visible tab page view(s) in the window (or takes them out), at the place the UI gave. */
   private layout(): void {
     if (this.win.isDestroyed()) return
-    const tab = this.active
-    const want = tab && tab.view && !tab.view.webContents.isDestroyed() && this.bounds && !this.overlayOpen && this.showsPage(tab) ? tab.view : null
-    if (this.attached && this.attached !== want) {
-      this.win.contentView.removeChildView(this.attached)
-      this.attached = null
-    }
-    if (want && this.bounds) {
-      if (this.attached !== want) {
-        this.win.contentView.addChildView(want)
-        this.attached = want
-      }
-      if (this.fullscreenTab?.view === want) {
+    const desired = new Map<WebContentsView, { rect: Rect; radius: number }>()
+
+    if (this.bounds && !this.overlayOpen) {
+      if (this.fullscreenTab && this.fullscreenTab.view && !this.fullscreenTab.view.webContents.isDestroyed() && this.showsPage(this.fullscreenTab)) {
         const [width, height] = this.win.getContentSize()
-        want.setBounds({ x: 0, y: 0, width, height })
-        this.radius(want, 0)
+        desired.set(this.fullscreenTab.view, { rect: { x: 0, y: 0, width, height }, radius: 0 })
       } else {
-        want.setBounds(this.bounds)
-        this.radius(want, 10)
+        const vis = this.visibleTabs()
+        const group = this.activeId !== null ? this.splitGroupOf(this.activeId) : undefined
+        const splitLayout = computeSplitLayout(
+          this.bounds,
+          vis.length,
+          group ? { colRatio: group.colRatio, rowRatio: group.rowRatio } : {}
+        )
+        for (let i = 0; i < vis.length; i++) {
+          const tab = vis[i]
+          const slot = splitLayout.panes[i]
+          if (slot && tab.view && !tab.view.webContents.isDestroyed() && this.showsPage(tab)) {
+            desired.set(tab.view, { rect: slot.view, radius: 10 })
+          }
+        }
       }
+    }
+
+    for (const view of [...this.attachedViews]) {
+      if (!desired.has(view)) {
+        this.win.contentView.removeChildView(view)
+        this.attachedViews.delete(view)
+      }
+    }
+
+    for (const [view, cfg] of desired) {
+      if (!this.attachedViews.has(view)) {
+        this.win.contentView.addChildView(view)
+        this.attachedViews.add(view)
+      }
+      view.setBounds(cfg.rect)
+      this.radius(view, cfg.radius)
     }
   }
 
@@ -820,6 +1069,7 @@ export class Tabs {
       if (restoreWindow && this.win.isFullScreen()) this.win.setFullScreen(false)
     }
     if (!this.win.isDestroyed()) this.win.webContents.send('page-fullscreen', !!this.fullscreenTab)
+    this.hooks.onPageFullscreen?.(!!this.fullscreenTab)
     this.layout()
   }
 
@@ -835,6 +1085,7 @@ export class Tabs {
     }
     if (restoreWindow && this.win.isFullScreen()) this.win.setFullScreen(false)
     if (!this.win.isDestroyed()) this.win.webContents.send('page-fullscreen', false)
+    this.hooks.onPageFullscreen?.(false)
     this.layout()
   }
 
@@ -885,10 +1136,41 @@ export class Tabs {
     if (!tab) return
     const wsTabs = this.workspaceTabs(tab.info.workspaceId)
     const muted = tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents.isAudioMuted() : tab.info.muted
+    const tabGroup = this.splitGroupOf(id)
+    const activeTab = this.active
+    const activeGroup = activeTab ? this.splitGroupOf(activeTab.info.id) : undefined
+    const sameWsAsActive = !!activeTab && activeTab.info.workspaceId === tab.info.workspaceId
+    const canSplitWithActive =
+      sameWsAsActive &&
+      activeTab!.info.id !== id &&
+      (!activeGroup || (!activeGroup.tabIds.includes(id) && activeGroup.tabIds.length < MAX_SPLIT_PANES))
+
+    const splitItems: Electron.MenuItemConstructorOptions[] = []
+    if (canSplitWithActive) {
+      splitItems.push({
+        label: activeGroup ? 'Add to split view' : 'Split with active tab',
+        click: () => this.splitTabs(activeTab!.info.id, id, 'right', id)
+      })
+    } else if (!tabGroup && activeTab?.info.id === id) {
+      splitItems.push({
+        label: 'Split with next tab',
+        accelerator: 'CmdOrCtrl+Shift+\\',
+        click: () => this.splitWithNext()
+      })
+    }
+    if (tabGroup) {
+      splitItems.push({ label: 'Swap panes', click: () => this.swapSplit(tabGroup.id) })
+      if (tabGroup.tabIds.length > 2) {
+        splitItems.push({ label: 'Remove from split', click: () => this.removeFromSplit(id) })
+      }
+      splitItems.push({ label: 'Unsplit', click: () => this.unsplit(id) })
+    }
+
     this.hooks.onMenuOpen?.(true)
     Menu.buildFromTemplate([
       { label: 'New tab', click: () => this.create('', { workspaceId: tab.info.workspaceId }) },
       { type: 'separator' },
+      ...(splitItems.length ? [...splitItems, { type: 'separator' as const }] : []),
       {
         label: 'Reload',
         enabled: this.showsPage(tab),
@@ -918,13 +1200,14 @@ export class Tabs {
 
   focusOmnibox(): void {
     if (this.fullscreenTab) this.exitPageFullscreen(true)
-    this.hooks.onFocusOmnibox?.()
+    if (this.hooks.onFocusOmnibox?.() === true) return
     this.win.webContents.focus()
     this.win.webContents.send('focus-omnibox')
   }
 
   toggleDownloads(): void {
     if (this.fullscreenTab) this.exitPageFullscreen(true)
+    if (this.hooks.onToggleDownloads?.() === true) return
     if (!this.win.isDestroyed()) this.win.webContents.send('downloads:toggle')
   }
 
@@ -974,23 +1257,53 @@ export class Tabs {
 
   // ---- keyboard -------------------------------------------------------------
 
+  /**
+   * Intercepts Alt+click on a link (which Chromium turns into SaveLinkAs / will-download)
+   * and opens it in the floating Peek preview window instead of downloading the page.
+   */
+  consumeAltPeek(wc: WebContents, url: string): boolean {
+    if (!this.altHeld && Date.now() - this.lastAltAt > 450) return false
+    if (!isAllowedUrl(url)) return false
+    const tab = this.tabs.find((t) => t.view?.webContents === wc)
+    if (!tab) return false
+    this.altStandalone = false
+    this.altHeld = false
+    this.hooks.openPeek?.(url, tab.info.id, tab.info.workspaceId, this.partitionFor(tab.info.workspaceId))
+    return true
+  }
+
   /** Browser shortcuts, from the UI or from a page. True when one was used. */
   shortcut(input: Input): boolean {
+    const isShift = input.key === 'Shift' || input.code === 'ShiftLeft' || input.code === 'ShiftRight'
     const isAlt = input.key === 'Alt' || input.code === 'AltLeft' || input.code === 'AltRight'
     if (input.type === 'keyUp') {
-      if (isAlt && this.altStandalone) {
-        this.altStandalone = false
-        this.hooks.onFocusMenuBar?.()
-        return true
+      if (isShift) this.shiftHeld = false
+      if (isAlt) {
+        this.altHeld = false
+        this.lastAltAt = Date.now()
+        if (this.altStandalone) {
+          this.altStandalone = false
+          this.hooks.onFocusMenuBar?.()
+          return true
+        }
       }
       return false
     }
     if (input.type !== 'keyDown') return false
+    if (isShift) {
+      this.shiftHeld = true
+      this.altStandalone = false
+      return false
+    }
     if (isAlt) {
+      this.altHeld = true
+      this.lastAltAt = Date.now()
       if (!input.control && !input.meta && !input.shift && !input.isAutoRepeat) this.altStandalone = true
       else this.altStandalone = false
       return false
     }
+    this.shiftHeld = input.shift
+    this.altHeld = input.alt
     this.altStandalone = false
 
     const mod = process.platform === 'darwin' ? input.meta : input.control
@@ -1017,9 +1330,11 @@ export class Tabs {
 
     if (mod && !input.alt) {
       if (key === 'q' && !input.shift) return run(() => this.hooks.quit?.())
+      if (key === 'k' && !input.shift) return run(() => this.hooks.onTogglePalette?.('command'))
       if (key === 's' && input.shift) return run(() => this.hooks.toggleCompactMode())
+      if (input.shift && (key === '\\' || key === '|' || input.code === 'Backslash')) return run(() => this.splitWithNext())
       if (key === 't' && input.shift) return run(() => this.reopenClosed())
-      if (key === 't') return run(() => this.create())
+      if (key === 't') return run(() => { if (!this.hooks.onNewTabShortcut?.()) this.create() })
       if (key === 'w') return run(() => this.activeId !== null && this.close(this.activeId))
       if (key === 'l') return run(() => this.focusOmnibox())
       if (key === 'f') return run(() => this.openFind())
@@ -1084,7 +1399,26 @@ export class Tabs {
     }
 
     wc.on('focus', () => {
-      if (isCurrent()) this.lastFocusTarget = 'page'
+      if (!isCurrent()) return
+      this.lastFocusTarget = 'page'
+      if (info.id !== this.activeId && this.isVisibleTab(info.id)) {
+        this.focusPane(info.id)
+      }
+    })
+    wc.on('before-mouse-event', (_e, mouse) => {
+      if (!isCurrent()) return
+      if (mouse.type === 'mouseDown') {
+        this.lastFocusTarget = 'page'
+        if (mouse.modifiers?.includes('shift')) this.shiftHeld = true
+        if (mouse.modifiers?.includes('alt')) {
+          this.altHeld = true
+          this.lastAltAt = Date.now()
+          this.altStandalone = false
+        }
+        if (info.id !== this.activeId && this.isVisibleTab(info.id)) {
+          this.focusPane(info.id)
+        }
+      }
     })
     wc.on('before-input-event', (e, input) => {
       if (this.shortcut(input)) e.preventDefault()
@@ -1115,11 +1449,17 @@ export class Tabs {
       }
     })
 
-    // Links that open a new tab become a tab in the same workspace. Real pop-ups stay pop-ups
-    // and inherit the workspace's session partition and security baseline.
-    wc.setWindowOpenHandler(({ url, disposition }) => {
+    // Links that open a new tab become a tab in the same workspace. Shift+click opens a floating
+    // Peek preview. Real pop-ups (window.open with explicit features, e.g. "Sign in with ...") stay pop-ups.
+    wc.setWindowOpenHandler(({ url, disposition, features }) => {
       if (!isAllowedUrl(url)) {
         if (parseExternalAppUrl(url)) this.hooks.externalApp(info.id, wc.getURL(), url)
+        return { action: 'deny' }
+      }
+      if (shouldPeekWindowOpen(disposition, features, this.shiftHeld)) {
+        this.shiftHeld = false
+        const partition = this.partitionFor(info.workspaceId)
+        this.hooks.openPeek?.(url, info.id, info.workspaceId, partition)
         return { action: 'deny' }
       }
       if (disposition === 'new-window') {
@@ -1271,6 +1611,10 @@ export class Tabs {
     if (p.linkURL && isAllowedUrl(p.linkURL)) {
       items.push(
         { label: 'Open link in new tab', click: () => this.create(p.linkURL, { activate: false, after: tab.info.id, workspaceId: wsId }) },
+        {
+          label: 'Peek link',
+          click: () => this.hooks.openPeek?.(p.linkURL, tab.info.id, wsId, this.partitionFor(wsId))
+        },
         { label: 'Copy link', click: () => clipboard.writeText(p.linkURL) }
       )
       gap()
@@ -1322,7 +1666,11 @@ export class Tabs {
       this.emitQueued = true
       setImmediate(() => {
         this.emitQueued = false
-        if (!this.win.isDestroyed()) this.win.webContents.send('state', this.state())
+        if (!this.win.isDestroyed()) {
+          const st = this.state()
+          this.win.webContents.send('state', st)
+          this.hooks.onState?.(st)
+        }
       })
     }
     if (this.saveTimer) clearTimeout(this.saveTimer)
@@ -1354,6 +1702,17 @@ export class Tabs {
         const wsTabs = this.workspaceTabs(ws.id)
         const kept = wsTabs.filter((t) => t.info.url || t.pendingUrl)
         const activeTabId = ws.id === this.activeWorkspaceId ? this.activeId : this.workspaceActiveTab.get(ws.id)
+        const indexById = new Map<number, number>()
+        kept.forEach((t, idx) => indexById.set(t.info.id, idx))
+        const savedSplits: SavedSplitGroup[] = []
+        for (const group of this.workspaceSplits(ws.id)) {
+          const indices = group.tabIds
+            .map((tid) => indexById.get(tid))
+            .filter((idx): idx is number => idx !== undefined && !kept[idx].info.pinned)
+          if (indices.length >= 2) {
+            savedSplits.push({ tabs: indices, colRatio: group.colRatio, rowRatio: group.rowRatio })
+          }
+        }
         return {
           ...ws,
           tabs: kept.map((t) => ({
@@ -1361,7 +1720,8 @@ export class Tabs {
             title: t.info.title,
             pinned: t.info.pinned
           })),
-          active: Math.max(0, kept.findIndex((t) => t.info.id === activeTabId))
+          active: Math.max(0, kept.findIndex((t) => t.info.id === activeTabId)),
+          ...(savedSplits.length ? { splits: savedSplits } : {})
         }
       })
     }
@@ -1400,6 +1760,24 @@ export class Tabs {
       const ids = ws.tabs.map((t) =>
         this.create(t.url, { activate: false, lazy: true, pinned: t.pinned, title: t.title, workspaceId: ws.id })
       )
+      if (ws.splits?.length) {
+        const groups: SplitGroup[] = []
+        for (const sp of ws.splits) {
+          const tabIds = sp.tabs.map((idx) => ids[idx]).filter((tid): tid is number => tid !== undefined)
+          if (tabIds.length >= 2) {
+            groups.push({
+              id: `split-${this.nextSplitId++}`,
+              tabIds,
+              colRatio: sp.colRatio,
+              rowRatio: sp.rowRatio
+            })
+          }
+        }
+        if (groups.length) {
+          this.setWorkspaceSplits(ws.id, groups)
+          this.sortPinned(ws.id)
+        }
+      }
       const activeIdx = Math.max(0, Math.min(ws.active, ids.length - 1))
       this.workspaceActiveTab.set(ws.id, ids[activeIdx])
     }

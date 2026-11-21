@@ -56,6 +56,11 @@ const api: VeyraApi = {
   toggleMute: (id) => ipcRenderer.send('tab:mute', id),
   sleepTab: (id) => ipcRenderer.send('tab:sleep', id),
   tabMenu: (id) => ipcRenderer.send('tab:menu', id),
+  splitWith: (anchorId, otherId, placement) => ipcRenderer.send('split:with', anchorId, otherId, placement),
+  splitWithNext: () => ipcRenderer.send('split:next'),
+  unsplit: (tabId) => ipcRenderer.send('split:unsplit', tabId),
+  setSplitRatio: (groupId, kind, ratio) => ipcRenderer.send('split:ratio', groupId, kind, ratio),
+  swapSplit: (groupId) => ipcRenderer.send('split:swap', groupId),
   switchWorkspace: (id) => ipcRenderer.send('workspace:switch', id),
   createWorkspace: (input: WorkspaceCreateInput) => ipcRenderer.invoke('workspace:create', input),
   updateWorkspace: (id: string, patch: WorkspaceUpdateInput) => ipcRenderer.invoke('workspace:update', id, patch),
@@ -80,8 +85,8 @@ const api: VeyraApi = {
   clearBrowsingData: (req) => ipcRenderer.invoke('privacy:clear', req),
   suggest: (input) => ipcRenderer.invoke('suggest', input),
   overlay: async (open) => {
-    const shot = (await ipcRenderer.invoke('overlay', open)) as string | null
-    return shot
+    const shots = (await ipcRenderer.invoke('overlay', open)) as Record<number, string> | null
+    return shots
   },
   history: (query, before) => ipcRenderer.invoke('history:list', query, before),
   deleteHistory: (id) => void ipcRenderer.invoke('history:delete', id),
@@ -103,11 +108,14 @@ const api: VeyraApi = {
   toggleDevTools: () => ipcRenderer.send('tab:devtools'),
   toggleDownloads: () => ipcRenderer.send('downloads:toggle'),
   openFind: () => ipcRenderer.send('find:open'),
+  openPalette: (mode) => ipcRenderer.send('palette:open-request', mode),
   openInternal: (url) => ipcRenderer.send('tab:open-internal', url),
   winCmd: (cmd) => ipcRenderer.send('win:cmd', cmd),
   relaunch: () => ipcRenderer.send('app:relaunch'),
   onWinState: (cb) => listen('win:state', cb),
   onFocusMenuBar: (cb) => listen<void>('menu:focus-bar', () => cb()),
+  onOpenSettingsSection: (cb) => listen<string>('ui:settings-section', cb),
+  onNewWorkspaceRequest: (cb) => listen<void>('ui:new-workspace', () => cb()),
   menu: {
     open: (spec) => ipcRenderer.send('menu:open', spec),
     close: () => ipcRenderer.send('menu:close'),

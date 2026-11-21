@@ -25,8 +25,30 @@ export type Suggestion =
 
 const DAY = 86_400_000
 
-function terms(input: string): string[] {
-  return input.toLowerCase().split(/\s+/).filter(Boolean)
+export function searchTerms(input: string): string[] {
+  return input.trim().toLowerCase().split(/\s+/).filter(Boolean)
+}
+
+/**
+ * Scores a named command, workspace, or settings section against typed input on the same
+ * scale as `score()`, so commands and URL/tab candidates rank side by side in Ctrl+K.
+ */
+export function scoreCommand(label: string, keywords: string, input: string, boost = 0): number {
+  const q = input.trim().toLowerCase()
+  if (!q) return 0
+  const words = searchTerms(q)
+  const l = label.toLowerCase()
+  const hay = `${l} ${keywords.toLowerCase()}`
+  if (!words.every((w) => hay.includes(w))) return 0
+
+  let s = 10 + boost
+  if (l === q) s += 55
+  else if (l.startsWith(q)) s += 38
+  else if (l.includes(q)) s += 24
+  const labelWords = l.split(/\W+/).filter(Boolean)
+  if (words.every((w) => labelWords.some((lw) => lw.startsWith(w)))) s += 16
+  else if (words.every((w) => l.includes(w))) s += 8
+  return s
 }
 
 /** The address without scheme and www., lower case: what people actually type. */
@@ -38,7 +60,7 @@ function bare(url: string): string {
 export function score(c: Candidate, input: string, now: number): number {
   const q = input.trim().toLowerCase()
   if (!q) return 0
-  const words = terms(q)
+  const words = searchTerms(q)
   const url = bare(c.url)
   const title = c.title.toLowerCase()
   if (!words.every((w) => url.includes(w) || title.includes(w))) return 0

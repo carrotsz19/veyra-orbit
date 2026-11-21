@@ -21,11 +21,12 @@ import {
   Sparkles,
   Star,
   Trash2,
+  Ungroup,
   Volume2,
   VolumeX,
   X
 } from 'lucide-react'
-import type { BrowserState, DownloadInfo, TabInfo, UpdateState, WorkspaceAccentId, WorkspaceIconId, WorkspaceInfo } from '@shared/types'
+import type { BrowserState, DownloadInfo, SplitGroup, TabInfo, UpdateState, WorkspaceAccentId, WorkspaceIconId, WorkspaceInfo } from '@shared/types'
 import { WORKSPACE_ACCENTS, WORKSPACE_ICONS, isBuiltInWorkspaceIcon } from '@shared/workspaces'
 import { displayUrl } from '@shared/url'
 import { Downloads } from './Downloads'
@@ -95,6 +96,7 @@ interface Props {
   onDismissUpdate: () => void
   onEditorOpenChange?: (open: boolean) => void
   onPointerEdge?: (inside: boolean) => void
+  onDragTabChange?: (tabId: number | null) => void
   openNewWorkspaceTick?: number
 }
 
@@ -107,6 +109,7 @@ export function Sidebar({
   onDismissUpdate,
   onEditorOpenChange,
   onPointerEdge,
+  onDragTabChange,
   openNewWorkspaceTick = 0
 }: Props): React.JSX.Element {
   const [dragId, setDragId] = useState<number | null>(null)
@@ -133,15 +136,47 @@ export function Sidebar({
   const open = state.tabs.filter((t) => !t.pinned)
   const activeWorkspace = state.workspaces.find((w) => w.id === state.activeWorkspaceId)
 
+  // Group open tabs into single rows or combined split-group rows.
+  type TabRow = { kind: 'single'; tab: TabInfo } | { kind: 'split'; group: SplitGroup; tabs: TabInfo[] }
+  const openRows: TabRow[] = []
+  const groupByTab = new Map<number, SplitGroup>()
+  for (const g of state.splits) {
+    for (const tid of g.tabIds) groupByTab.set(tid, g)
+  }
+  const openById = new Map(open.map((t) => [t.id, t]))
+  const seenGroups = new Set<string>()
+  for (const t of open) {
+    const group = groupByTab.get(t.id)
+    if (group) {
+      if (seenGroups.has(group.id)) continue
+      seenGroups.add(group.id)
+      const members = group.tabIds.map((id) => openById.get(id)).filter((x): x is TabInfo => !!x)
+      if (members.length >= 2) {
+        openRows.push({ kind: 'split', group, tabs: members })
+        continue
+      }
+    }
+    openRows.push({ kind: 'single', tab: t })
+  }
+
   const drop = (target: TabInfo): void => {
     if (dragId === null || dragId === target.id) return
     api.move(dragId, state.tabs.findIndex((t) => t.id === target.id))
     setDragId(null)
+    onDragTabChange?.(null)
   }
   const dragProps = (t: TabInfo) => ({
     draggable: true,
-    onDragStart: () => setDragId(t.id),
-    onDragEnd: () => setDragId(null),
+    onDragStart: (e: React.DragEvent) => {
+      e.dataTransfer.setData('text/x-orbit-tab', String(t.id))
+      e.dataTransfer.effectAllowed = 'move'
+      setDragId(t.id)
+      onDragTabChange?.(t.id)
+    },
+    onDragEnd: () => {
+      setDragId(null)
+      onDragTabChange?.(null)
+    },
     onDragOver: (e: React.DragEvent) => e.preventDefault(),
     onDrop: () => drop(t)
   })
@@ -278,46 +313,124 @@ export function Sidebar({
         )}
 
         <div className="tabs" role="tablist" aria-label="Tabs">
-          {open.map((t) => (
-            <div
-              key={t.id}
-              role="tab"
-              aria-selected={t.id === state.activeId}
-              className={`tab ${t.id === state.activeId ? 'on' : ''} ${t.sleeping ? 'sleeping' : ''} ${dragId === t.id ? 'dragging' : ''}`}
-              onMouseDown={(e) => e.button === 0 && api.activate(t.id)}
-              onAuxClick={(e) => e.button === 1 && api.closeTab(t.id)}
-              onContextMenu={(e) => {
-                e.preventDefault()
-                api.tabMenu(t.id)
-              }}
-              title={tabTooltip(t)}
-              {...dragProps(t)}
-            >
-              <Favicon tab={t} />
-              {(t.audible || t.muted) && (
+          {openRows.map((row) => {
+            if (row.kind === 'split') {
+              const groupActive = row.tabs.some((t) => t.id === state.activeId)
+              return (
+                <div
+                  key={row.group.id}
+                  className={`split-row ${groupActive ? 'on' : ''} ${row.tabs.length > 2 ? 'grid' : ''}`}
+                  role="group"
+                  aria-label="Split tabs"
+                >
+                  {row.tabs.map((t) => (
+                    <div
+                      key={t.id}
+                      role="tab"
+                      aria-selected={t.id === state.activeId}
+                      className={`split-cell ${t.id === state.activeId ? 'focused' : ''} ${t.sleeping ? 'sleeping' : ''} ${dragId === t.id ? 'dragging' : ''}`}
+                      title={tabTooltip(t)}
+                      onClick={() => api.activate(t.id)}
+                      onAuxClick={(e) => e.button === 1 && api.closeTab(t.id)}
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        api.tabMenu(t.id)
+                      }}
+                      {...dragProps(t)}
+                    >
+                      <Favicon tab={t} />
+                      <span className="tab-title">{label(t)}</span>
+                      <button
+                        type="button"
+                        className="split-cell-close"
+                        aria-label="Close pane"
+                        title="Close pane"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          api.closeTab(t.id)
+                        }}
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="split-row-unsplit"
+                    aria-label="Unsplit"
+                    title="Unsplit (Ctrl+Shift+\)"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      api.unsplit(row.tabs[0].id)
+                    }}
+                  >
+                    <Ungroup size={12} />
+                  </button>
+                </div>
+              )
+            }
+            const t = row.tab
+            return (
+              <div
+                key={t.id}
+                role="tab"
+                aria-selected={t.id === state.activeId}
+                className={`tab ${t.id === state.activeId ? 'on' : ''} ${t.sleeping ? 'sleeping' : ''} ${dragId === t.id ? 'dragging' : ''}`}
+                onClick={() => api.activate(t.id)}
+                onAuxClick={(e) => e.button === 1 && api.closeTab(t.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  api.tabMenu(t.id)
+                }}
+                title={tabTooltip(t)}
+                {...dragProps(t)}
+              >
+                <Favicon tab={t} />
+                {(t.audible || t.muted) && (
+                  <button
+                    type="button"
+                    className={`tab-btn tab-audio ${t.muted ? 'muted' : ''}`}
+                    aria-label={t.muted ? 'Unmute tab' : 'Mute tab'}
+                    title={t.muted ? 'Unmute tab' : 'Mute tab'}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      api.toggleMute(t.id)
+                    }}
+                  >
+                    {t.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                  </button>
+                )}
+                <span className="tab-title">{label(t)}</span>
                 <button
-                  type="button"
-                  className={`tab-btn tab-audio ${t.muted ? 'muted' : ''}`}
-                  aria-label={t.muted ? 'Unmute tab' : 'Mute tab'}
-                  title={t.muted ? 'Unmute tab' : 'Mute tab'}
+                  className="tab-btn"
+                  aria-label="Pin tab"
+                  title="Pin"
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation()
-                    api.toggleMute(t.id)
+                    api.togglePin(t.id)
                   }}
                 >
-                  {t.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                  {t.pinned ? <PinOff size={14} /> : <Pin size={14} />}
                 </button>
-              )}
-              <span className="tab-title">{label(t)}</span>
-              <button className="tab-btn" aria-label="Pin tab" title="Pin" onMouseDown={(e) => e.stopPropagation()} onClick={() => api.togglePin(t.id)}>
-                {t.pinned ? <PinOff size={14} /> : <Pin size={14} />}
-              </button>
-              <button className="tab-btn tab-close" aria-label="Close tab" title="Close (Ctrl+W)" onMouseDown={(e) => e.stopPropagation()} onClick={() => api.closeTab(t.id)}>
-                <X size={14} />
-              </button>
-            </div>
-          ))}
+                <button
+                  className="tab-btn tab-close"
+                  aria-label="Close tab"
+                  title="Close (Ctrl+W)"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    api.closeTab(t.id)
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )
+          })}
           <button className="tab new" onClick={() => api.newTab()}>
             <Plus size={16} />
             <span className="tab-title">New tab</span>

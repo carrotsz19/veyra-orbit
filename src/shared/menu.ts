@@ -86,6 +86,7 @@ export interface MenuBuildContext {
   workspaces: readonly MenuWorkspaceContext[]
   activeWorkspaceId: string
   compactMode: boolean
+  isSplit?: boolean
   isFullscreen: boolean
   canReopenClosed: boolean
   history: readonly MenuHistoryContext[]
@@ -159,7 +160,16 @@ export function buildMenus(ctx: MenuBuildContext): MenuSection[] {
   ]
 
   const viewItems: MenuEntry[] = [
+    { kind: 'item', id: 'view:palette', label: 'Command bar', keys: 'Ctrl+K' },
     { kind: 'item', id: 'view:compact', label: 'Compact mode', keys: 'Ctrl+Shift+S', checked: ctx.compactMode },
+    {
+      kind: 'item',
+      id: 'view:split',
+      label: ctx.isSplit ? 'Unsplit view' : 'Split with next tab',
+      keys: 'Ctrl+Shift+\\',
+      checked: ctx.isSplit ? true : undefined,
+      disabled: !tab
+    },
     SEP,
     { kind: 'item', id: 'view:zoom-in', label: 'Zoom in', keys: 'Ctrl+=', disabled: !webPage },
     { kind: 'item', id: 'view:zoom-out', label: 'Zoom out', keys: 'Ctrl+−', disabled: !webPage },
