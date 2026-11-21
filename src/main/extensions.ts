@@ -804,17 +804,48 @@ export class ExtensionManager {
     const dir = this.resolveEntryDir(entry)
     if (!dir) return null
     try {
-      // Do NOT call startWorkerForScope immediately after loadExtension — Electron 45 auto-starts MV3 SWs.
       const loaded = await st.session.extensions.loadExtension(dir, { allowFileAccess: false })
       const manifest = loaded.manifest as ManifestLike
       if (typeof manifest.name === 'string' && manifest.name) entry.name = manifest.name
       if (typeof manifest.version === 'string' && manifest.version) entry.version = manifest.version
       if (typeof manifest.description === 'string') entry.description = manifest.description
+      void this.ensureWorkerRunning(st, loaded)
       return loaded
     } catch (err) {
       console.error(`[extensions] Failed to load ${entry.id} into ${st.partition}:`, err)
       return null
     }
+  }
+
+  /**
+   * An MV3 extension loaded while Orbit is running (installed, re-enabled, loaded unpacked) doesn't
+   * always get its background service worker started, so nothing it does (ad-block rules included)
+   * works until Orbit restarts. Give Electron a moment to start it, then start it ourselves.
+   * Calling startWorkerForScope straight after loadExtension is too early, hence the wait.
+   */
+  private async ensureWorkerRunning(st: SessionExtState, ext: Electron.Extension): Promise<void> {
+    const bg = (ext.manifest as { background?: { service_worker?: unknown } }).background
+    if (!bg || typeof bg.service_worker !== 'string') return
+    const scope = `chrome-extension://${ext.id}/`
+    const running = (): boolean => {
+      try {
+        return Object.values(st.session.serviceWorkers.getAllRunning()).some((w) => w.scope === scope)
+      } catch {
+        return false
+      }
+    }
+    for (const delay of [400, 1000, 2500]) {
+      await new Promise((r) => setTimeout(r, delay))
+      if (!st.session.extensions.getExtension(ext.id)) return // removed meanwhile
+      if (running()) return
+      try {
+        await st.session.serviceWorkers.startWorkerForScope(scope)
+        return
+      } catch {
+        /* not registered yet: try again after the next wait */
+      }
+    }
+    console.error(`[extensions] ${ext.id}: background worker didn't start in ${st.partition}`)
   }
 
   // ---- Tab lifecycle notifications from Tabs --------------------------------
