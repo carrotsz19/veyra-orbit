@@ -8,6 +8,7 @@ import { Tabs } from './tabs'
 import { Store } from './store'
 import { SettingsStore } from './settings'
 import { ExternalApps, Permissions, cleanUserAgent, hardenAll, webSession } from './security'
+import { attachSessionCompat } from './compat'
 import { Downloads } from './downloads'
 import { Updater } from './updater'
 
@@ -127,6 +128,7 @@ function createWindow(): void {
     }
   )
   perms.attach(webSession())
+  attachSessionCompat(webSession())
   const p = perms
   t.onTabGone = (id) => {
     p.dropTab(id)

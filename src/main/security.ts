@@ -7,6 +7,7 @@ import { app, session, shell, type Session, type WebContents } from 'electron'
 import type { ExternalAppAsk, PermissionAsk, SitePermission } from '../shared/types'
 import { ASKABLE_PERMISSIONS, normalizePermissionOrigin } from '../shared/permissions'
 import { parseExternalAppUrl } from '../shared/external'
+import { chromeIdentity } from './compat'
 
 /** Where web pages keep cookies and storage. Workspaces will get one each (persist:ws-<id>). */
 export const WEB_PARTITION = 'persist:web'
@@ -189,10 +190,8 @@ export class ExternalApps {
  * Some sites (Google sign-in among them) turn away browsers they don't recognise.
  */
 export function cleanUserAgent(): void {
-  // Chrome's own reduced form: the major version only.
-  const major = process.versions.chrome.split('.')[0]
-  const platform = process.platform === 'darwin' ? 'Macintosh; Intel Mac OS X 10_15_7' : process.platform === 'win32' ? 'Windows NT 10.0; Win64; x64' : 'X11; Linux x86_64'
-  app.userAgentFallback = `Mozilla/5.0 (${platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`
+  // Chrome's own reduced form, consistent with Client Hints in compat.ts.
+  app.userAgentFallback = chromeIdentity().userAgent
 }
 
 /** Rules for every web contents the app ever creates, whoever creates it. */
