@@ -6,7 +6,18 @@ module.exports = {
   ...base,
   appId: 'app.veyra.orbit.dev',
   productName: 'Veyra Orbit Dev',
+  extraMetadata: { name: 'veyra-orbit-dev' },
   directories: { output: 'release-dev' },
   artifactName: 'Veyra-Orbit-Dev-Setup-${version}.${ext}',
-  nsis: { ...base.nsis, shortcutName: 'Veyra Orbit Dev', uninstallDisplayName: 'Veyra Orbit Dev' }
+  nsis: { ...base.nsis, shortcutName: 'Veyra Orbit Dev', uninstallDisplayName: 'Veyra Orbit Dev' },
+  // Dev builds read updates from the private dev repo using a read-only token embedded in main only.
+  publish: [
+    {
+      provider: 'github',
+      owner: 'carrotsz19',
+      repo: 'veyra-orbit-dev',
+      private: true,
+      releaseType: 'release'
+    }
+  ]
 }

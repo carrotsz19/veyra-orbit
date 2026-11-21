@@ -8,7 +8,9 @@ import { Tabs } from './tabs'
 import { Store } from './store'
 import { SettingsStore } from './settings'
 import { ExternalApps, Permissions, cleanUserAgent, hardenAll, webSession } from './security'
+import { attachSessionCompat } from './compat'
 import { Downloads } from './downloads'
+import { Updater } from './updater'
 
 const APP_NAME = __CHANNEL__ === 'dev' ? 'Veyra Orbit Dev' : 'Veyra Orbit'
 app.setName(APP_NAME)
@@ -42,6 +44,7 @@ let asks: PermissionAsk[] = []
 let externalAsks: ExternalAppAsk[] = []
 let store: Store | null = null
 let settings: SettingsStore | null = null
+let updater: Updater | null = null
 
 /** History and bookmarks changed: the UI re-reads them (the Library page, the star). */
 function dataChanged(): void {
@@ -125,6 +128,7 @@ function createWindow(): void {
     }
   )
   perms.attach(webSession())
+  attachSessionCompat(webSession())
   const p = perms
   t.onTabGone = (id) => {
     p.dropTab(id)
@@ -176,6 +180,13 @@ function createWindow(): void {
 
   if (s.get().startup === 'new-tab') t.create()
   else t.restore()
+
+  if (!updater) {
+    updater = new Updater((state) => {
+      if (win && !win.isDestroyed()) win.webContents.send('update:state', state)
+    })
+    updater.start()
+  }
 }
 
 /** Only the browser's own UI may call these; pages have no preload and can't reach them anyway. */
@@ -201,6 +212,7 @@ on('ready', () => {
   win.webContents.send('permissions:saved', perms?.listSaved() ?? [])
   sendSettings()
   win.webContents.send('page-fullscreen', tabs.isPageFullscreen())
+  if (updater) win.webContents.send('update:state', updater.state())
 })
 on('tab:new', (t, input?: unknown) => t.create((str(input) && toUrl(input, settings?.searchUrl())) || ''))
 on('tab:close', (t, id: unknown) => num(id) && t.close(id))
@@ -343,6 +355,9 @@ on('download:show', (_t, id: unknown) => {
 on('download:clear', () => {
   downloads?.clearFinished()
 })
+handle('update:state', () => updater?.state() ?? null)
+handle('update:check', () => updater?.check(true) ?? null)
+on('update:install', () => updater?.install())
 
 nativeTheme.on('updated', () => {
   if (!win || win.isDestroyed()) return
@@ -358,6 +373,7 @@ app.on('second-instance', () => {
 
 void app.whenReady().then(createWindow)
 app.on('will-quit', () => {
+  updater?.stop()
   store?.close()
   store = null
 })

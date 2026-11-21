@@ -11,6 +11,7 @@ import { INTERNAL_PAGES, buildSearchUrl, isAllowedUrl, isInternalUrl, toUrl } fr
 import { isSafeSubframeUrl, parseExternalAppUrl } from '../shared/external'
 import { clampZoomLevel, zoomPercent } from '../shared/format'
 import { WEB_PARTITION } from './security'
+import { attachPageCompat } from './compat'
 
 interface Tab {
   info: TabInfo
@@ -126,6 +127,7 @@ export class Tabs {
         muted: false
       }
     }
+    attachPageCompat(view.webContents)
     this.wire(tab)
 
     const at = opts.after !== undefined ? this.tabs.findIndex((t) => t.info.id === opts.after) + 1 : this.tabs.length
@@ -674,6 +676,7 @@ export class Tabs {
       return { action: 'deny' }
     })
     wc.on('did-create-window', (popup) => {
+      attachPageCompat(popup.webContents)
       popup.webContents.on('will-navigate', (e, url) => {
         if (!isAllowedUrl(url)) {
           e.preventDefault()

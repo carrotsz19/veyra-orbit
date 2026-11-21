@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Bookmark, Clock, Globe, LoaderCircle, Pin, PinOff, Plus, Settings, Volume2, VolumeX, X } from 'lucide-react'
-import type { BrowserState, DownloadInfo, TabInfo } from '@shared/types'
+import type { BrowserState, DownloadInfo, TabInfo, UpdateState } from '@shared/types'
 import { displayUrl } from '@shared/url'
 import { Downloads } from './Downloads'
 
@@ -25,9 +25,11 @@ interface Props {
   downloads: DownloadInfo[]
   downloadsOpen: boolean
   onCloseDownloads: () => void
+  update: UpdateState | null
+  onDismissUpdate: () => void
 }
 
-export function Sidebar({ state, downloads, downloadsOpen, onCloseDownloads }: Props): React.JSX.Element {
+export function Sidebar({ state, downloads, downloadsOpen, onCloseDownloads, update, onDismissUpdate }: Props): React.JSX.Element {
   const [dragId, setDragId] = useState<number | null>(null)
   const pinned = state.tabs.filter((t) => t.pinned)
   const open = state.tabs.filter((t) => !t.pinned)
@@ -148,6 +150,23 @@ export function Sidebar({ state, downloads, downloadsOpen, onCloseDownloads }: P
         </button>
       </div>
       {downloadsOpen && <Downloads items={downloads} onClose={onCloseDownloads} />}
+      {update?.status === 'ready' && (
+        <div className="update-note" role="status" aria-live="polite">
+          <div className="update-note-top">
+            <span className="update-note-dot" aria-hidden />
+            <span className="update-note-text">Update ready — restart to update</span>
+            <button type="button" className="dl-btn" aria-label="Dismiss update notice" title="Dismiss" onClick={onDismissUpdate}>
+              <X size={13} />
+            </button>
+          </div>
+          <div className="update-note-actions">
+            {update.availableVersion && <span className="update-note-ver">v{update.availableVersion}</span>}
+            <button type="button" className="btn primary update-note-btn" onClick={() => api.installUpdate()}>
+              Restart
+            </button>
+          </div>
+        </div>
+      )}
     </aside>
   )
 }
