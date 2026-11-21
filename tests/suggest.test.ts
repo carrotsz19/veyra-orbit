@@ -46,7 +46,22 @@ test('recent and bookmarked beat old', () => {
 test('internal pages: reachable from the address bar, never from a web page', () => {
   assert.equal(toUrl('orbit://history'), 'orbit://history')
   assert.equal(toUrl('ORBIT://Bookmarks/'), 'orbit://bookmarks')
+  assert.equal(toUrl('orbit://settings'), 'orbit://settings')
   assert.equal(isInternalUrl('orbit://history'), true)
+  assert.equal(isInternalUrl('orbit://settings'), true)
   assert.equal(isAllowedUrl('orbit://history'), false)
+  assert.equal(isAllowedUrl('orbit://settings'), false)
   assert.ok(toUrl('orbit://anything-else')!.startsWith(SEARCH_URL))
+})
+
+test('suggestions honour a custom search engine URL', () => {
+  const brave = 'https://search.brave.com/search?q='
+  assert.deepEqual(suggest('photosynthesis', [], now, 7, brave)[0], {
+    kind: 'search',
+    text: 'photosynthesis',
+    url: brave + 'photosynthesis'
+  })
+  const s = suggest('example.com', [], now, 7, brave)
+  assert.equal(s[0].kind, 'url')
+  assert.deepEqual(s[1], { kind: 'search', text: 'example.com', url: brave + 'example.com' })
 })

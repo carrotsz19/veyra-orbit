@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { toUrl, isAllowedUrl, displayUrl, SEARCH_URL } from '../src/shared/url.ts'
+import { toUrl, isAllowedUrl, isInternalUrl, displayUrl, buildSearchUrl, SEARCH_URL } from '../src/shared/url.ts'
 
 test('sites go to https, local addresses to http', () => {
   assert.equal(toUrl('example.com'), 'https://example.com')
@@ -29,4 +29,15 @@ test('addresses are shown short', () => {
   assert.equal(displayUrl('https://www.example.com/'), 'example.com')
   assert.equal(displayUrl('https://example.com/a?b=1'), 'example.com/a?b=1')
   assert.equal(displayUrl('http://localhost:5173/'), 'http://localhost:5173')
+  assert.equal(displayUrl('orbit://settings'), 'orbit://settings')
+})
+
+test('custom search engines build search URLs without breaking URL detection', () => {
+  const ddg = 'https://duckduckgo.com/?q='
+  assert.equal(buildSearchUrl('cell division', ddg), 'https://duckduckgo.com/?q=cell%20division')
+  assert.equal(toUrl('cell division', ddg), 'https://duckduckgo.com/?q=cell%20division')
+  assert.equal(toUrl('example.com', ddg), 'https://example.com')
+  assert.equal(toUrl('orbit://settings', ddg), 'orbit://settings')
+  assert.equal(isInternalUrl('orbit://settings'), true)
+  assert.equal(isAllowedUrl('orbit://settings'), false)
 })

@@ -2,7 +2,7 @@
  * Address bar suggestions: what you've typed, matched against open tabs, bookmarks and history.
  * Pure, so it's tested on its own (tests/suggest.test.ts).
  */
-import { SEARCH_URL, displayUrl, toUrl } from './url.ts'
+import { SEARCH_URL, buildSearchUrl, displayUrl, toUrl } from './url.ts'
 
 export interface Candidate {
   url: string
@@ -61,14 +61,14 @@ export function score(c: Candidate, input: string, now: number): number {
  * The list under the address bar. The first row is always what Enter does with the text as typed
  * (go to the address, or search for it).
  */
-export function suggest(input: string, candidates: Candidate[], now = Date.now(), max = 7): Suggestion[] {
+export function suggest(input: string, candidates: Candidate[], now = Date.now(), max = 7, searchUrl = SEARCH_URL): Suggestion[] {
   const text = input.trim()
   if (!text) return []
-  const target = toUrl(text)
+  const target = toUrl(text, searchUrl)
   const out: Suggestion[] = []
   const seen = new Set<string>()
 
-  if (target && !target.startsWith(SEARCH_URL)) {
+  if (target && !target.startsWith(searchUrl)) {
     out.push({ kind: 'url', url: target })
     seen.add(target)
   }
@@ -106,7 +106,7 @@ export function suggest(input: string, candidates: Candidate[], now = Date.now()
     else out.push({ kind: 'page', url: c.url, title: c.title || displayUrl(c.url), bookmarked: c.bookmarked })
   }
 
-  const search: Suggestion = { kind: 'search', text, url: SEARCH_URL + encodeURIComponent(text) }
+  const search: Suggestion = { kind: 'search', text, url: buildSearchUrl(text, searchUrl) }
   // Words with spaces read as a search first; an address-like entry keeps the address first.
   if (out[0]?.kind === 'url') out.splice(1, 0, search)
   else out.unshift(search)
