@@ -1,13 +1,15 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, type IpcMainEvent, type IpcMainInvokeEvent, type Session } from 'electron'
 import { join } from 'node:path'
 import { release } from 'node:os'
-import type { ClearDataRange, ExternalAppAsk, PermissionAsk, Rect } from '../shared/types'
+import type { ClearDataRange, CompactPinKind, CompactRevealState, ExternalAppAsk, PermissionAsk, Rect, WorkspaceCreateInput, WorkspaceUpdateInput } from '../shared/types'
 import { toUrl } from '../shared/url'
 import { suggest, type Candidate } from '../shared/suggest'
+import { computeCompactZones } from '../shared/compact'
+import { resolveSleepTimeoutMs } from '../shared/sleep'
 import { Tabs } from './tabs'
 import { Store } from './store'
 import { SettingsStore } from './settings'
-import { ExternalApps, Permissions, cleanUserAgent, hardenAll, webSession } from './security'
+import { ExternalApps, Permissions, WEB_PARTITION, cleanUserAgent, hardenAll, sessionForPartition } from './security'
 import { attachSessionCompat } from './compat'
 import { Downloads } from './downloads'
 import { Updater } from './updater'
@@ -29,6 +31,8 @@ const acrylic = isWin && Number(release().split('.')[2] ?? 0) >= 22621
 const TITLE_BAR_H = 40
 const HOUR_MS = 3_600_000
 const CLEAR_RANGES = new Set<ClearDataRange>(['hour', 'day', 'all'])
+const COMPACT_POLL_MS = 60
+const COMPACT_HIDE_DELAY_MS = 240
 
 function overlay(): Electron.TitleBarOverlayOptions {
   const dark = nativeTheme.shouldUseDarkColors
@@ -46,6 +50,153 @@ let store: Store | null = null
 let settings: SettingsStore | null = null
 let updater: Updater | null = null
 
+/** Compact mode runtime state for the active window. */
+let compactState: CompactRevealState = { enabled: false, sidebar: false, toolbar: false }
+let compactPins = { omnibox: false, sidebar: false, menu: false }
+let compactHover = { sidebar: false, toolbar: false }
+let lastPolledCursor: { x: number; y: number } | null = null
+let compactPoller: NodeJS.Timeout | null = null
+let sideHideTimer: NodeJS.Timeout | null = null
+let barHideTimer: NodeJS.Timeout | null = null
+
+function applyCompactTargets(wantSide: boolean, wantBar: boolean): void {
+  if (!win || win.isDestroyed() || !settings?.get().compactMode) return
+  let changed = false
+  if (wantSide) {
+    if (sideHideTimer) {
+      clearTimeout(sideHideTimer)
+      sideHideTimer = null
+    }
+    if (!compactState.sidebar) {
+      compactState = { ...compactState, sidebar: true }
+      changed = true
+    }
+  } else if (compactState.sidebar && !sideHideTimer) {
+    sideHideTimer = setTimeout(() => {
+      sideHideTimer = null
+      if (!compactPins.sidebar && !compactPins.menu && !compactHover.sidebar && compactState.sidebar) {
+        compactState = { ...compactState, sidebar: false }
+        if (win && !win.isDestroyed()) win.webContents.send('compact:state', compactState)
+      }
+    }, COMPACT_HIDE_DELAY_MS)
+  }
+
+  if (wantBar) {
+    if (barHideTimer) {
+      clearTimeout(barHideTimer)
+      barHideTimer = null
+    }
+    if (!compactState.toolbar) {
+      compactState = { ...compactState, toolbar: true }
+      changed = true
+    }
+  } else if (compactState.toolbar && !barHideTimer) {
+    barHideTimer = setTimeout(() => {
+      barHideTimer = null
+      if (!compactPins.omnibox && !compactHover.toolbar && compactState.toolbar) {
+        compactState = { ...compactState, toolbar: false }
+        if (win && !win.isDestroyed()) win.webContents.send('compact:state', compactState)
+      }
+    }, COMPACT_HIDE_DELAY_MS)
+  }
+
+  if (changed && win && !win.isDestroyed()) {
+    win.webContents.send('compact:state', compactState)
+  }
+}
+
+function sendCompactState(force = false): void {
+  if (!win || win.isDestroyed()) return
+  const enabled = !!settings?.get().compactMode
+  const next: CompactRevealState = enabled
+    ? {
+        enabled: true,
+        sidebar: compactState.sidebar || compactPins.sidebar || compactPins.menu || compactHover.sidebar,
+        toolbar: compactState.toolbar || compactPins.omnibox || compactHover.toolbar
+      }
+    : { enabled: false, sidebar: false, toolbar: false }
+
+  if (!force && next.enabled === compactState.enabled && next.sidebar === compactState.sidebar && next.toolbar === compactState.toolbar) {
+    return
+  }
+  compactState = next
+  win.webContents.send('compact:state', compactState)
+}
+
+function clearCompactTimers(): void {
+  if (sideHideTimer) {
+    clearTimeout(sideHideTimer)
+    sideHideTimer = null
+  }
+  if (barHideTimer) {
+    clearTimeout(barHideTimer)
+    barHideTimer = null
+  }
+}
+
+function stopCompactPoller(): void {
+  if (compactPoller) {
+    clearInterval(compactPoller)
+    compactPoller = null
+  }
+  lastPolledCursor = null
+  clearCompactTimers()
+}
+
+function pollCompactCursor(): void {
+  if (!win || win.isDestroyed() || !settings?.get().compactMode) return
+  if (tabs?.isPageFullscreen() || win.isMinimized() || !win.isVisible()) return
+
+  const focused = win.isFocused()
+  const cursor = screen.getCursorScreenPoint()
+  const moved = lastPolledCursor !== null && (cursor.x !== lastPolledCursor.x || cursor.y !== lastPolledCursor.y)
+  lastPolledCursor = cursor
+
+  const content = win.getContentBounds()
+  const zones = computeCompactZones({
+    rx: cursor.x - content.x,
+    ry: cursor.y - content.y,
+    contentWidth: content.width,
+    contentHeight: content.height,
+    sidebarOpen: compactState.sidebar,
+    toolbarOpen: compactState.toolbar
+  })
+
+  // If the OS cursor is outside the window and hasn't moved (e.g. non-interactive desktop session),
+  // defer to the thin always-visible edge strips so we don't override DOM hover state.
+  if (!zones.insideWindow && !moved) {
+    applyCompactTargets(compactHover.sidebar || compactPins.sidebar || compactPins.menu, compactHover.toolbar || compactPins.omnibox)
+    return
+  }
+
+  // Only reveal newly when the window is focused; keep-open or pinned states still hold cleanly.
+  const sideByCursor = focused ? zones.wantSidebar : compactState.sidebar && zones.wantSidebar
+  const barByCursor = focused ? zones.wantToolbar : compactState.toolbar && zones.wantToolbar
+  const wantSide = sideByCursor || compactHover.sidebar || compactPins.sidebar || compactPins.menu
+  const wantBar = barByCursor || compactHover.toolbar || compactPins.omnibox
+  applyCompactTargets(wantSide, wantBar)
+}
+
+function syncCompactMode(): void {
+  const enabled = !!settings?.get().compactMode
+  if (!enabled) {
+    stopCompactPoller()
+    compactHover = { sidebar: false, toolbar: false }
+    compactState = { enabled: false, sidebar: false, toolbar: false }
+    sendCompactState(true)
+    return
+  }
+  compactState = {
+    enabled: true,
+    sidebar: compactPins.sidebar || compactPins.menu || compactHover.sidebar,
+    toolbar: compactPins.omnibox || compactHover.toolbar
+  }
+  sendCompactState(true)
+  if (!compactPoller) {
+    compactPoller = setInterval(pollCompactCursor, COMPACT_POLL_MS)
+  }
+}
+
 /** History and bookmarks changed: the UI re-reads them (the Library page, the star). */
 function dataChanged(): void {
   tabs?.refresh()
@@ -54,6 +205,13 @@ function dataChanged(): void {
 
 function sendSettings(): void {
   if (win && !win.isDestroyed() && settings) win.webContents.send('settings', settings.view())
+}
+
+function toggleCompactMode(): void {
+  if (!settings) return
+  settings.update({ compactMode: !settings.get().compactMode })
+  sendSettings()
+  syncCompactMode()
 }
 
 function createWindow(): void {
@@ -95,6 +253,33 @@ function createWindow(): void {
   })
   const ext = externalApps
 
+  downloads?.detach()
+  downloads = new Downloads(
+    () => ({ dir: s.effectiveDownloadsDir(), askWhereToSave: s.get().askWhereToSave }),
+    (list) => {
+      if (!w.isDestroyed()) w.webContents.send('downloads', list)
+    }
+  )
+  const d = downloads
+
+  const configuredSessions = new Set<Session>()
+  const onDownload = (_e: Electron.Event, _item: Electron.DownloadItem, wc: Electron.WebContents): void => tabs?.downloadStarted(wc)
+
+  /**
+   * Single setup path for every web session partition (the shared persist:web partition and every
+   * isolated workspace persist:ws-<id> partition) so security, site compat and downloads never drift.
+   */
+  const setupWebSession = (partition: string): Session => {
+    const sess = sessionForPartition(partition)
+    if (configuredSessions.has(sess)) return sess
+    configuredSessions.add(sess)
+    perms?.attach(sess)
+    attachSessionCompat(sess)
+    d.attach(sess)
+    sess.on('will-download', onDownload)
+    return sess
+  }
+
   tabs = new Tabs(w, join(app.getPath('userData'), 'session.json'), {
     visit: (url, title, typed) => {
       db.visit(url, title, typed)
@@ -109,12 +294,35 @@ function createWindow(): void {
     searchUrl: () => s.searchUrl(),
     externalApp: (tabId, pageUrl, targetUrl) => {
       ext.request(tabId, pageUrl, targetUrl)
+    },
+    ensureSession: (partition) => {
+      setupWebSession(partition)
+    },
+    hasPendingPermission: (tabId) => perms?.hasPendingPermission(tabId) ?? false,
+    sleepPolicy: () => {
+      const cur = s.get()
+      return {
+        timeoutMs: resolveSleepTimeoutMs(cur.sleepAfterMinutes, process.env.VEYRA_SLEEP_TEST_MINUTES, app.isPackaged),
+        sleepPinnedTabs: cur.sleepPinnedTabs
+      }
+    },
+    toggleCompactMode: () => toggleCompactMode(),
+    onMenuOpen: (open) => {
+      compactPins.menu = open
+      if (settings?.get().compactMode) sendCompactState()
+    },
+    onFocusOmnibox: () => {
+      if (!settings?.get().compactMode) return
+      if (barHideTimer) {
+        clearTimeout(barHideTimer)
+        barHideTimer = null
+      }
+      compactPins.omnibox = true
+      compactState = { ...compactState, toolbar: true }
+      sendCompactState(true)
     }
   })
   const t = tabs
-  w.webContents.on('before-input-event', (e, input) => {
-    if (t.shortcut(input)) e.preventDefault()
-  })
 
   perms = new Permissions(
     (wc) => t.tabIdOf(wc),
@@ -127,26 +335,18 @@ function createWindow(): void {
       if (!w.isDestroyed()) w.webContents.send('permissions:saved', perms?.listSaved() ?? [])
     }
   )
-  perms.attach(webSession())
-  attachSessionCompat(webSession())
   const p = perms
   t.onTabGone = (id) => {
     p.dropTab(id)
     ext.dropTab(id)
   }
 
-  downloads?.detach()
-  downloads = new Downloads(
-    () => ({ dir: s.effectiveDownloadsDir(), askWhereToSave: s.get().askWhereToSave }),
-    (list) => {
-      if (!w.isDestroyed()) w.webContents.send('downloads', list)
-    }
-  )
-  downloads.attach(webSession())
-  const onDownload = (_e: Electron.Event, _item: Electron.DownloadItem, wc: Electron.WebContents): void => t.downloadStarted(wc)
-  webSession().on('will-download', onDownload)
-  w.on('closed', () => webSession().off('will-download', onDownload))
-  const d = downloads
+  // Always configure the shared default web session up front.
+  setupWebSession(WEB_PARTITION)
+
+  w.webContents.on('before-input-event', (e, input) => {
+    if (t.shortcut(input)) e.preventDefault()
+  })
 
   w.once('ready-to-show', () => w.show())
   // Windows flickers acrylic on a full-screen window, so full screen is solid; and a page in
@@ -168,8 +368,15 @@ function createWindow(): void {
   w.on('resize', () => t.relayout())
   w.on('close', () => t.save())
   w.on('closed', () => {
+    stopCompactPoller()
+    compactPins = { omnibox: false, sidebar: false, menu: false }
+    compactHover = { sidebar: false, toolbar: false }
+    compactState = { enabled: false, sidebar: false, toolbar: false }
+    for (const sess of configuredSessions) sess.off('will-download', onDownload)
+    configuredSessions.clear()
     d.detach()
     if (downloads === d) downloads = null
+    t.dispose()
     win = null
     tabs = null
   })
@@ -178,8 +385,8 @@ function createWindow(): void {
   if (process.env.ELECTRON_RENDERER_URL) void w.loadURL(`${process.env.ELECTRON_RENDERER_URL}?${new URLSearchParams(query)}`)
   else void w.loadFile(join(__dirname, '../renderer/index.html'), { query })
 
-  if (s.get().startup === 'new-tab') t.create()
-  else t.restore()
+  t.restore(s.get().startup !== 'new-tab')
+  syncCompactMode()
 
   if (!updater) {
     updater = new Updater((state) => {
@@ -211,6 +418,7 @@ on('ready', () => {
   win.webContents.send('downloads', downloads?.list() ?? [])
   win.webContents.send('permissions:saved', perms?.listSaved() ?? [])
   sendSettings()
+  sendCompactState(true)
   win.webContents.send('page-fullscreen', tabs.isPageFullscreen())
   if (updater) win.webContents.send('update:state', updater.state())
 })
@@ -227,7 +435,25 @@ on('nav:reload', (t) => t.reload())
 on('nav:stop', (t) => t.stop())
 on('nav:zoom-reset', (t) => t.resetZoom())
 on('tab:mute', (t, id: unknown) => num(id) && t.toggleMute(id))
+on('tab:sleep', (t, id: unknown) => num(id) && t.sleepTab(id, true))
 on('tab:menu', (t, id: unknown) => num(id) && t.tabMenu(id))
+on('workspace:switch', (t, id: unknown) => str(id) && t.switchWorkspace(id))
+on('compact:toggle', () => toggleCompactMode())
+on('compact:pin', (_t, kind: unknown, pinned: unknown) => {
+  if (kind !== 'omnibox' && kind !== 'sidebar') return
+  const k = kind as CompactPinKind
+  compactPins[k] = pinned === true
+  if (settings?.get().compactMode) {
+    applyCompactTargets(compactHover.sidebar || compactPins.sidebar || compactPins.menu, compactHover.toolbar || compactPins.omnibox)
+  }
+})
+on('compact:hover', (_t, edge: unknown, hovering: unknown) => {
+  if (edge !== 'sidebar' && edge !== 'toolbar') return
+  compactHover[edge] = hovering === true
+  if (settings?.get().compactMode && !tabs?.isPageFullscreen()) {
+    applyCompactTargets(compactHover.sidebar || compactPins.sidebar || compactPins.menu, compactHover.toolbar || compactPins.omnibox)
+  }
+})
 on('bounds', (t, r: unknown) => {
   const rect = r as Rect | null
   if (rect === null) return t.setBounds(null)
@@ -242,11 +468,39 @@ function handle(channel: string, f: (...args: unknown[]) => unknown): void {
   })
 }
 
+handle('workspace:create', (input) => {
+  if (!tabs || !input || typeof input !== 'object' || Array.isArray(input)) return null
+  const raw = input as Record<string, unknown>
+  const req: WorkspaceCreateInput = {
+    name: str(raw.name) ? raw.name : '',
+    icon: str(raw.icon) ? raw.icon : undefined,
+    accent: str(raw.accent) ? (raw.accent as WorkspaceCreateInput['accent']) : undefined,
+    isolated: typeof raw.isolated === 'boolean' ? raw.isolated : undefined
+  }
+  return tabs.createWorkspace(req)
+})
+
+handle('workspace:update', (id, patch) => {
+  if (!tabs || !str(id) || !patch || typeof patch !== 'object' || Array.isArray(patch)) return null
+  const raw = patch as Record<string, unknown>
+  const req: WorkspaceUpdateInput = {}
+  if (str(raw.name)) req.name = raw.name
+  if (str(raw.icon)) req.icon = raw.icon
+  if (str(raw.accent)) req.accent = raw.accent as WorkspaceUpdateInput['accent']
+  if (typeof raw.isolated === 'boolean') req.isolated = raw.isolated
+  return tabs.updateWorkspace(id, req)
+})
+
+handle('workspace:delete', (id) => {
+  if (!tabs || !str(id)) return false
+  return tabs.deleteWorkspace(id)
+})
+
 handle('suggest', (input) => {
   if (!str(input) || !store || !tabs) return []
   const open: Candidate[] = tabs
-    .state()
-    .tabs.filter((t) => /^https?:/.test(t.url))
+    .allTabs()
+    .filter((t) => /^https?:/.test(t.url))
     .map((t) => ({ url: t.url, title: t.title, visits: 0, typed: 0, last: 0, bookmarked: t.bookmarked, tabId: t.id }))
   return suggest(input, [...open, ...store.candidates(input)], Date.now(), 7, settings?.searchUrl())
 })
@@ -280,9 +534,13 @@ handle('settings:update', (patch) => {
   const raw = patch as Record<string, unknown>
   const safePatch: Record<string, unknown> = { ...raw }
   if ('downloadsDir' in safePatch && safePatch.downloadsDir !== '') delete safePatch.downloadsDir
-  const prevTheme = settings.get().theme
+  const prev = settings.get()
   const view = settings.update(safePatch)
-  if (view.theme !== prevTheme) nativeTheme.themeSource = view.theme
+  if (view.theme !== prev.theme) nativeTheme.themeSource = view.theme
+  if (view.compactMode !== prev.compactMode) syncCompactMode()
+  if (view.sleepAfterMinutes !== prev.sleepAfterMinutes || view.sleepPinnedTabs !== prev.sleepPinnedTabs) {
+    tabs?.refreshSleepPolicy()
+  }
   sendSettings()
   return view
 })
@@ -318,8 +576,12 @@ handle('privacy:clear', async (req) => {
     store?.clear(since)
     dataChanged()
   }
-  if (r.siteData === true) await webSession().clearStorageData()
-  if (r.cache === true) await webSession().clearCache()
+  const partitions = new Set<string>([WEB_PARTITION, ...(tabs?.workspacePartitions() ?? [])])
+  for (const part of partitions) {
+    const sess = sessionForPartition(part)
+    if (r.siteData === true) await sess.clearStorageData()
+    if (r.cache === true) await sess.clearCache()
+  }
 })
 
 on('permission:answer', (_t, id: unknown, allow: unknown, remember?: unknown) => {
@@ -373,6 +635,7 @@ app.on('second-instance', () => {
 
 void app.whenReady().then(createWindow)
 app.on('will-quit', () => {
+  stopCompactPoller()
   updater?.stop()
   store?.close()
   store = null
