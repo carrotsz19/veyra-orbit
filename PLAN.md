@@ -63,7 +63,7 @@ These are planned for, not surprises:
 - [x] Sleeping tabs (idle background tabs discard to free memory and reload when opened)
 - [ ] Link preview pop-up ("peek")
 - [ ] Ctrl+K command palette, following Veyra Study's `Palette.tsx`
-- [ ] Floating layer for menus and the palette above pages
+- [x] Floating layer for menus and the palette above pages
 
 ### M2: the study twist
 - Workspaces are Veyra Study **Subjects**
