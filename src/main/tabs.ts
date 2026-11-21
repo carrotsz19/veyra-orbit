@@ -58,6 +58,10 @@ export interface TabHooks {
   onMenuOpen?(open: boolean): void
   /** Notifies compact mode when the address bar is about to be focused. */
   onFocusOmnibox?(): void
+  /** Focuses the title-bar menu bar when standalone Alt is pressed and released. */
+  onFocusMenuBar?(): void
+  /** Quits the application (Ctrl+Q). */
+  quit?(): void
 }
 
 const ZOOM_STEP = 0.5
@@ -87,6 +91,10 @@ export class Tabs {
   onTabGone: (id: number) => void = () => {}
   /** While true, floating UI is open above the page, so the page view is taken out. */
   private overlayOpen = false
+  /** Tracks whether the last focused target was the active web page or the browser UI (for Edit menu). */
+  private lastFocusTarget: 'ui' | 'page' = 'ui'
+  /** Tracks a standalone Alt key press so Alt-release focuses the menu bar without clashing with Alt+Left/Tab. */
+  private altStandalone = false
 
   constructor(
     private win: BrowserWindow,
@@ -94,6 +102,12 @@ export class Tabs {
     private hooks: TabHooks
   ) {
     this.refreshSleepPolicy()
+    this.win.webContents.on('focus', () => {
+      this.lastFocusTarget = 'ui'
+    })
+    this.win.on('blur', () => {
+      this.altStandalone = false
+    })
   }
 
   // ---- reading ------------------------------------------------------------
@@ -109,7 +123,8 @@ export class Tabs {
       workspaces: this.workspaces.map((w) => ({ ...w })),
       activeWorkspaceId: this.activeWorkspaceId,
       tabCounts,
-      workspaceSwitchDir: this.workspaceSwitchDir
+      workspaceSwitchDir: this.workspaceSwitchDir,
+      canReopenClosed: this.closed.length > 0
     }
   }
 
@@ -707,8 +722,37 @@ export class Tabs {
     this.changed()
   }
 
+  zoomIn(): void {
+    this.zoom(ZOOM_STEP)
+  }
+
+  zoomOut(): void {
+    this.zoom(-ZOOM_STEP)
+  }
+
   resetZoom(): void {
     this.zoom(null)
+  }
+
+  toggleDevTools(): void {
+    const tab = this.active
+    if (!tab || !this.showsPage(tab) || !tab.view || tab.view.webContents.isDestroyed()) return
+    tab.view.webContents.toggleDevTools()
+  }
+
+  /** Runs an Edit menu command against whichever surface (active web page or browser UI) last had focus. */
+  editCommand(cmd: 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'selectAll'): void {
+    const tab = this.active
+    const usePage =
+      this.lastFocusTarget === 'page' &&
+      !!tab &&
+      this.showsPage(tab) &&
+      !!tab.view &&
+      !tab.view.webContents.isDestroyed()
+    const target = usePage ? tab!.view!.webContents : this.win.webContents
+    if (target.isDestroyed()) return
+    target.focus()
+    target[cmd]()
   }
 
   setBounds(r: Rect | null): void {
@@ -932,7 +976,23 @@ export class Tabs {
 
   /** Browser shortcuts, from the UI or from a page. True when one was used. */
   shortcut(input: Input): boolean {
+    const isAlt = input.key === 'Alt' || input.code === 'AltLeft' || input.code === 'AltRight'
+    if (input.type === 'keyUp') {
+      if (isAlt && this.altStandalone) {
+        this.altStandalone = false
+        this.hooks.onFocusMenuBar?.()
+        return true
+      }
+      return false
+    }
     if (input.type !== 'keyDown') return false
+    if (isAlt) {
+      if (!input.control && !input.meta && !input.shift && !input.isAutoRepeat) this.altStandalone = true
+      else this.altStandalone = false
+      return false
+    }
+    this.altStandalone = false
+
     const mod = process.platform === 'darwin' ? input.meta : input.control
     const key = input.key.toLowerCase()
     const run = (f: () => void): true => (f(), true)
@@ -956,6 +1016,7 @@ export class Tabs {
     }
 
     if (mod && !input.alt) {
+      if (key === 'q' && !input.shift) return run(() => this.hooks.quit?.())
       if (key === 's' && input.shift) return run(() => this.hooks.toggleCompactMode())
       if (key === 't' && input.shift) return run(() => this.reopenClosed())
       if (key === 't') return run(() => this.create())
@@ -1022,6 +1083,9 @@ export class Tabs {
       this.changed()
     }
 
+    wc.on('focus', () => {
+      if (isCurrent()) this.lastFocusTarget = 'page'
+    })
     wc.on('before-input-event', (e, input) => {
       if (this.shortcut(input)) e.preventDefault()
     })

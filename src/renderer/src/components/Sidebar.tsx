@@ -95,6 +95,7 @@ interface Props {
   onDismissUpdate: () => void
   onEditorOpenChange?: (open: boolean) => void
   onPointerEdge?: (inside: boolean) => void
+  openNewWorkspaceTick?: number
 }
 
 export function Sidebar({
@@ -105,7 +106,8 @@ export function Sidebar({
   update,
   onDismissUpdate,
   onEditorOpenChange,
-  onPointerEdge
+  onPointerEdge,
+  openNewWorkspaceTick = 0
 }: Props): React.JSX.Element {
   const [dragId, setDragId] = useState<number | null>(null)
   const [editor, setEditor] = useState<EditorState | null>(null)
@@ -113,6 +115,19 @@ export function Sidebar({
   useEffect(() => {
     onEditorOpenChange?.(editor !== null)
   }, [editor, onEditorOpenChange])
+
+  useEffect(() => {
+    if (openNewWorkspaceTick <= 0) return
+    const nextAccent = WORKSPACE_ACCENTS[state.workspaces.length % WORKSPACE_ACCENTS.length].id
+    setEditor({
+      mode: 'create',
+      name: '',
+      icon: 'book-open',
+      accent: nextAccent,
+      isolated: false,
+      confirmDelete: false
+    })
+  }, [openNewWorkspaceTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const pinned = state.tabs.filter((t) => t.pinned)
   const open = state.tabs.filter((t) => !t.pinned)
@@ -191,14 +206,6 @@ export function Sidebar({
       onMouseEnter={() => onPointerEdge?.(true)}
       onMouseLeave={() => onPointerEdge?.(false)}
     >
-      <div className="side-top">
-        <span className="brand">
-          <span className="brand-dot" />
-          Veyra <span className="brand-sub">Orbit</span>
-          {__CHANNEL__ === 'dev' && <span className="brand-dev">DEV</span>}
-        </span>
-      </div>
-
       {activeWorkspace && (
         <div className="ws-head">
           <span className="ws-head-badge" aria-hidden>

@@ -1,8 +1,19 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, type IpcMainEvent, type IpcMainInvokeEvent, type Session } from 'electron'
 import { join } from 'node:path'
 import { release } from 'node:os'
-import type { ClearDataRange, CompactPinKind, CompactRevealState, ExternalAppAsk, PermissionAsk, Rect, WorkspaceCreateInput, WorkspaceUpdateInput } from '../shared/types'
-import { toUrl } from '../shared/url'
+import type {
+  ClearDataRange,
+  CompactPinKind,
+  CompactRevealState,
+  ExternalAppAsk,
+  PermissionAsk,
+  Rect,
+  WinCmd,
+  WindowState,
+  WorkspaceCreateInput,
+  WorkspaceUpdateInput
+} from '../shared/types'
+import { isInternalUrl, toUrl } from '../shared/url'
 import { suggest, type Candidate } from '../shared/suggest'
 import { computeCompactZones } from '../shared/compact'
 import { resolveSleepTimeoutMs } from '../shared/sleep'
@@ -13,6 +24,7 @@ import { ExternalApps, Permissions, WEB_PARTITION, cleanUserAgent, hardenAll, se
 import { attachSessionCompat } from './compat'
 import { Downloads } from './downloads'
 import { Updater } from './updater'
+import { MenuPopup } from './floating'
 
 const APP_NAME = __CHANNEL__ === 'dev' ? 'Veyra Orbit Dev' : 'Veyra Orbit'
 app.setName(APP_NAME)
@@ -40,6 +52,7 @@ function overlay(): Electron.TitleBarOverlayOptions {
 }
 
 let win: BrowserWindow | null = null
+let menuPopup: MenuPopup | null = null
 let tabs: Tabs | null = null
 let perms: Permissions | null = null
 let externalApps: ExternalApps | null = null
@@ -52,12 +65,22 @@ let updater: Updater | null = null
 
 /** Compact mode runtime state for the active window. */
 let compactState: CompactRevealState = { enabled: false, sidebar: false, toolbar: false }
-let compactPins = { omnibox: false, sidebar: false, menu: false }
+let compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false }
 let compactHover = { sidebar: false, toolbar: false }
 let lastPolledCursor: { x: number; y: number } | null = null
 let compactPoller: NodeJS.Timeout | null = null
 let sideHideTimer: NodeJS.Timeout | null = null
 let barHideTimer: NodeJS.Timeout | null = null
+
+function sendWinState(): void {
+  if (!win || win.isDestroyed()) return
+  const payload: WindowState = {
+    focused: win.isFocused() || !!menuPopup?.isFocused(),
+    maximized: win.isMaximized(),
+    fullscreen: win.isFullScreen()
+  }
+  win.webContents.send('win:state', payload)
+}
 
 function applyCompactTargets(wantSide: boolean, wantBar: boolean): void {
   if (!win || win.isDestroyed() || !settings?.get().compactMode) return
@@ -93,7 +116,7 @@ function applyCompactTargets(wantSide: boolean, wantBar: boolean): void {
   } else if (compactState.toolbar && !barHideTimer) {
     barHideTimer = setTimeout(() => {
       barHideTimer = null
-      if (!compactPins.omnibox && !compactHover.toolbar && compactState.toolbar) {
+      if (!compactPins.omnibox && !compactPins.titleMenu && !compactHover.toolbar && compactState.toolbar) {
         compactState = { ...compactState, toolbar: false }
         if (win && !win.isDestroyed()) win.webContents.send('compact:state', compactState)
       }
@@ -112,7 +135,7 @@ function sendCompactState(force = false): void {
     ? {
         enabled: true,
         sidebar: compactState.sidebar || compactPins.sidebar || compactPins.menu || compactHover.sidebar,
-        toolbar: compactState.toolbar || compactPins.omnibox || compactHover.toolbar
+        toolbar: compactState.toolbar || compactPins.omnibox || compactPins.titleMenu || compactHover.toolbar
       }
     : { enabled: false, sidebar: false, toolbar: false }
 
@@ -165,7 +188,10 @@ function pollCompactCursor(): void {
   // If the OS cursor is outside the window and hasn't moved (e.g. non-interactive desktop session),
   // defer to the thin always-visible edge strips so we don't override DOM hover state.
   if (!zones.insideWindow && !moved) {
-    applyCompactTargets(compactHover.sidebar || compactPins.sidebar || compactPins.menu, compactHover.toolbar || compactPins.omnibox)
+    applyCompactTargets(
+      compactHover.sidebar || compactPins.sidebar || compactPins.menu,
+      compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu
+    )
     return
   }
 
@@ -173,7 +199,7 @@ function pollCompactCursor(): void {
   const sideByCursor = focused ? zones.wantSidebar : compactState.sidebar && zones.wantSidebar
   const barByCursor = focused ? zones.wantToolbar : compactState.toolbar && zones.wantToolbar
   const wantSide = sideByCursor || compactHover.sidebar || compactPins.sidebar || compactPins.menu
-  const wantBar = barByCursor || compactHover.toolbar || compactPins.omnibox
+  const wantBar = barByCursor || compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu
   applyCompactTargets(wantSide, wantBar)
 }
 
@@ -189,7 +215,7 @@ function syncCompactMode(): void {
   compactState = {
     enabled: true,
     sidebar: compactPins.sidebar || compactPins.menu || compactHover.sidebar,
-    toolbar: compactPins.omnibox || compactHover.toolbar
+    toolbar: compactPins.omnibox || compactPins.titleMenu || compactHover.toolbar
   }
   sendCompactState(true)
   if (!compactPoller) {
@@ -215,9 +241,10 @@ function toggleCompactMode(): void {
 }
 
 function createWindow(): void {
-  settings ??= new SettingsStore(join(app.getPath('userData'), 'settings.json'), app.getPath('downloads'), process.env.VEYRA_DOWNLOADS || '')
+  settings ??= new SettingsStore(join(app.getPath('userData'), 'settings.json'), app.getPath('downloads'), process.env.VEYRA_DOWNLOADS || '', isWin)
   const s = settings
   nativeTheme.themeSource = s.get().theme
+  const activeButtons = s.activeWindowButtonsStyle()
 
   const w = new BrowserWindow({
     width: 1360,
@@ -229,7 +256,11 @@ function createWindow(): void {
     icon: join(__dirname, `../../resources/${__CHANNEL__ === 'dev' ? 'icon-dev.png' : 'icon.png'}`),
     autoHideMenuBar: true,
     ...(acrylic ? { backgroundColor: '#00000000', backgroundMaterial: 'acrylic' as const } : { backgroundColor: nativeTheme.shouldUseDarkColors ? '#15140f' : '#f3f1ec' }),
-    ...(isWin ? { titleBarStyle: 'hidden' as const, titleBarOverlay: overlay() } : { titleBarStyle: 'hiddenInset' as const }),
+    ...(isWin
+      ? activeButtons === 'windows'
+        ? { titleBarStyle: 'hidden' as const, titleBarOverlay: overlay() }
+        : { titleBarStyle: 'hidden' as const }
+      : { titleBarStyle: 'hiddenInset' as const }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -239,6 +270,26 @@ function createWindow(): void {
     }
   })
   win = w
+  // Orbit draws its own title bar and menus; remove Electron's default menu bar so Alt never shows it.
+  w.setMenu(null)
+
+  // Reusable floating acrylic window for title-bar menus (sits above native WebContentsViews).
+  menuPopup?.destroy()
+  menuPopup = new MenuPopup(w, {
+    preload: join(__dirname, '../preload/floating.js'),
+    acrylic,
+    onOpenChange: (open) => {
+      compactPins.titleMenu = open
+      if (settings?.get().compactMode) {
+        applyCompactTargets(
+          compactHover.sidebar || compactPins.sidebar || compactPins.menu,
+          compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu
+        )
+      }
+      sendWinState()
+    },
+    onFocusChange: () => sendWinState()
+  })
 
   // The browser's own UI never navigates and never opens windows; pages do that in tabs.
   w.webContents.on('will-navigate', (e) => e.preventDefault())
@@ -323,7 +374,21 @@ function createWindow(): void {
       compactPins.omnibox = true
       compactState = { ...compactState, toolbar: true }
       sendCompactState(true)
-    }
+    },
+    onFocusMenuBar: () => {
+      if (w.isDestroyed()) return
+      if (settings?.get().compactMode) {
+        if (barHideTimer) {
+          clearTimeout(barHideTimer)
+          barHideTimer = null
+        }
+        compactState = { ...compactState, toolbar: true }
+        sendCompactState(true)
+      }
+      w.webContents.focus()
+      w.webContents.send('menu:focus-bar')
+    },
+    quit: () => app.quit()
   })
   const t = tabs
 
@@ -354,11 +419,16 @@ function createWindow(): void {
   w.once('ready-to-show', () => w.show())
   // Windows flickers acrylic on a full-screen window, so full screen is solid; and a page in
   // full screen leaves it when the window does (Esc, F11).
+  w.on('focus', sendWinState)
+  w.on('blur', sendWinState)
+  w.on('maximize', sendWinState)
+  w.on('unmaximize', sendWinState)
   w.on('enter-full-screen', () => {
     if (acrylic) {
       w.setBackgroundMaterial('none')
       w.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#15140f' : '#f3f1ec')
     }
+    sendWinState()
     t.relayout()
   })
   w.on('leave-full-screen', () => {
@@ -366,15 +436,18 @@ function createWindow(): void {
       w.setBackgroundColor('#00000000')
       w.setBackgroundMaterial('acrylic')
     }
+    sendWinState()
     t.exitPageFullscreen()
   })
   w.on('resize', () => t.relayout())
   w.on('close', () => t.save())
   w.on('closed', () => {
     stopCompactPoller()
-    compactPins = { omnibox: false, sidebar: false, menu: false }
+    compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false }
     compactHover = { sidebar: false, toolbar: false }
     compactState = { enabled: false, sidebar: false, toolbar: false }
+    menuPopup?.destroy()
+    menuPopup = null
     for (const sess of configuredSessions) sess.off('will-download', onDownload)
     configuredSessions.clear()
     d.detach()
@@ -384,7 +457,12 @@ function createWindow(): void {
     tabs = null
   })
 
-  const query = { material: acrylic ? 'acrylic' : 'solid', platform: process.platform }
+  const query = {
+    material: acrylic ? 'acrylic' : 'solid',
+    platform: process.platform,
+    buttons: activeButtons,
+    version: app.getVersion()
+  }
   if (process.env.ELECTRON_RENDERER_URL) void w.loadURL(`${process.env.ELECTRON_RENDERER_URL}?${new URLSearchParams(query)}`)
   else void w.loadFile(join(__dirname, '../renderer/index.html'), { query })
 
@@ -399,10 +477,29 @@ function createWindow(): void {
   }
 }
 
-/** Only the browser's own UI may call these; pages have no preload and can't reach them anyway. */
+/** Only the browser's own main UI may call app/tab/settings IPC; pages have no preload. */
 function fromUi(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
   return !!win && e.sender === win.webContents
 }
+
+/** Only the floating menu window may call menu-popup return channels. */
+function fromMenu(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  return !!menuPopup && menuPopup.isSender(e.sender)
+}
+
+const WIN_CMDS = new Set<WinCmd>([
+  'minimize',
+  'maximize',
+  'close',
+  'fullscreen',
+  'quit',
+  'undo',
+  'redo',
+  'cut',
+  'copy',
+  'paste',
+  'selectAll'
+])
 
 function on<A extends unknown[]>(channel: string, f: (t: Tabs, ...args: A) => void): void {
   ipcMain.on(channel, (e, ...args) => {
@@ -422,11 +519,20 @@ on('ready', () => {
   win.webContents.send('permissions:saved', perms?.listSaved() ?? [])
   sendSettings()
   sendCompactState(true)
+  sendWinState()
   win.webContents.send('page-fullscreen', tabs.isPageFullscreen())
   if (updater) win.webContents.send('update:state', updater.state())
 })
 on('tab:new', (t, input?: unknown) => t.create((str(input) && toUrl(input, settings?.searchUrl())) || ''))
 on('tab:close', (t, id: unknown) => num(id) && t.close(id))
+on('tab:reopen', (t) => t.reopenClosed())
+on('tab:print', (t) => t.print())
+on('tab:devtools', (t) => t.toggleDevTools())
+on('tab:open-internal', (t, url: unknown) => {
+  if (str(url) && isInternalUrl(url)) t.openInternal(url)
+})
+on('downloads:toggle', (t) => t.toggleDownloads())
+on('find:open', (t) => t.openFind())
 on('tab:activate', (t, id: unknown) => num(id) && t.activate(id))
 // Everything the UI navigates to was typed (address bar, start page), which history ranks higher.
 on('tab:navigate', (t, id: unknown, input: unknown) => num(id) && str(input) && t.navigate(id, input, true))
@@ -436,7 +542,65 @@ on('nav:back', (t) => t.back())
 on('nav:forward', (t) => t.forward())
 on('nav:reload', (t) => t.reload())
 on('nav:stop', (t) => t.stop())
+on('nav:zoom-in', (t) => t.zoomIn())
+on('nav:zoom-out', (t) => t.zoomOut())
 on('nav:zoom-reset', (t) => t.resetZoom())
+on('win:cmd', (t, cmd: unknown) => {
+  if (!str(cmd) || !WIN_CMDS.has(cmd as WinCmd) || !win || win.isDestroyed()) return
+  switch (cmd as WinCmd) {
+    case 'minimize':
+      win.minimize()
+      return
+    case 'maximize':
+      if (win.isMaximized()) win.unmaximize()
+      else win.maximize()
+      return
+    case 'close':
+      win.close()
+      return
+    case 'fullscreen':
+      win.setFullScreen(!win.isFullScreen())
+      return
+    case 'quit':
+      app.quit()
+      return
+    case 'undo':
+    case 'redo':
+    case 'cut':
+    case 'copy':
+    case 'paste':
+    case 'selectAll':
+      t.editCommand(cmd as 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'selectAll')
+      return
+  }
+})
+on('app:relaunch', (t) => {
+  t.save()
+  app.relaunch()
+  app.quit()
+})
+// Floating title-bar menu IPC: main UI asks to open/close; menu window reports size/pick/step/dismiss.
+ipcMain.on('menu:open', (e, spec: unknown) => {
+  if (fromUi(e)) menuPopup?.open(spec)
+})
+ipcMain.on('menu:close', (e) => {
+  if (fromUi(e)) menuPopup?.close()
+})
+ipcMain.on('menu:ready', (e) => {
+  if (fromMenu(e)) menuPopup?.markReady()
+})
+ipcMain.on('menu:size', (e, width: unknown, height: unknown) => {
+  if (fromMenu(e) && num(width) && num(height)) menuPopup?.applySize(width, height)
+})
+ipcMain.on('menu:pick', (e, id: unknown) => {
+  if (fromMenu(e) && str(id)) menuPopup?.pick(id)
+})
+ipcMain.on('menu:step', (e, by: unknown) => {
+  if (fromMenu(e) && (by === -1 || by === 1)) menuPopup?.step(by)
+})
+ipcMain.on('menu:dismiss', (e) => {
+  if (fromMenu(e)) menuPopup?.dismiss()
+})
 on('tab:mute', (t, id: unknown) => num(id) && t.toggleMute(id))
 on('tab:sleep', (t, id: unknown) => num(id) && t.sleepTab(id, true))
 on('tab:menu', (t, id: unknown) => num(id) && t.tabMenu(id))
@@ -447,14 +611,20 @@ on('compact:pin', (_t, kind: unknown, pinned: unknown) => {
   const k = kind as CompactPinKind
   compactPins[k] = pinned === true
   if (settings?.get().compactMode) {
-    applyCompactTargets(compactHover.sidebar || compactPins.sidebar || compactPins.menu, compactHover.toolbar || compactPins.omnibox)
+    applyCompactTargets(
+      compactHover.sidebar || compactPins.sidebar || compactPins.menu,
+      compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu
+    )
   }
 })
 on('compact:hover', (_t, edge: unknown, hovering: unknown) => {
   if (edge !== 'sidebar' && edge !== 'toolbar') return
   compactHover[edge] = hovering === true
   if (settings?.get().compactMode && !tabs?.isPageFullscreen()) {
-    applyCompactTargets(compactHover.sidebar || compactPins.sidebar || compactPins.menu, compactHover.toolbar || compactPins.omnibox)
+    applyCompactTargets(
+      compactHover.sidebar || compactPins.sidebar || compactPins.menu,
+      compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu
+    )
   }
 })
 on('bounds', (t, r: unknown) => {
@@ -626,7 +796,13 @@ on('update:install', () => updater?.install())
 
 nativeTheme.on('updated', () => {
   if (!win || win.isDestroyed()) return
-  if (isWin) win.setTitleBarOverlay(overlay())
+  if (isWin && settings?.activeWindowButtonsStyle() === 'windows') {
+    try {
+      win.setTitleBarOverlay(overlay())
+    } catch {
+      /* window without titleBarOverlay */
+    }
+  }
   if (!acrylic) win.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#15140f' : '#f3f1ec')
 })
 

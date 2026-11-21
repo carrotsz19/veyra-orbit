@@ -4,19 +4,36 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { DEFAULT_SETTINGS, mergeSettings, sanitizeSettings, searchUrlFor, type Settings, type SettingsView } from '../shared/settings.ts'
+import {
+  DEFAULT_SETTINGS,
+  mergeSettings,
+  sanitizeSettings,
+  searchUrlFor,
+  type Settings,
+  type SettingsView,
+  type WindowButtonsStyle
+} from '../shared/settings.ts'
 
 export class SettingsStore {
   private readonly file: string
   private readonly defaultDownloadsDir: string
   private readonly envDownloadsDir: string
+  private readonly supportsWindowButtons: boolean
+  private activeWindowButtons: WindowButtonsStyle
   private data: Settings
 
-  constructor(file: string, defaultDownloadsDir: string, envDownloadsDir = '') {
+  constructor(
+    file: string,
+    defaultDownloadsDir: string,
+    envDownloadsDir = '',
+    supportsWindowButtons = process.platform === 'win32'
+  ) {
     this.file = file
     this.defaultDownloadsDir = defaultDownloadsDir
     this.envDownloadsDir = envDownloadsDir
+    this.supportsWindowButtons = supportsWindowButtons
     this.data = this.load()
+    this.activeWindowButtons = supportsWindowButtons ? this.data.windowButtons : 'windows'
   }
 
   private load(): Settings {
@@ -49,11 +66,17 @@ export class SettingsStore {
     return this.envDownloadsDir || this.data.downloadsDir || this.defaultDownloadsDir
   }
 
+  activeWindowButtonsStyle(): WindowButtonsStyle {
+    return this.activeWindowButtons
+  }
+
   view(): SettingsView {
     return {
       ...this.data,
       effectiveDownloadsDir: this.effectiveDownloadsDir(),
-      downloadsOverridden: !!this.envDownloadsDir
+      downloadsOverridden: !!this.envDownloadsDir,
+      activeWindowButtons: this.activeWindowButtons,
+      supportsWindowButtons: this.supportsWindowButtons
     }
   }
 

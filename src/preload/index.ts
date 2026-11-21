@@ -95,7 +95,26 @@ const api: VeyraApi = {
   onUpdateState: (cb) => listen<UpdateState>('update:state', cb),
   getUpdateState: () => ipcRenderer.invoke('update:state'),
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
-  installUpdate: () => ipcRenderer.send('update:install')
+  installUpdate: () => ipcRenderer.send('update:install'),
+  reopenClosedTab: () => ipcRenderer.send('tab:reopen'),
+  print: () => ipcRenderer.send('tab:print'),
+  zoomIn: () => ipcRenderer.send('nav:zoom-in'),
+  zoomOut: () => ipcRenderer.send('nav:zoom-out'),
+  toggleDevTools: () => ipcRenderer.send('tab:devtools'),
+  toggleDownloads: () => ipcRenderer.send('downloads:toggle'),
+  openFind: () => ipcRenderer.send('find:open'),
+  openInternal: (url) => ipcRenderer.send('tab:open-internal', url),
+  winCmd: (cmd) => ipcRenderer.send('win:cmd', cmd),
+  relaunch: () => ipcRenderer.send('app:relaunch'),
+  onWinState: (cb) => listen('win:state', cb),
+  onFocusMenuBar: (cb) => listen<void>('menu:focus-bar', () => cb()),
+  menu: {
+    open: (spec) => ipcRenderer.send('menu:open', spec),
+    close: () => ipcRenderer.send('menu:close'),
+    onPicked: (cb) => listen<string>('menu:picked', cb),
+    onClosed: (cb) => listen<void>('menu:closed', () => cb()),
+    onStep: (cb) => listen<-1 | 1>('menu:step', cb)
+  }
 }
 
 contextBridge.exposeInMainWorld('veyra', api)

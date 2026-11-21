@@ -31,6 +31,8 @@ export interface BrowserState {
   tabCounts: Record<string, number>
   /** Direction hint for workspace switch transition: -1 (left), 0 (none), 1 (right). */
   workspaceSwitchDir: -1 | 0 | 1
+  /** True when at least one closed tab can be reopened (Ctrl+Shift+T). */
+  canReopenClosed: boolean
 }
 
 /** A site asking for something (camera, notifications, ...). Denied unless the person allows it. */
@@ -105,13 +107,52 @@ export interface Bookmark {
 }
 
 export type { Suggestion } from './suggest'
-export type { SearchEngineId, Settings, SettingsView, SleepMinutes, StartupBehavior, ThemeSource } from './settings'
+export type { SearchEngineId, Settings, SettingsView, SleepMinutes, StartupBehavior, ThemeSource, WindowButtonsStyle } from './settings'
 export type { UpdateState, UpdateStatus } from './updates'
 export type { WorkspaceAccentId, WorkspaceCreateInput, WorkspaceIconId, WorkspaceInfo, WorkspaceUpdateInput } from './workspaces'
 export type { CompactRevealState } from './compact'
+export type { MenuEntry, MenuId, MenuItemEntry, MenuPopupHeader, MenuPopupSpec, MenuSection } from './menu'
+export type { InternalUrl } from './url'
 
 export type CompactPinKind = 'omnibox' | 'sidebar'
 export type CompactEdgeKind = 'sidebar' | 'toolbar'
+
+export type WinCmd =
+  | 'minimize'
+  | 'maximize'
+  | 'close'
+  | 'fullscreen'
+  | 'quit'
+  | 'undo'
+  | 'redo'
+  | 'cut'
+  | 'copy'
+  | 'paste'
+  | 'selectAll'
+
+export interface WindowState {
+  focused: boolean
+  maximized: boolean
+  fullscreen: boolean
+}
+
+export interface MenuBridgeApi {
+  open(spec: import('./menu').MenuPopupSpec): void
+  close(): void
+  onPicked(cb: (id: string) => void): () => void
+  onClosed(cb: () => void): () => void
+  onStep(cb: (by: -1 | 1) => void): () => void
+}
+
+/** Minimal preload bridge exposed ONLY to the floating menu BrowserWindow. */
+export interface VeyraMenuWindowApi {
+  ready(): void
+  onRender(cb: (spec: import('./menu').MenuPopupSpec) => void): () => void
+  size(width: number, height: number): void
+  pick(id: string): void
+  step(by: -1 | 1): void
+  dismiss(): void
+}
 
 export type ClearDataRange = 'hour' | 'day' | 'all'
 
@@ -200,4 +241,17 @@ export interface VeyraApi {
   getUpdateState(): Promise<import('./updates').UpdateState | null>
   checkForUpdates(): Promise<import('./updates').UpdateState | null>
   installUpdate(): void
+  reopenClosedTab(): void
+  print(): void
+  zoomIn(): void
+  zoomOut(): void
+  toggleDevTools(): void
+  toggleDownloads(): void
+  openFind(): void
+  openInternal(url: import('./url').InternalUrl): void
+  winCmd(cmd: WinCmd): void
+  relaunch(): void
+  onWinState(cb: (s: WindowState) => void): () => void
+  onFocusMenuBar(cb: () => void): () => void
+  menu: MenuBridgeApi
 }
