@@ -109,12 +109,22 @@ export interface Bookmark {
 }
 
 export type { Suggestion } from './suggest'
-export type { SearchEngineId, Settings, SettingsView, SleepMinutes, StartupBehavior, ThemeSource, WindowButtonsStyle } from './settings'
+export type {
+  NewTabBehavior,
+  SearchEngineId,
+  Settings,
+  SettingsView,
+  SleepMinutes,
+  StartupBehavior,
+  ThemeSource,
+  WindowButtonsStyle
+} from './settings'
 export type { UpdateState, UpdateStatus } from './updates'
 export type { WorkspaceAccentId, WorkspaceCreateInput, WorkspaceIconId, WorkspaceInfo, WorkspaceUpdateInput } from './workspaces'
 export type { CompactRevealState } from './compact'
 export type { MenuEntry, MenuId, MenuItemEntry, MenuPopupHeader, MenuPopupSpec, MenuSection } from './menu'
 export type { SplitGroup } from './split'
+export type { PaletteItem, PaletteMode, PaletteOpenState, PaletteResultsPayload } from './palette'
 export type { InternalUrl } from './url'
 
 export type CompactPinKind = 'omnibox' | 'sidebar'
@@ -154,6 +164,18 @@ export interface VeyraMenuWindowApi {
   size(width: number, height: number): void
   pick(id: string): void
   step(by: -1 | 1): void
+  dismiss(): void
+}
+
+/** Minimal bridge exposed ONLY to the floating Ctrl+K command palette BrowserWindow. */
+export interface VeyraPaletteWindowApi {
+  ready(): void
+  onOpen(cb: (init: import('./palette').PaletteOpenState) => void): () => void
+  onResults(cb: (payload: import('./palette').PaletteResultsPayload) => void): () => void
+  query(text: string): void
+  pick(id: string, openInNewTab: boolean): void
+  submitText(text: string, openInNewTab: boolean): void
+  size(height: number): void
   dismiss(): void
 }
 

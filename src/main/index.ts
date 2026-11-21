@@ -13,10 +13,18 @@ import type {
   WorkspaceCreateInput,
   WorkspaceUpdateInput
 } from '../shared/types'
-import { isInternalUrl, toUrl } from '../shared/url'
+import { isAllowedUrl, isInternalUrl, toUrl } from '../shared/url'
 import { suggest, type Candidate } from '../shared/suggest'
 import { computeCompactZones } from '../shared/compact'
 import { resolveSleepTimeoutMs } from '../shared/sleep'
+import { WORKSPACE_ACCENTS } from '../shared/workspaces'
+import {
+  buildPaletteResults,
+  resolveTypedPaletteText,
+  type PaletteAction,
+  type PaletteContext,
+  type PaletteMode
+} from '../shared/palette'
 import { Tabs } from './tabs'
 import { Store } from './store'
 import { SettingsStore } from './settings'
@@ -24,7 +32,7 @@ import { ExternalApps, Permissions, WEB_PARTITION, cleanUserAgent, hardenAll, se
 import { attachSessionCompat } from './compat'
 import { Downloads } from './downloads'
 import { Updater } from './updater'
-import { CompactPanel, MenuPopup } from './floating'
+import { CompactPanel, MenuPopup, PalettePopup } from './floating'
 
 const APP_NAME = __CHANNEL__ === 'dev' ? 'Veyra Orbit Dev' : 'Veyra Orbit'
 app.setName(APP_NAME)
@@ -53,6 +61,7 @@ function overlay(): Electron.TitleBarOverlayOptions {
 
 let win: BrowserWindow | null = null
 let menuPopup: MenuPopup | null = null
+let palettePopup: PalettePopup | null = null
 let compactSidebar: CompactPanel | null = null
 let compactTitlebar: CompactPanel | null = null
 let compactOmniboxOpen = false
@@ -84,6 +93,7 @@ function isAnyOrbitFocused(): boolean {
   return (
     !!(win && !win.isDestroyed() && win.isFocused()) ||
     !!menuPopup?.isFocused() ||
+    !!palettePopup?.isFocused() ||
     !!compactSidebar?.isFocused() ||
     !!compactTitlebar?.isFocused()
   )
@@ -348,6 +358,231 @@ function toggleCompactMode(): void {
   syncCompactMode()
 }
 
+function buildPaletteContext(query: string, mode: PaletteMode): PaletteContext | null {
+  if (!tabs || !store || !settings || !win || win.isDestroyed()) return null
+  const st = tabs.state()
+  const wsNameById = new Map(st.workspaces.map((w) => [w.id, w.name]))
+  const all = tabs.allTabs()
+  const activeTab = all.find((t) => t.id === st.activeId) ?? null
+  const trimmed = query.trim()
+
+  let candidates: Candidate[] = []
+  if (trimmed) {
+    candidates = store.candidates(trimmed, 120)
+  } else {
+    const bookmarks = store.bookmarks().slice(0, 12)
+    const recent = store.history('', null, 16)
+    const bmUrls = new Set(bookmarks.map((b) => b.url))
+    candidates = [
+      ...bookmarks.map((b) => ({ url: b.url, title: b.title, visits: 0, typed: 0, last: b.created, bookmarked: true })),
+      ...recent
+        .filter((h) => !bmUrls.has(h.url))
+        .map((h) => ({ url: h.url, title: h.title, visits: 1, typed: 0, last: h.time, bookmarked: false }))
+    ]
+  }
+
+  return {
+    mode,
+    tabs: all.map((t) => ({
+      id: t.id,
+      workspaceId: t.workspaceId,
+      workspaceName: wsNameById.get(t.workspaceId) ?? 'Personal',
+      url: t.url,
+      title: t.title,
+      bookmarked: t.bookmarked,
+      pinned: t.pinned,
+      muted: t.muted,
+      active: t.id === st.activeId
+    })),
+    candidates,
+    workspaces: st.workspaces.map((w) => ({
+      id: w.id,
+      name: w.name,
+      active: w.id === st.activeWorkspaceId
+    })),
+    activeTab: activeTab
+      ? {
+          id: activeTab.id,
+          url: activeTab.url,
+          hasError: !!activeTab.error,
+          pinned: activeTab.pinned,
+          muted: activeTab.muted,
+          bookmarked: activeTab.bookmarked,
+          zoom: activeTab.zoom
+        }
+      : null,
+    isSplit: !!activeTab && st.splits.some((g) => g.tabIds.includes(activeTab.id)),
+    compactMode: settings.get().compactMode,
+    isFullscreen: win.isFullScreen(),
+    canReopenClosed: st.canReopenClosed,
+    theme: settings.get().theme,
+    searchUrl: settings.searchUrl()
+  }
+}
+
+function activeWorkspaceAccentHex(): string {
+  const dark = nativeTheme.shouldUseDarkColors
+  const st = tabs?.state()
+  const ws = st?.workspaces.find((w) => w.id === st.activeWorkspaceId)
+  const entry = WORKSPACE_ACCENTS.find((a) => a.id === ws?.accent) ?? WORKSPACE_ACCENTS[0]
+  return dark ? entry.dark : entry.light
+}
+
+function openOrTogglePalette(mode: PaletteMode): void {
+  if (!palettePopup || !tabs) return
+  if (palettePopup.isOpen() && palettePopup.currentMode() === mode) {
+    palettePopup.dismiss()
+    return
+  }
+  menuPopup?.close()
+  if (tabs.isPageFullscreen()) tabs.exitPageFullscreen(true)
+  const ctx = buildPaletteContext('', mode)
+  if (!ctx) return
+  const { items, actions } = buildPaletteResults('', ctx)
+  palettePopup.open({
+    mode,
+    dark: nativeTheme.shouldUseDarkColors,
+    accent: activeWorkspaceAccentHex(),
+    items,
+    actions
+  })
+}
+
+function openNewWorkspaceEditor(): void {
+  if (settings?.get().compactMode) {
+    if (sideHideTimer) {
+      clearTimeout(sideHideTimer)
+      sideHideTimer = null
+    }
+    compactState = { ...compactState, sidebar: true }
+    sendCompactState(true, 'sidebar')
+    compactSidebar?.send('ui:new-workspace')
+  } else if (win && !win.isDestroyed()) {
+    win.webContents.send('ui:new-workspace')
+  }
+}
+
+function executePaletteAction(action: PaletteAction, openInNewTab: boolean): void {
+  if (!tabs || !win || win.isDestroyed()) return
+  switch (action.type) {
+    case 'switch-tab':
+      tabs.activate(action.tabId)
+      return
+    case 'switch-workspace':
+      tabs.switchWorkspace(action.workspaceId)
+      return
+    case 'settings-section':
+      tabs.openInternal('orbit://settings')
+      win.webContents.send('ui:settings-section', action.sectionId)
+      return
+    case 'navigate': {
+      if (!isAllowedUrl(action.url) && !isInternalUrl(action.url)) return
+      const activeId = tabs.state().activeId
+      if (openInNewTab || activeId === null) tabs.create(action.url)
+      else tabs.navigate(activeId, action.url, true)
+      return
+    }
+    case 'command': {
+      const st = tabs.state()
+      switch (action.cmd) {
+        case 'new-tab':
+          tabs.create('')
+          return
+        case 'new-workspace':
+          openNewWorkspaceEditor()
+          return
+        case 'toggle-compact':
+          toggleCompactMode()
+          return
+        case 'split-next':
+          tabs.splitWithNext()
+          return
+        case 'unsplit':
+          tabs.unsplit()
+          return
+        case 'reopen-closed':
+          tabs.reopenClosed()
+          return
+        case 'reload':
+          tabs.reload(false)
+          return
+        case 'hard-reload':
+          tabs.reload(true)
+          return
+        case 'duplicate-tab':
+          if (st.activeId !== null) tabs.duplicate(st.activeId)
+          return
+        case 'pin-tab':
+          if (st.activeId !== null) tabs.togglePin(st.activeId)
+          return
+        case 'mute-tab':
+          if (st.activeId !== null) tabs.toggleMute(st.activeId)
+          return
+        case 'sleep-tab':
+          if (st.activeId !== null) tabs.sleepTab(st.activeId, true)
+          return
+        case 'close-tab':
+          if (st.activeId !== null) tabs.close(st.activeId)
+          return
+        case 'toggle-bookmark':
+          tabs.toggleBookmark()
+          return
+        case 'zoom-in':
+          tabs.zoomIn()
+          return
+        case 'zoom-out':
+          tabs.zoomOut()
+          return
+        case 'zoom-reset':
+          tabs.resetZoom()
+          return
+        case 'print':
+          tabs.print()
+          return
+        case 'find':
+          tabs.openFind()
+          return
+        case 'toggle-downloads':
+          tabs.toggleDownloads()
+          return
+        case 'devtools':
+          tabs.toggleDevTools()
+          return
+        case 'fullscreen':
+          win.setFullScreen(!win.isFullScreen())
+          return
+        case 'open-history':
+          tabs.openInternal('orbit://history')
+          return
+        case 'open-bookmarks':
+          tabs.openInternal('orbit://bookmarks')
+          return
+        case 'open-settings':
+          tabs.openInternal('orbit://settings')
+          return
+        case 'clear-history-hour':
+          store?.clear(Date.now() - HOUR_MS)
+          dataChanged()
+          return
+        case 'clear-history-day':
+          store?.clear(Date.now() - 24 * HOUR_MS)
+          dataChanged()
+          return
+        case 'theme-light':
+        case 'theme-dark':
+        case 'theme-system': {
+          if (!settings) return
+          const theme = action.cmd === 'theme-light' ? 'light' : action.cmd === 'theme-dark' ? 'dark' : 'system'
+          settings.update({ theme })
+          nativeTheme.themeSource = theme
+          sendSettings()
+          return
+        }
+      }
+    }
+  }
+}
+
 function createWindow(): void {
   settings ??= new SettingsStore(join(app.getPath('userData'), 'settings.json'), app.getPath('downloads'), process.env.VEYRA_DOWNLOADS || '', isWin)
   const s = settings
@@ -428,6 +663,14 @@ function createWindow(): void {
       }
       sendWinState()
     },
+    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur())
+  })
+
+  // Reusable floating acrylic window for the Ctrl+K command palette.
+  palettePopup?.destroy()
+  palettePopup = new PalettePopup(w, {
+    preload: join(__dirname, '../preload/palette.js'),
+    acrylic,
     onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur())
   })
 
@@ -551,9 +794,18 @@ function createWindow(): void {
       if (on) {
         compactSidebar?.hide(true)
         compactTitlebar?.hide(true)
+        palettePopup?.close()
       } else if (settings?.get().compactMode) {
         syncCompactPanels()
       }
+    },
+    onTogglePalette: (mode) => openOrTogglePalette(mode),
+    onNewTabShortcut: () => {
+      if (settings?.get().newTabBehavior === 'command-bar') {
+        openOrTogglePalette('new-tab')
+        return true
+      }
+      return false
     },
     quit: () => app.quit()
   })
@@ -636,6 +888,8 @@ function createWindow(): void {
     compactSidebar = null
     compactTitlebar?.destroy()
     compactTitlebar = null
+    palettePopup?.destroy()
+    palettePopup = null
     menuPopup?.destroy()
     menuPopup = null
     for (const sess of configuredSessions) sess.off('will-download', onDownload)
@@ -685,6 +939,11 @@ function fromUiSurface(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
 /** Only the floating menu window may call menu-popup return channels. */
 function fromMenu(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
   return !!menuPopup && menuPopup.isSender(e.sender)
+}
+
+/** Only the floating Ctrl+K command palette window may call palette:* return channels. */
+function fromPalette(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  return !!palettePopup && palettePopup.isSender(e.sender)
 }
 
 const WIN_CMDS = new Set<WinCmd>([
@@ -777,7 +1036,13 @@ ipcMain.on('compact-panel:settings-section', (e, sectionId: unknown) => {
   if (win && !win.isDestroyed()) win.webContents.send('ui:settings-section', sectionId)
 })
 
-onSurface('tab:new', (t, input?: unknown) => t.create((str(input) && toUrl(input, settings?.searchUrl())) || ''))
+onSurface('tab:new', (t, input?: unknown) => {
+  if (input === undefined && settings?.get().newTabBehavior === 'command-bar') {
+    openOrTogglePalette('new-tab')
+    return
+  }
+  t.create((str(input) && toUrl(input, settings?.searchUrl())) || '')
+})
 onSurface('tab:close', (t, id: unknown) => num(id) && t.close(id))
 onSurface('tab:reopen', (t) => t.reopenClosed())
 onSurface('tab:print', (t) => t.print())
@@ -856,6 +1121,36 @@ ipcMain.on('menu:step', (e, by: unknown) => {
 })
 ipcMain.on('menu:dismiss', (e) => {
   if (fromMenu(e)) menuPopup?.dismiss()
+})
+
+// Floating Ctrl+K command palette IPC: strict sender check + main-side ID/URL validation.
+ipcMain.on('palette:ready', (e) => {
+  if (fromPalette(e)) palettePopup?.markReady()
+})
+ipcMain.on('palette:query', (e, text: unknown) => {
+  if (!fromPalette(e) || !palettePopup || !str(text)) return
+  const ctx = buildPaletteContext(text, palettePopup.currentMode())
+  if (!ctx) return
+  const { items, actions } = buildPaletteResults(text, ctx)
+  palettePopup.updateResults(text.trim(), items, actions)
+})
+ipcMain.on('palette:pick', (e, id: unknown, openInNewTab: unknown) => {
+  if (!fromPalette(e) || !palettePopup) return
+  const action = palettePopup.consumePick(id)
+  if (!action) return
+  executePaletteAction(action, openInNewTab === true)
+})
+ipcMain.on('palette:submit-text', (e, text: unknown, openInNewTab: unknown) => {
+  if (!fromPalette(e) || !palettePopup || !settings) return
+  const url = resolveTypedPaletteText(text, settings.searchUrl())
+  palettePopup.close()
+  if (url) executePaletteAction({ type: 'navigate', url }, openInNewTab === true)
+})
+ipcMain.on('palette:size', (e, height: unknown) => {
+  if (fromPalette(e) && num(height)) palettePopup?.applyHeight(height)
+})
+ipcMain.on('palette:dismiss', (e) => {
+  if (fromPalette(e)) palettePopup?.dismiss()
 })
 onSurface('tab:mute', (t, id: unknown) => num(id) && t.toggleMute(id))
 onSurface('tab:sleep', (t, id: unknown) => num(id) && t.sleepTab(id, true))

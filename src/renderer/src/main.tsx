@@ -19,6 +19,10 @@ if (view === 'menu') {
   void import('./components/CompactPanels').then(({ CompactTitlebarWindow }) => {
     createRoot(document.getElementById('root')!).render(<CompactTitlebarWindow />)
   })
+} else if (view === 'palette') {
+  void import('./components/PaletteWindow').then(({ PaletteWindow }) => {
+    createRoot(document.getElementById('root')!).render(<PaletteWindow />)
+  })
 } else {
   if (__CHANNEL__ === 'dev') document.title = 'Veyra Orbit Dev'
   void import('./App').then(({ App }) => {

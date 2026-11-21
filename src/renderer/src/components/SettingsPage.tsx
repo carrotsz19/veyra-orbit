@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { FolderOpen, Monitor, Moon, RefreshCw, RotateCcw, Shield, Sun, Trash2 } from 'lucide-react'
 import type {
   ClearDataRange,
+  NewTabBehavior,
   SearchEngineId,
   SettingsView,
   SitePermission,
@@ -27,6 +28,11 @@ const THEMES: { id: ThemeSource; label: string; icon: typeof Monitor }[] = [
 const STARTUP_OPTIONS: { id: StartupBehavior; label: string; detail: string }[] = [
   { id: 'restore', label: "Reopen last session's tabs", detail: 'Pick up where you left off. Restored tabs load only when you open them.' },
   { id: 'new-tab', label: 'Start with a new tab', detail: 'Open a clean start page each time Orbit launches.' }
+]
+
+const NEW_TAB_OPTIONS: { id: NewTabBehavior; label: string; detail: string }[] = [
+  { id: 'start-page', label: 'Start page', detail: 'Open a fresh start page with the greeting and search bar.' },
+  { id: 'command-bar', label: 'Command bar', detail: 'Open the floating Ctrl+K command bar in new-tab mode.' }
 ]
 
 const SLEEP_LABELS: Record<SleepMinutes, string> = {
@@ -186,6 +192,7 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
       searchEngine: SearchEngineId
       theme: ThemeSource
       startup: StartupBehavior
+      newTabBehavior: NewTabBehavior
       downloadsDir: string
       askWhereToSave: boolean
       compactMode: boolean
@@ -293,6 +300,27 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
                   aria-checked={settings.startup === opt.id}
                   className={`set-row set-choice ${settings.startup === opt.id ? 'on' : ''}`}
                   onClick={() => patch({ startup: opt.id })}
+                >
+                  <span className="set-radio" aria-hidden />
+                  <div className="set-row-info">
+                    <div className="set-label">{opt.label}</div>
+                    <div className="set-desc">{opt.detail}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="set-section" aria-labelledby="set-newtab-h">
+            <h2 id="set-newtab-h">New tab opens</h2>
+            <div className="set-card" role="radiogroup" aria-label="New tab opens">
+              {NEW_TAB_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  role="radio"
+                  aria-checked={settings.newTabBehavior === opt.id}
+                  className={`set-row set-choice ${settings.newTabBehavior === opt.id ? 'on' : ''}`}
+                  onClick={() => patch({ newTabBehavior: opt.id })}
                 >
                   <span className="set-radio" aria-hidden />
                   <div className="set-row-info">

@@ -8,6 +8,14 @@
 import { BrowserWindow, screen, type Input, type WebContents } from 'electron'
 import { join } from 'node:path'
 import { clampPopupBounds, type BoundsRect, type MenuEntry, type MenuPopupHeader, type MenuPopupSpec } from '../shared/menu'
+import {
+  computePaletteBounds,
+  validatePalettePick,
+  type PaletteAction,
+  type PaletteItem,
+  type PaletteMode,
+  type PaletteOpenState
+} from '../shared/palette'
 
 export interface FloatingWindowOptions {
   parent: BrowserWindow
@@ -557,6 +565,127 @@ export class CompactPanel {
       this.hideTimer = null
     }
     this.revealed = false
+    this.floating.destroy()
+  }
+}
+
+// ---- Floating Ctrl+K command palette built on FloatingWindow ---------------
+
+export class PalettePopup {
+  private readonly floating: FloatingWindow
+  private readonly parent: BrowserWindow
+  private actions = new Map<string, PaletteAction>()
+  private mode: PaletteMode = 'command'
+  private lastHeight = 360
+
+  constructor(
+    parent: BrowserWindow,
+    opts: {
+      preload: string
+      acrylic: boolean
+      onFocusChange?: (focused: boolean) => void
+      onHidden?: () => void
+    }
+  ) {
+    this.parent = parent
+    this.floating = new FloatingWindow({
+      parent,
+      preload: opts.preload,
+      view: 'palette',
+      acrylic: opts.acrylic,
+      width: 600,
+      height: 360,
+      hideOnBlur: true,
+      hideOnParentMove: true,
+      onFocusChange: opts.onFocusChange,
+      onHidden: () => {
+        this.actions.clear()
+        opts.onHidden?.()
+      }
+    })
+  }
+
+  isSender(wc: WebContents): boolean {
+    return this.floating.isSender(wc)
+  }
+
+  isOpen(): boolean {
+    return this.floating.isVisible()
+  }
+
+  isFocused(): boolean {
+    return this.floating.isFocused()
+  }
+
+  currentMode(): PaletteMode {
+    return this.mode
+  }
+
+  markReady(): void {
+    this.floating.markReady()
+  }
+
+  open(
+    init: { mode: PaletteMode; dark: boolean; accent: string; items: PaletteItem[]; actions: Map<string, PaletteAction> }
+  ): void {
+    if (this.parent.isDestroyed()) return
+    this.mode = init.mode
+    this.actions = init.actions
+    const z = this.parent.webContents.getZoomFactor()
+    this.floating.setZoomFactor(z)
+    const cb = this.parent.getContentBounds()
+    const workArea = screen.getDisplayNearestPoint({ x: cb.x + Math.round(cb.width / 2), y: cb.y + 60 }).workArea
+    const initialH = Math.min(500, Math.max(92, 52 + init.items.length * 42 + 34))
+    this.lastHeight = initialH
+    const bounds = computePaletteBounds(cb, workArea, initialH, z)
+    const payload: PaletteOpenState = {
+      mode: init.mode,
+      dark: init.dark,
+      accent: init.accent,
+      items: init.items
+    }
+    this.floating.send('palette:open', payload)
+    this.floating.showAtBounds(bounds, true, 8)
+  }
+
+  updateResults(query: string, items: PaletteItem[], actions: Map<string, PaletteAction>): void {
+    this.actions = actions
+    this.floating.send('palette:results', { query, items })
+  }
+
+  applyHeight(height: number): void {
+    if (this.parent.isDestroyed() || !this.floating.isVisible()) return
+    if (!Number.isFinite(height) || height <= 0) return
+    const clamped = Math.min(520, Math.max(58, Math.ceil(height)))
+    if (Math.abs(clamped - this.lastHeight) < 2) return
+    this.lastHeight = clamped
+    const z = this.parent.webContents.getZoomFactor()
+    const cb = this.parent.getContentBounds()
+    const workArea = screen.getDisplayNearestPoint({ x: cb.x + Math.round(cb.width / 2), y: cb.y + 60 }).workArea
+    const bounds = computePaletteBounds(cb, workArea, clamped, z)
+    this.floating.setBounds(bounds)
+  }
+
+  /** Validates an item ID against the exact list main rendered, closes the palette, and returns the action. */
+  consumePick(id: unknown): PaletteAction | null {
+    const action = validatePalettePick(this.actions, id)
+    if (!action) return null
+    this.close()
+    return action
+  }
+
+  dismiss(): void {
+    this.close()
+    if (!this.parent.isDestroyed()) this.parent.focus()
+  }
+
+  close(): void {
+    this.actions.clear()
+    this.floating.hide('asked')
+  }
+
+  destroy(): void {
+    this.actions.clear()
     this.floating.destroy()
   }
 }

@@ -29,7 +29,8 @@ export default defineConfig({
         input: {
           index: resolve('src/preload/index.ts'),
           floating: resolve('src/preload/floating.ts'),
-          compact: resolve('src/preload/compact.ts')
+          compact: resolve('src/preload/compact.ts'),
+          palette: resolve('src/preload/palette.ts')
         }
       }
     }

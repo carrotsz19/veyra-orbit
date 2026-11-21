@@ -78,6 +78,10 @@ export interface TabHooks {
   onToggleDownloads?(): boolean | void
   /** Called when a page enters or leaves HTML5 full screen. */
   onPageFullscreen?(on: boolean): void
+  /** Opens or toggles the Ctrl+K command palette. */
+  onTogglePalette?(mode: 'command' | 'new-tab'): void
+  /** Called on Ctrl+T when no URL is given; returns true if handled (e.g. opening command bar in new-tab mode). */
+  onNewTabShortcut?(): boolean
   /** Quits the application (Ctrl+Q). */
   quit?(): void
 }
@@ -1287,10 +1291,11 @@ export class Tabs {
 
     if (mod && !input.alt) {
       if (key === 'q' && !input.shift) return run(() => this.hooks.quit?.())
+      if (key === 'k' && !input.shift) return run(() => this.hooks.onTogglePalette?.('command'))
       if (key === 's' && input.shift) return run(() => this.hooks.toggleCompactMode())
       if (input.shift && (key === '\\' || key === '|' || input.code === 'Backslash')) return run(() => this.splitWithNext())
       if (key === 't' && input.shift) return run(() => this.reopenClosed())
-      if (key === 't') return run(() => this.create())
+      if (key === 't') return run(() => { if (!this.hooks.onNewTabShortcut?.()) this.create() })
       if (key === 'w') return run(() => this.activeId !== null && this.close(this.activeId))
       if (key === 'l') return run(() => this.focusOmnibox())
       if (key === 'f') return run(() => this.openFind())
