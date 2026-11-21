@@ -279,6 +279,9 @@ export function TitleBar({
         case 'edit:find':
           api.openFind()
           return
+        case 'view:palette':
+          api.openPalette('command')
+          return
         case 'view:compact':
           api.toggleCompactMode()
           return

@@ -301,6 +301,7 @@ export interface VeyraApi {
   toggleDevTools(): void
   toggleDownloads(): void
   openFind(): void
+  openPalette(mode?: import('./palette').PaletteMode): void
   openInternal(url: import('./url').InternalUrl): void
   winCmd(cmd: WinCmd): void
   relaunch(): void

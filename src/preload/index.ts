@@ -108,6 +108,7 @@ const api: VeyraApi = {
   toggleDevTools: () => ipcRenderer.send('tab:devtools'),
   toggleDownloads: () => ipcRenderer.send('downloads:toggle'),
   openFind: () => ipcRenderer.send('find:open'),
+  openPalette: (mode) => ipcRenderer.send('palette:open-request', mode),
   openInternal: (url) => ipcRenderer.send('tab:open-internal', url),
   winCmd: (cmd) => ipcRenderer.send('win:cmd', cmd),
   relaunch: () => ipcRenderer.send('app:relaunch'),

@@ -78,6 +78,7 @@ const uiSubset = {
   toggleDevTools: () => ipcRenderer.send('tab:devtools'),
   toggleDownloads: () => ipcRenderer.send('downloads:toggle'),
   openFind: () => ipcRenderer.send('find:open'),
+  openPalette: (mode?: 'command' | 'new-tab') => ipcRenderer.send('palette:open-request', mode),
   openInternal: (url: string) => ipcRenderer.send('tab:open-internal', url),
   winCmd: (cmd: string) => ipcRenderer.send('win:cmd', cmd),
   menu: {

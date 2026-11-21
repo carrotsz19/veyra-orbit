@@ -1405,6 +1405,21 @@ export class Tabs {
         this.focusPane(info.id)
       }
     })
+    wc.on('before-mouse-event', (_e, mouse) => {
+      if (!isCurrent()) return
+      if (mouse.type === 'mouseDown') {
+        this.lastFocusTarget = 'page'
+        if (mouse.modifiers?.includes('shift')) this.shiftHeld = true
+        if (mouse.modifiers?.includes('alt')) {
+          this.altHeld = true
+          this.lastAltAt = Date.now()
+          this.altStandalone = false
+        }
+        if (info.id !== this.activeId && this.isVisibleTab(info.id)) {
+          this.focusPane(info.id)
+        }
+      }
+    })
     wc.on('before-input-event', (e, input) => {
       if (this.shortcut(input)) e.preventDefault()
     })

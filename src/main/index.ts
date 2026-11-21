@@ -49,6 +49,10 @@ hardenAll()
 const isWin = process.platform === 'win32'
 /** Acrylic needs Windows 11 22H2 (build 22621) or newer. */
 const acrylic = isWin && Number(release().split('.')[2] ?? 0) >= 22621
+const smokeLog = !app.isPackaged && process.env.VEYRA_SMOKE_LOG === '1'
+function logSmoke(tag: string, data: unknown): void {
+  if (smokeLog) console.log(`[smoke:${tag}] ${JSON.stringify(data)}`)
+}
 const TITLE_BAR_H = 40
 const HOUR_MS = 3_600_000
 const CLEAR_RANGES = new Set<ClearDataRange>(['hour', 'day', 'all'])
@@ -168,6 +172,15 @@ function syncCompactPanels(focusTarget?: 'sidebar' | 'toolbar', immediateHide = 
   } else {
     compactSidebar?.hide(immediateHide)
   }
+
+  logSmoke('compact', {
+    enabled,
+    sidebar: compactState.sidebar,
+    toolbar: compactState.toolbar,
+    sidebarVisible: !!compactSidebar?.isVisible(),
+    toolbarVisible: !!compactTitlebar?.isVisible(),
+    viewBounds: tabs?.attachedViewBounds() ?? []
+  })
 }
 
 function sendWinState(): void {
@@ -450,6 +463,7 @@ function openOrTogglePalette(mode: PaletteMode): void {
     items,
     actions
   })
+  logSmoke('palette', { event: 'open', mode, count: items.length, visible: palettePopup.isOpen() })
 }
 
 function openNewWorkspaceEditor(): void {
@@ -809,6 +823,12 @@ function createWindow(): void {
     onState: (st) => {
       compactSidebar?.send('state', st)
       compactTitlebar?.send('state', st)
+      logSmoke('state', {
+        activeId: st.activeId,
+        tabCount: st.tabs.length,
+        splits: st.splits,
+        viewBounds: tabs?.attachedViewBounds() ?? []
+      })
     },
     onToggleDownloads: () => {
       if (!settings?.get().compactMode) return false
@@ -852,6 +872,7 @@ function createWindow(): void {
         dark: nativeTheme.shouldUseDarkColors,
         accent: activeWorkspaceAccentHex()
       })
+      logSmoke('peek', { event: 'open', url, sourceTabId, visible: peekPopup.isOpen() })
     },
     quit: () => app.quit()
   })
@@ -1108,6 +1129,9 @@ onSurface('tab:open-internal', (t, url: unknown) => {
 })
 onSurface('downloads:toggle', (t) => t.toggleDownloads())
 onSurface('find:open', (t) => t.openFind())
+onSurface('palette:open-request', (_t, mode?: unknown) => {
+  openOrTogglePalette(mode === 'new-tab' ? 'new-tab' : 'command')
+})
 onSurface('tab:activate', (t, id: unknown) => num(id) && t.activate(id))
 // Everything the UI navigates to was typed (address bar, start page), which history ranks higher.
 onSurface('tab:navigate', (t, id: unknown, input: unknown) => num(id) && str(input) && t.navigate(id, input, true))

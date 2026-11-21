@@ -160,6 +160,7 @@ export function buildMenus(ctx: MenuBuildContext): MenuSection[] {
   ]
 
   const viewItems: MenuEntry[] = [
+    { kind: 'item', id: 'view:palette', label: 'Command bar', keys: 'Ctrl+K' },
     { kind: 'item', id: 'view:compact', label: 'Compact mode', keys: 'Ctrl+Shift+S', checked: ctx.compactMode },
     {
       kind: 'item',
