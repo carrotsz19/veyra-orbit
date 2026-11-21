@@ -3,7 +3,7 @@
  * renderer). Only the active tab's view is in the window, placed where the UI says the page goes.
  * Restored tabs load only when opened, and idle background tabs can sleep to free memory.
  */
-import { BrowserWindow, Menu, WebContentsView, clipboard, type Input, type WebContents } from 'electron'
+import { BrowserWindow, Menu, MenuItem, WebContentsView, clipboard, type Input, type WebContents } from 'electron'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { BrowserState, Rect, TabInfo, WorkspaceCreateInput, WorkspaceInfo, WorkspaceUpdateInput } from '../shared/types'
@@ -47,6 +47,8 @@ interface Tab {
   typed?: boolean
   /** Timestamp when this tab was last active in the window (for sleeping tabs). */
   lastActiveAt: number
+  /** If set, this tab may navigate to chrome-extension://<allowedExtensionId>/... pages. */
+  allowedExtensionId?: string
 }
 
 /** What the tabs tell the rest of the browser about, and ask it. */
@@ -88,6 +90,12 @@ export interface TabHooks {
   onNewTabShortcut?(): boolean
   /** Opens a link in the floating Peek preview window (Shift+click, Alt+click, or right-click "Peek link"). */
   openPeek?(url: string, sourceTabId: number, workspaceId: string, partition: string): void
+  /** Extension lifecycle hooks. */
+  onTabViewCreated?(wc: WebContents, tabId: number, partition: string): void
+  onTabViewDestroyed?(wc: WebContents, tabId: number, partition: string): void
+  onActiveTabChanged?(wc: WebContents | null, partition: string): void
+  extensionContextMenuItems?(wc: WebContents, params: Electron.ContextMenuParams): Electron.MenuItem[]
+  isLoadedExtension?(partition: string, extensionId: string): boolean
   /** Quits the application (Ctrl+Q). */
   quit?(): void
 }
@@ -241,6 +249,85 @@ export class Tabs {
     return this.tabs.find((t) => t.view?.webContents === wc)?.info.id ?? null
   }
 
+  activePartition(): string {
+    return this.partitionFor(this.activeWorkspaceId)
+  }
+
+  activeWebContents(): WebContents | null {
+    const tab = this.active
+    if (!tab || !this.showsPage(tab) || !tab.view || tab.view.webContents.isDestroyed()) return null
+    return tab.view.webContents
+  }
+
+  tabDetailsForWebContents(wc: WebContents): { pinned: boolean; index: number; discarded: boolean; active: boolean } | null {
+    const tab = this.tabs.find((t) => t.view?.webContents === wc)
+    if (!tab) return null
+    const wsTabs = this.workspaceTabs(tab.info.workspaceId)
+    return {
+      pinned: tab.info.pinned,
+      index: wsTabs.indexOf(tab),
+      discarded: tab.info.sleeping,
+      active: tab.info.id === this.activeId
+    }
+  }
+
+  activateByWebContents(wc: WebContents): void {
+    const tab = this.tabs.find((t) => t.view?.webContents === wc)
+    if (tab) this.activate(tab.info.id)
+  }
+
+  closeByWebContents(wc: WebContents): void {
+    const tab = this.tabs.find((t) => t.view?.webContents === wc)
+    if (tab) this.close(tab.info.id)
+  }
+
+  authorizeExtensionTabNavigation(wc: WebContents, extensionId: string): void {
+    const tab = this.tabs.find((t) => t.view?.webContents === wc)
+    if (tab) tab.allowedExtensionId = extensionId
+  }
+
+  private isUrlAllowedForTab(tab: Tab, url: string): boolean {
+    if (isAllowedUrl(url)) return true
+    if (!tab.allowedExtensionId || !url.startsWith('chrome-extension://')) return false
+    try {
+      const u = new URL(url)
+      if (u.hostname !== tab.allowedExtensionId) return false
+      const partition = this.partitionFor(tab.info.workspaceId)
+      return this.hooks.isLoadedExtension ? this.hooks.isLoadedExtension(partition, tab.allowedExtensionId) : true
+    } catch {
+      return false
+    }
+  }
+
+  /** Creates a tab on behalf of a Chrome extension (supports http(s) and that extension's own chrome-extension:// pages). */
+  createExtensionTab(
+    url: string,
+    opts: { activate?: boolean; partition: string; ownerExtensionId?: string }
+  ): WebContents | null {
+    const ws =
+      this.workspaces.find((w) => workspacePartition(w) === opts.partition && w.id === this.activeWorkspaceId) ??
+      this.workspaces.find((w) => workspacePartition(w) === opts.partition) ??
+      this.workspaces.find((w) => w.id === this.activeWorkspaceId)
+    if (!ws) return null
+    const id = this.create('', { workspaceId: ws.id, activate: opts.activate !== false })
+    const tab = this.get(id)
+    if (!tab) return null
+    if (opts.ownerExtensionId) tab.allowedExtensionId = opts.ownerExtensionId
+    const view = this.ensureView(tab)
+    if (url && this.isUrlAllowedForTab(tab, url)) {
+      tab.info.url = url
+      void view.webContents.loadURL(url).catch(() => {})
+      this.layout()
+      this.changed()
+    }
+    return view.webContents
+  }
+
+  private notifyActiveTab(): void {
+    const partition = this.partitionFor(this.activeWorkspaceId)
+    this.hooks.onActiveTabChanged?.(this.activeWebContents(), partition)
+  }
+
   private get(id: number): Tab | undefined {
     return this.tabs.find((t) => t.info.id === id)
   }
@@ -281,6 +368,7 @@ export class Tabs {
     if (tab.info.muted) view.webContents.setAudioMuted(true)
     attachPageCompat(view.webContents)
     this.wire(tab, view)
+    this.hooks.onTabViewCreated?.(view.webContents, tab.info.id, partition)
     return view
   }
 
@@ -295,6 +383,10 @@ export class Tabs {
     const view = tab.view
     if (!view) return
     tab.view = null
+    const partition = this.partitionFor(tab.info.workspaceId)
+    if (!view.webContents.isDestroyed()) {
+      this.hooks.onTabViewDestroyed?.(view.webContents, tab.info.id, partition)
+    }
     if (this.attachedViews.has(view)) {
       if (!this.win.isDestroyed()) this.win.contentView.removeChildView(view)
       this.attachedViews.delete(view)
@@ -318,6 +410,7 @@ export class Tabs {
 
     this.activeWorkspaceId = id
     this.workspaceSwitchDir = dir
+    this.hooks.ensureSession(this.partitionFor(id))
 
     const wsTabs = this.workspaceTabs(id)
     const remembered = this.workspaceActiveTab.get(id)
@@ -594,6 +687,7 @@ export class Tabs {
     } else {
       this.focusOmnibox()
     }
+    this.notifyActiveTab()
     this.changed()
   }
 
@@ -609,6 +703,7 @@ export class Tabs {
     tab.lastActiveAt = now
     this.lastFocusTarget = 'page'
     this.workspaceSwitchDir = 0
+    this.notifyActiveTab()
     this.changed()
   }
 
@@ -634,6 +729,7 @@ export class Tabs {
       tab.info.canGoForward = false
       this.layout()
       this.win.webContents.focus()
+      this.notifyActiveTab()
       this.changed()
       return
     }
@@ -642,6 +738,7 @@ export class Tabs {
     void view.webContents.loadURL(url).catch(() => {})
     this.layout()
     view.webContents.focus()
+    this.notifyActiveTab()
     this.changed()
   }
 
@@ -734,6 +831,9 @@ export class Tabs {
       }
     }
     this.sortPinned(tab.info.workspaceId)
+    if (tab.view && !tab.view.webContents.isDestroyed()) {
+      ;(tab.view.webContents as unknown as { emit(ev: string): void }).emit('tab-updated')
+    }
     this.workspaceSwitchDir = 0
     this.changed()
   }
@@ -931,6 +1031,9 @@ export class Tabs {
     tab.info.audible = false
     tab.info.canGoBack = false
     tab.info.canGoForward = false
+    if (tab.view && !tab.view.webContents.isDestroyed()) {
+      ;(tab.view.webContents as unknown as { emit(ev: string): void }).emit('tab-updated')
+    }
     this.destroyView(tab)
     this.workspaceSwitchDir = 0
     this.changed()
@@ -1465,15 +1568,15 @@ export class Tabs {
       this.zoom(direction === 'in' ? ZOOM_STEP : -ZOOM_STEP, tab)
     })
 
-    // Only web addresses: no file:, javascript:, chrome: and the like. Allowlisted external apps ask first.
+    // Only web addresses (or same-extension pages on extension-owned tabs): no file:, javascript:, chrome: and the like. Allowlisted external apps ask first.
     wc.on('will-navigate', (e, url) => {
-      if (!isAllowedUrl(url)) {
+      if (!this.isUrlAllowedForTab(tab, url)) {
         e.preventDefault()
         if (parseExternalAppUrl(url)) this.hooks.externalApp(info.id, wc.getURL(), url)
       }
     })
     wc.on('will-redirect', (e, url) => {
-      if (!isAllowedUrl(url)) {
+      if (!this.isUrlAllowedForTab(tab, url)) {
         e.preventDefault()
         if (parseExternalAppUrl(url)) this.hooks.externalApp(info.id, wc.getURL(), url)
       }
@@ -1690,13 +1793,26 @@ export class Tabs {
       )
       gap()
     }
+    const extMenuItems = this.hooks.extensionContextMenuItems?.(wc, p) ?? []
     if (!p.linkURL && !p.isEditable && !p.selectionText.trim() && p.mediaType === 'none') {
       items.push({ label: 'Print…', accelerator: 'CmdOrCtrl+P', click: () => wc.print({}, () => {}) })
       gap()
     }
     items.push({ label: 'Inspect', click: () => wc.inspectElement(p.x, p.y) })
+    const menu = Menu.buildFromTemplate(items)
+    if (extMenuItems.length > 0) {
+      const insertAt = Math.max(0, menu.items.length - 1)
+      menu.insert(insertAt, new MenuItem({ type: 'separator' }))
+      let offset = insertAt
+      for (const extItem of extMenuItems) {
+        menu.insert(offset++, extItem)
+      }
+      if (insertAt > 0 && menu.items[insertAt - 1]?.type !== 'separator') {
+        menu.insert(insertAt, new MenuItem({ type: 'separator' }))
+      }
+    }
     this.hooks.onMenuOpen?.(true)
-    Menu.buildFromTemplate(items).popup({
+    menu.popup({
       window: this.win,
       callback: () => this.hooks.onMenuOpen?.(false)
     })
@@ -1785,9 +1901,8 @@ export class Tabs {
     this.activeWorkspaceId = saved.activeWorkspaceId
     this.workspaceSwitchDir = 0
 
-    for (const ws of this.workspaces) {
-      this.hooks.ensureSession(workspacePartition(ws))
-    }
+    // Lazy-load isolated workspace sessions only when they are first activated/used.
+    this.hooks.ensureSession(this.partitionFor(this.activeWorkspaceId))
 
     if (!restoreTabs) {
       this.create('', { workspaceId: this.activeWorkspaceId, activate: true })

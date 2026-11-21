@@ -6,6 +6,9 @@ import type {
   CompactPinKind,
   CompactRevealState,
   DownloadInfo,
+  ExtensionActionView,
+  ExtensionInstallAsk,
+  ExtensionsState,
   ExternalAppAsk,
   FindState,
   PermissionAsk,
@@ -126,7 +129,24 @@ const api: VeyraApi = {
   },
   getImportStatus: () => ipcRenderer.invoke('import:status'),
   runImport: (req) => ipcRenderer.invoke('import:run', req),
-  dismissImportPrompt: () => ipcRenderer.invoke('import:dismiss-prompt')
+  dismissImportPrompt: () => ipcRenderer.invoke('import:dismiss-prompt'),
+  extensions: {
+    onState: (cb) => listen<ExtensionsState>('extensions:state', cb),
+    onActions: (cb) => listen<ExtensionActionView[]>('extensions:actions', cb),
+    onInstallAsk: (cb) => listen<ExtensionInstallAsk[]>('extensions:install-ask', cb),
+    getState: () => ipcRenderer.invoke('extensions:get-state'),
+    getActions: () => ipcRenderer.invoke('extensions:get-actions'),
+    setEnabled: (id, enabled) => ipcRenderer.invoke('extensions:set-enabled', id, enabled),
+    setPinned: (id, pinned) => ipcRenderer.invoke('extensions:set-pinned', id, pinned),
+    installFromStore: (idOrUrl) => ipcRenderer.invoke('extensions:install-store', idOrUrl),
+    installUnpacked: () => ipcRenderer.invoke('extensions:install-unpacked'),
+    uninstall: (id) => ipcRenderer.invoke('extensions:uninstall', id),
+    openOptions: (id) => ipcRenderer.send('extensions:open-options', id),
+    setDeveloperMode: (enabled) => ipcRenderer.invoke('extensions:set-dev-mode', enabled),
+    clickAction: (id, anchorRect) => ipcRenderer.send('extensions:action-click', id, anchorRect),
+    contextMenuAction: (id, anchorRect) => ipcRenderer.send('extensions:action-context-menu', id, anchorRect),
+    answerInstall: (requestId, allow) => ipcRenderer.send('extensions:install-answer', requestId, allow)
+  }
 }
 
 contextBridge.exposeInMainWorld('veyra', api)

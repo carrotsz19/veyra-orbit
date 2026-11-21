@@ -45,6 +45,80 @@ export function attachSessionCompat(sess: Session): void {
   })
 }
 
+export function detachSessionCompat(sess: Session): void {
+  if (!attachedCompatSessions.has(sess)) return
+  sess.webRequest.onBeforeSendHeaders(null)
+  attachedCompatSessions.delete(sess)
+}
+
+const DNR_RESOURCE_TYPES = [
+  'main_frame',
+  'sub_frame',
+  'stylesheet',
+  'script',
+  'image',
+  'font',
+  'object',
+  'xmlhttprequest',
+  'ping',
+  'csp_report',
+  'media',
+  'websocket',
+  'webtransport',
+  'webbundle',
+  'other'
+]
+
+/**
+ * Builds the static declarativeNetRequest ruleset used by Orbit's internal
+ * `orbit-compat` extension in persistent sessions (where session.webRequest
+ * cannot be attached because it would disable extension DNR blocking).
+ */
+export function buildOrbitCompatDnrRules(id: ChromeIdentity = chromeIdentity()): unknown[] {
+  return [
+    {
+      id: 1,
+      priority: 1,
+      action: {
+        type: 'modifyHeaders',
+        requestHeaders: [
+          { header: 'Sec-CH-UA', operation: 'set', value: id.secChUa },
+          { header: 'Sec-CH-UA-Full-Version-List', operation: 'set', value: id.secChUaFullVersionList }
+        ]
+      },
+      condition: {
+        urlFilter: '*',
+        resourceTypes: DNR_RESOURCE_TYPES
+      }
+    },
+    {
+      id: 2,
+      priority: 2,
+      action: {
+        type: 'modifyHeaders',
+        requestHeaders: [
+          { header: 'User-Agent', operation: 'set', value: id.firefoxUserAgent },
+          { header: 'Sec-CH-UA', operation: 'remove' },
+          { header: 'Sec-CH-UA-Mobile', operation: 'remove' },
+          { header: 'Sec-CH-UA-Platform', operation: 'remove' },
+          { header: 'Sec-CH-UA-Platform-Version', operation: 'remove' },
+          { header: 'Sec-CH-UA-Full-Version', operation: 'remove' },
+          { header: 'Sec-CH-UA-Full-Version-List', operation: 'remove' },
+          { header: 'Sec-CH-UA-Arch', operation: 'remove' },
+          { header: 'Sec-CH-UA-Bitness', operation: 'remove' },
+          { header: 'Sec-CH-UA-Model', operation: 'remove' },
+          { header: 'Sec-CH-UA-WoW64', operation: 'remove' },
+          { header: 'Sec-CH-UA-Form-Factors', operation: 'remove' }
+        ]
+      },
+      condition: {
+        urlFilter: '||accounts.google.com/',
+        resourceTypes: DNR_RESOURCE_TYPES
+      }
+    }
+  ]
+}
+
 /**
  * Attaches client-hint metadata and the WebAuthn conditional-mediation shim to a web page
  * (both normal tabs and sign-in popups). Never used on the browser's own UI window.
