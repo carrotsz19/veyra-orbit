@@ -1,6 +1,6 @@
 // The bridge for the browser's own UI. Web pages in tabs get no preload at all.
 import { contextBridge, ipcRenderer } from 'electron'
-import type { BrowserState, DownloadInfo, FindState, PermissionAsk, Rect, VeyraApi } from '../shared/types'
+import type { BrowserState, DownloadInfo, ExternalAppAsk, FindState, PermissionAsk, Rect, SettingsView, SitePermission, VeyraApi } from '../shared/types'
 
 function listen<T>(channel: string, cb: (v: T) => void): () => void {
   const f = (_e: Electron.IpcRendererEvent, v: T): void => cb(v)
@@ -12,6 +12,9 @@ const api: VeyraApi = {
   onState: (cb) => listen<BrowserState>('state', cb),
   onFocusOmnibox: (cb) => listen<void>('focus-omnibox', () => cb()),
   onPermission: (cb) => listen<PermissionAsk[]>('permissions', cb),
+  onExternalApps: (cb) => listen<ExternalAppAsk[]>('external-apps', cb),
+  onSettings: (cb) => listen<SettingsView>('settings', cb),
+  onSavedPermissions: (cb) => listen<SitePermission[]>('permissions:saved', cb),
   onDownloads: (cb) => listen<DownloadInfo[]>('downloads', cb),
   onToggleDownloads: (cb) => listen<void>('downloads:toggle', () => cb()),
   onFindOpen: (cb) => listen<void>('find:open', () => cb()),
@@ -30,7 +33,8 @@ const api: VeyraApi = {
   togglePin: (id) => ipcRenderer.send('tab:pin', id),
   move: (id, to) => ipcRenderer.send('tab:move', id, to),
   setBounds: (r: Rect | null) => ipcRenderer.send('bounds', r),
-  answerPermission: (id, allow) => ipcRenderer.send('permission:answer', id, allow),
+  answerPermission: (id, allow, remember) => ipcRenderer.send('permission:answer', id, allow, remember),
+  answerExternalApp: (id, open) => ipcRenderer.send('external-app:answer', id, open),
   find: (text, opts) => ipcRenderer.send('find:start', text, opts),
   stopFind: () => ipcRenderer.send('find:stop'),
   pauseDownload: (id) => ipcRenderer.send('download:pause', id),
@@ -39,6 +43,13 @@ const api: VeyraApi = {
   openDownload: (id) => ipcRenderer.send('download:open', id),
   showDownload: (id) => ipcRenderer.send('download:show', id),
   clearFinishedDownloads: () => ipcRenderer.send('download:clear'),
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
+  chooseDownloadsDir: () => ipcRenderer.invoke('settings:choose-downloads-dir'),
+  savedPermissions: () => ipcRenderer.invoke('permissions:list'),
+  setSavedPermission: (origin, permission, allow) => ipcRenderer.invoke('permissions:set', origin, permission, allow),
+  removeSavedPermission: (origin, permission) => ipcRenderer.invoke('permissions:remove', origin, permission),
+  clearBrowsingData: (req) => ipcRenderer.invoke('privacy:clear', req),
   suggest: (input) => ipcRenderer.invoke('suggest', input),
   overlay: async (open) => {
     const shot = (await ipcRenderer.invoke('overlay', open)) as string | null

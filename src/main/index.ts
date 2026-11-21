@@ -1,12 +1,13 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
 import { release } from 'node:os'
-import type { PermissionAsk, Rect } from '../shared/types'
+import type { ClearDataRange, ExternalAppAsk, PermissionAsk, Rect } from '../shared/types'
 import { toUrl } from '../shared/url'
 import { suggest, type Candidate } from '../shared/suggest'
 import { Tabs } from './tabs'
 import { Store } from './store'
-import { Permissions, cleanUserAgent, hardenAll, webSession } from './security'
+import { SettingsStore } from './settings'
+import { ExternalApps, Permissions, cleanUserAgent, hardenAll, webSession } from './security'
 import { Downloads } from './downloads'
 
 const APP_NAME = 'Veyra Orbit'
@@ -24,6 +25,8 @@ const isWin = process.platform === 'win32'
 /** Acrylic needs Windows 11 22H2 (build 22621) or newer. */
 const acrylic = isWin && Number(release().split('.')[2] ?? 0) >= 22621
 const TITLE_BAR_H = 40
+const HOUR_MS = 3_600_000
+const CLEAR_RANGES = new Set<ClearDataRange>(['hour', 'day', 'all'])
 
 function overlay(): Electron.TitleBarOverlayOptions {
   const dark = nativeTheme.shouldUseDarkColors
@@ -33,9 +36,12 @@ function overlay(): Electron.TitleBarOverlayOptions {
 let win: BrowserWindow | null = null
 let tabs: Tabs | null = null
 let perms: Permissions | null = null
+let externalApps: ExternalApps | null = null
 let downloads: Downloads | null = null
 let asks: PermissionAsk[] = []
+let externalAsks: ExternalAppAsk[] = []
 let store: Store | null = null
+let settings: SettingsStore | null = null
 
 /** History and bookmarks changed: the UI re-reads them (the Library page, the star). */
 function dataChanged(): void {
@@ -43,7 +49,15 @@ function dataChanged(): void {
   if (win && !win.isDestroyed()) win.webContents.send('data-changed')
 }
 
+function sendSettings(): void {
+  if (win && !win.isDestroyed() && settings) win.webContents.send('settings', settings.view())
+}
+
 function createWindow(): void {
+  settings ??= new SettingsStore(join(app.getPath('userData'), 'settings.json'), app.getPath('downloads'), process.env.VEYRA_DOWNLOADS || '')
+  const s = settings
+  nativeTheme.themeSource = s.get().theme
+
   const w = new BrowserWindow({
     width: 1360,
     height: 860,
@@ -71,6 +85,13 @@ function createWindow(): void {
 
   store ??= new Store(join(app.getPath('userData'), 'orbit.db'))
   const db = store
+
+  externalApps = new ExternalApps((list) => {
+    externalAsks = list
+    if (!w.isDestroyed()) w.webContents.send('external-apps', list)
+  })
+  const ext = externalApps
+
   tabs = new Tabs(w, join(app.getPath('userData'), 'session.json'), {
     visit: (url, title, typed) => {
       db.visit(url, title, typed)
@@ -81,6 +102,10 @@ function createWindow(): void {
     toggleBookmark: (url, title) => {
       db.toggleBookmark(url, title)
       dataChanged()
+    },
+    searchUrl: () => s.searchUrl(),
+    externalApp: (tabId, pageUrl, targetUrl) => {
+      ext.request(tabId, pageUrl, targetUrl)
     }
   })
   const t = tabs
@@ -93,16 +118,26 @@ function createWindow(): void {
     (list) => {
       asks = list
       if (!w.isDestroyed()) w.webContents.send('permissions', list)
+    },
+    db,
+    () => {
+      if (!w.isDestroyed()) w.webContents.send('permissions:saved', perms?.listSaved() ?? [])
     }
   )
   perms.attach(webSession())
   const p = perms
-  t.onTabGone = (id) => p.dropTab(id)
+  t.onTabGone = (id) => {
+    p.dropTab(id)
+    ext.dropTab(id)
+  }
 
   downloads?.detach()
-  downloads = new Downloads(process.env.VEYRA_DOWNLOADS || app.getPath('downloads'), (list) => {
-    if (!w.isDestroyed()) w.webContents.send('downloads', list)
-  })
+  downloads = new Downloads(
+    () => ({ dir: s.effectiveDownloadsDir(), askWhereToSave: s.get().askWhereToSave }),
+    (list) => {
+      if (!w.isDestroyed()) w.webContents.send('downloads', list)
+    }
+  )
   downloads.attach(webSession())
   const onDownload = (_e: Electron.Event, _item: Electron.DownloadItem, wc: Electron.WebContents): void => t.downloadStarted(wc)
   webSession().on('will-download', onDownload)
@@ -122,7 +157,8 @@ function createWindow(): void {
   if (process.env.ELECTRON_RENDERER_URL) void w.loadURL(`${process.env.ELECTRON_RENDERER_URL}?${new URLSearchParams(query)}`)
   else void w.loadFile(join(__dirname, '../renderer/index.html'), { query })
 
-  t.restore()
+  if (s.get().startup === 'new-tab') t.create()
+  else t.restore()
 }
 
 /** Only the browser's own UI may call these; pages have no preload and can't reach them anyway. */
@@ -143,9 +179,12 @@ on('ready', () => {
   if (!win || !tabs) return
   win.webContents.send('state', tabs.state())
   win.webContents.send('permissions', asks)
+  win.webContents.send('external-apps', externalAsks)
   win.webContents.send('downloads', downloads?.list() ?? [])
+  win.webContents.send('permissions:saved', perms?.listSaved() ?? [])
+  sendSettings()
 })
-on('tab:new', (t, input?: unknown) => t.create((str(input) && toUrl(input)) || ''))
+on('tab:new', (t, input?: unknown) => t.create((str(input) && toUrl(input, settings?.searchUrl())) || ''))
 on('tab:close', (t, id: unknown) => num(id) && t.close(id))
 on('tab:activate', (t, id: unknown) => num(id) && t.activate(id))
 // Everything the UI navigates to was typed (address bar, start page), which history ranks higher.
@@ -162,6 +201,7 @@ on('bounds', (t, r: unknown) => {
   if (rect === null) return t.setBounds(null)
   if (rect && num(rect.x) && num(rect.y) && num(rect.width) && num(rect.height)) t.setBounds(rect)
 })
+
 /** Calls from the UI that answer back. Pages can't reach these either. */
 function handle(channel: string, f: (...args: unknown[]) => unknown): void {
   ipcMain.handle(channel, (e, ...args) => {
@@ -176,7 +216,7 @@ handle('suggest', (input) => {
     .state()
     .tabs.filter((t) => /^https?:/.test(t.url))
     .map((t) => ({ url: t.url, title: t.title, visits: 0, typed: 0, last: 0, bookmarked: t.bookmarked, tabId: t.id }))
-  return suggest(input, [...open, ...store.candidates(input)])
+  return suggest(input, [...open, ...store.candidates(input)], Date.now(), 7, settings?.searchUrl())
 })
 handle('overlay', (open) => tabs?.setOverlay(open === true) ?? null)
 on('overlay:hide', (t) => t.hidePageForOverlay())
@@ -201,8 +241,60 @@ handle('bookmark:rename', (url, title) => {
   dataChanged()
 })
 
-ipcMain.on('permission:answer', (e, id: unknown, allow: unknown) => {
-  if (fromUi(e) && num(id)) perms?.answer(id, allow === true)
+handle('settings:get', () => settings?.view() ?? null)
+handle('settings:update', (patch) => {
+  if (!settings || !patch || typeof patch !== 'object' || Array.isArray(patch)) return settings?.view() ?? null
+  // Custom downloads folders are chosen only via the main-process folder dialog; here only '' (reset) is accepted.
+  const raw = patch as Record<string, unknown>
+  const safePatch: Record<string, unknown> = { ...raw }
+  if ('downloadsDir' in safePatch && safePatch.downloadsDir !== '') delete safePatch.downloadsDir
+  const prevTheme = settings.get().theme
+  const view = settings.update(safePatch)
+  if (view.theme !== prevTheme) nativeTheme.themeSource = view.theme
+  sendSettings()
+  return view
+})
+handle('settings:choose-downloads-dir', async () => {
+  if (!settings || !win || win.isDestroyed()) return settings?.view() ?? null
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Choose downloads folder',
+    defaultPath: settings.effectiveDownloadsDir(),
+    properties: ['openDirectory', 'createDirectory']
+  })
+  if (result.canceled || !result.filePaths[0]) return settings.view()
+  const view = settings.update({ downloadsDir: result.filePaths[0] })
+  sendSettings()
+  return view
+})
+
+handle('permissions:list', () => perms?.listSaved() ?? [])
+handle('permissions:set', (origin, permission, allow) => {
+  if (!str(origin) || !str(permission)) return false
+  return perms?.setSaved(origin, permission, allow === true) ?? false
+})
+handle('permissions:remove', (origin, permission) => {
+  if (str(origin) && str(permission)) perms?.removeSaved(origin, permission)
+})
+
+handle('privacy:clear', async (req) => {
+  if (!req || typeof req !== 'object' || Array.isArray(req)) return
+  const r = req as Record<string, unknown>
+  const range = typeof r.range === 'string' && CLEAR_RANGES.has(r.range as ClearDataRange) ? (r.range as ClearDataRange) : null
+  if (!range) return
+  if (r.history === true) {
+    const since = range === 'all' ? 0 : Date.now() - (range === 'hour' ? HOUR_MS : 24 * HOUR_MS)
+    store?.clear(since)
+    dataChanged()
+  }
+  if (r.siteData === true) await webSession().clearStorageData()
+  if (r.cache === true) await webSession().clearCache()
+})
+
+on('permission:answer', (_t, id: unknown, allow: unknown, remember?: unknown) => {
+  if (num(id)) perms?.answer(id, allow === true, remember === undefined ? true : remember === true)
+})
+on('external-app:answer', (_t, id: unknown, open: unknown) => {
+  if (num(id)) externalApps?.answer(id, open === true)
 })
 on('find:start', (t, text: unknown, opts: unknown) => {
   if (!str(text)) return
@@ -213,43 +305,35 @@ on('find:start', (t, text: unknown, opts: unknown) => {
   })
 })
 on('find:stop', (t) => t.stopFind())
-ipcMain.on('download:pause', (e, id: unknown) => {
-  if (fromUi(e) && num(id)) downloads?.pause(id)
+on('download:pause', (_t, id: unknown) => {
+  if (num(id)) downloads?.pause(id)
 })
-ipcMain.on('download:resume', (e, id: unknown) => {
-  if (fromUi(e) && num(id)) downloads?.resume(id)
+on('download:resume', (_t, id: unknown) => {
+  if (num(id)) downloads?.resume(id)
 })
-ipcMain.on('download:cancel', (e, id: unknown) => {
-  if (fromUi(e) && num(id)) downloads?.cancel(id)
+on('download:cancel', (_t, id: unknown) => {
+  if (num(id)) downloads?.cancel(id)
 })
-ipcMain.on('download:open', (e, id: unknown) => {
-  if (fromUi(e) && num(id)) downloads?.open(id)
+on('download:open', (_t, id: unknown) => {
+  if (num(id)) downloads?.open(id)
 })
-ipcMain.on('download:show', (e, id: unknown) => {
-  if (fromUi(e) && num(id)) downloads?.show(id)
+on('download:show', (_t, id: unknown) => {
+  if (num(id)) downloads?.show(id)
 })
-ipcMain.on('download:clear', (e) => {
-  if (fromUi(e)) downloads?.clearFinished()
+on('download:clear', () => {
+  downloads?.clearFinished()
 })
 
 nativeTheme.on('updated', () => {
-  if (win && isWin) win.setTitleBarOverlay(overlay())
+  if (!win || win.isDestroyed()) return
+  if (isWin) win.setTitleBarOverlay(overlay())
+  if (!acrylic) win.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#15140f' : '#f3f1ec')
 })
 
 app.on('second-instance', () => {
   if (!win) return
   if (win.isMinimized()) win.restore()
   win.focus()
-})
-
-// Links to other apps (mailto:, zoommtg:, ...) aren't opened from pages for now.
-app.on('web-contents-created', (_e, wc) => {
-  wc.on('will-navigate', (ev, url) => {
-    if (/^mailto:/i.test(url)) {
-      ev.preventDefault()
-      void shell.openExternal(url)
-    }
-  })
 })
 
 void app.whenReady().then(createWindow)

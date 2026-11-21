@@ -1,13 +1,18 @@
 /*
- * Download manager for the web session. Files save automatically to the user's Downloads folder
- * with unique names ("file (1).pdf"), progress is pushed to the sidebar UI, and files are never
- * opened automatically.
+ * Download manager for the web session. Files save automatically to the configured Downloads folder
+ * with unique names ("file (1).pdf"), or prompt via a save dialog when "Ask where to save each file"
+ * is enabled. Progress is pushed to the sidebar UI, and files are never opened automatically.
  */
 import { shell, type DownloadItem, type Event, type Session } from 'electron'
 import { existsSync, mkdirSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import type { DownloadInfo, DownloadState } from '../shared/types'
 import { isRunnable, pickUniqueFilename } from '../shared/downloads'
+
+export interface DownloadConfig {
+  dir: string
+  askWhereToSave: boolean
+}
 
 interface TrackedDownload {
   info: DownloadInfo
@@ -29,7 +34,7 @@ export class Downloads {
   }
 
   constructor(
-    private readonly dir: string,
+    private readonly getConfig: () => DownloadConfig,
     private readonly publish: (items: DownloadInfo[]) => void
   ) {}
 
@@ -55,7 +60,8 @@ export class Downloads {
   }
 
   private handle(item: DownloadItem): void {
-    const baseDir = resolve(this.dir)
+    const { dir, askWhereToSave } = this.getConfig()
+    const baseDir = resolve(dir)
     try {
       mkdirSync(baseDir, { recursive: true })
     } catch {
@@ -66,17 +72,23 @@ export class Downloads {
       const candidate = join(baseDir, name)
       return this.inFlight.has(candidate.toLowerCase()) || existsSync(candidate)
     })
-    const savePath = join(baseDir, filename)
-    const key = savePath.toLowerCase()
-    this.inFlight.add(key)
-    item.setSavePath(savePath)
+    const suggestedPath = join(baseDir, filename)
+    let inFlightKey: string | null = null
+
+    if (askWhereToSave) {
+      item.setSaveDialogOptions({ defaultPath: suggestedPath })
+    } else {
+      inFlightKey = suggestedPath.toLowerCase()
+      this.inFlight.add(inFlightKey)
+      item.setSavePath(suggestedPath)
+    }
 
     const entry: TrackedDownload = {
       item,
       info: {
         id: this.nextId++,
         filename,
-        savePath,
+        savePath: askWhereToSave ? '' : suggestedPath,
         url: item.getURL(),
         state: 'progressing',
         receivedBytes: item.getReceivedBytes(),
@@ -89,7 +101,20 @@ export class Downloads {
     this.items.unshift(entry)
     this.emitNow()
 
+    const syncSavePath = (): void => {
+      const actual = item.getSavePath()
+      if (!actual) return
+      entry.info.savePath = actual
+      const actualName = basename(actual)
+      if (actualName) entry.info.filename = actualName
+      if (!inFlightKey) {
+        inFlightKey = actual.toLowerCase()
+        this.inFlight.add(inFlightKey)
+      }
+    }
+
     item.on('updated', (_e, state) => {
+      if (!entry.info.savePath) syncSavePath()
       const prevState = entry.info.state
       const nextState: DownloadState = state === 'interrupted' ? 'interrupted' : item.isPaused() ? 'paused' : 'progressing'
       entry.info.state = nextState
@@ -102,7 +127,8 @@ export class Downloads {
     })
 
     item.once('done', (_e, state) => {
-      this.inFlight.delete(key)
+      if (!entry.info.savePath) syncSavePath()
+      if (inFlightKey) this.inFlight.delete(inFlightKey)
       entry.info.state = state
       entry.info.receivedBytes = item.getReceivedBytes()
       const total = item.getTotalBytes()
