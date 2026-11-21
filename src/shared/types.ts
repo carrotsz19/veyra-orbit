@@ -26,6 +26,8 @@ export interface TabInfo {
 export interface BrowserState {
   tabs: TabInfo[]
   activeId: number | null
+  /** Split groups in the active workspace (each has 2..4 tab IDs). */
+  splits: import('./split').SplitGroup[]
   workspaces: import('./workspaces').WorkspaceInfo[]
   activeWorkspaceId: string
   tabCounts: Record<string, number>
@@ -112,6 +114,7 @@ export type { UpdateState, UpdateStatus } from './updates'
 export type { WorkspaceAccentId, WorkspaceCreateInput, WorkspaceIconId, WorkspaceInfo, WorkspaceUpdateInput } from './workspaces'
 export type { CompactRevealState } from './compact'
 export type { MenuEntry, MenuId, MenuItemEntry, MenuPopupHeader, MenuPopupSpec, MenuSection } from './menu'
+export type { SplitGroup } from './split'
 export type { InternalUrl } from './url'
 
 export type CompactPinKind = 'omnibox' | 'sidebar'
@@ -196,6 +199,16 @@ export interface VeyraApi {
   sleepTab(id: number): void
   /** Opens the right-click menu for a tab in the sidebar. */
   tabMenu(id: number): void
+  /** Splits `anchorTabId` with `otherTabId` (or adds `otherTabId` to `anchorTabId`'s split group). */
+  splitWith(anchorTabId: number, otherTabId: number, placement?: 'left' | 'right'): void
+  /** Splits the active tab with the next tab in the workspace, or unsplits if already split. */
+  splitWithNext(): void
+  /** Dissolves the split group containing `tabId` (or the active tab if omitted). */
+  unsplit(tabId?: number): void
+  /** Updates a split group's column or row divider ratio (0.2..0.8). */
+  setSplitRatio(groupId: string, kind: 'col' | 'row', ratio: number): void
+  /** Swaps panes in a split group. */
+  swapSplit(groupId: string): void
   switchWorkspace(id: string): void
   createWorkspace(input: import('./workspaces').WorkspaceCreateInput): Promise<import('./workspaces').WorkspaceInfo | null>
   updateWorkspace(id: string, patch: import('./workspaces').WorkspaceUpdateInput): Promise<import('./workspaces').WorkspaceInfo | null>
@@ -222,10 +235,10 @@ export interface VeyraApi {
   /** Address bar suggestions for what's typed. */
   suggest(input: string): Promise<import('./suggest').Suggestion[]>
   /**
-   * Floating UI (the suggestions list) has to sit above the page, which is a native view.
-   * Opening takes the page out and returns a picture of it to show in its place; closing puts it back.
+   * Floating UI (the suggestions list or tab-drag drop zone) has to sit above the page, which is a native view.
+   * Opening takes visible page views out and returns a map of tabId -> JPEG screenshot to show in their place.
    */
-  overlay(open: boolean): Promise<string | null>
+  overlay(open: boolean): Promise<Record<number, string> | null>
   history(query: string, before: number | null): Promise<HistoryEntry[]>
   deleteHistory(id: number): void
   /** Clears history from this many ms ago up to now; 0 clears it all. */

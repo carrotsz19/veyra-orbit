@@ -96,8 +96,10 @@ interface TitleBarProps {
   tab?: TabInfo
   settings: SettingsView | null
   winState: WindowState
-  onPageShot: (shot: string | null) => void
+  onPageShot: (shots: Record<number, string> | null) => void
   onEditingChange?: (editing: boolean) => void
+  onOmniboxOpenChange?: (open: boolean) => void
+  useOmniboxOverlay?: boolean
   onPointerEdge?: (inside: boolean) => void
   onNewWorkspace: () => void
   onOpenSettingsSection: (sectionId: string) => void
@@ -110,6 +112,8 @@ export function TitleBar({
   winState,
   onPageShot,
   onEditingChange,
+  onOmniboxOpenChange,
+  useOmniboxOverlay = true,
   onPointerEdge,
   onNewWorkspace,
   onOpenSettingsSection
@@ -174,6 +178,7 @@ export function TitleBar({
         workspaces: state.workspaces.map((w) => ({ id: w.id, name: w.name })),
         activeWorkspaceId: state.activeWorkspaceId,
         compactMode: !!settings?.compactMode,
+        isSplit: !!tab && state.splits.some((g) => g.tabIds.includes(tab.id)),
         isFullscreen: winState.fullscreen,
         canReopenClosed: state.canReopenClosed,
         history: history.map((h) => ({ url: h.url, title: h.title })),
@@ -181,7 +186,7 @@ export function TitleBar({
         appVersion: INITIAL_VERSION,
         isDev: __CHANNEL__ === 'dev'
       }),
-    [tab, state.workspaces, state.activeWorkspaceId, state.canReopenClosed, settings?.compactMode, winState.fullscreen, history, bookmarks]
+    [tab, state.workspaces, state.activeWorkspaceId, state.splits, state.canReopenClosed, settings?.compactMode, winState.fullscreen, history, bookmarks]
   )
 
   const recentUrls = useMemo(() => recentHistoryItems(history.map((h) => ({ url: h.url, title: h.title }))), [history])
@@ -276,6 +281,9 @@ export function TitleBar({
           return
         case 'view:compact':
           api.toggleCompactMode()
+          return
+        case 'view:split':
+          api.splitWithNext()
           return
         case 'view:zoom-in':
           api.zoomIn()
@@ -595,7 +603,13 @@ export function TitleBar({
           )}
         </div>
 
-        <Omnibox tab={tab} onPageShot={onPageShot} onEditingChange={onEditingChange} />
+        <Omnibox
+          tab={tab}
+          onPageShot={onPageShot}
+          onEditingChange={onEditingChange}
+          onOpenChange={onOmniboxOpenChange}
+          useOverlay={useOmniboxOverlay}
+        />
         {tab && tab.zoom !== 100 && (
           <button
             type="button"

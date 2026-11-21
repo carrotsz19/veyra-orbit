@@ -604,6 +604,21 @@ ipcMain.on('menu:dismiss', (e) => {
 on('tab:mute', (t, id: unknown) => num(id) && t.toggleMute(id))
 on('tab:sleep', (t, id: unknown) => num(id) && t.sleepTab(id, true))
 on('tab:menu', (t, id: unknown) => num(id) && t.tabMenu(id))
+on('split:with', (t, anchorId: unknown, otherId: unknown, placement?: unknown) => {
+  if (!num(anchorId) || !num(otherId)) return
+  const side = placement === 'left' ? 'left' : 'right'
+  t.splitTabs(anchorId, otherId, side, otherId)
+})
+on('split:next', (t) => t.splitWithNext())
+on('split:unsplit', (t, tabId?: unknown) => t.unsplit(num(tabId) ? tabId : undefined))
+on('split:ratio', (t, groupId: unknown, kind: unknown, ratio: unknown) => {
+  if (str(groupId) && (kind === 'col' || kind === 'row') && num(ratio)) {
+    t.setSplitRatio(groupId, kind, ratio)
+  }
+})
+on('split:swap', (t, groupId: unknown) => {
+  if (str(groupId)) t.swapSplit(groupId)
+})
 on('workspace:switch', (t, id: unknown) => str(id) && t.switchWorkspace(id))
 on('compact:toggle', () => toggleCompactMode())
 on('compact:pin', (_t, kind: unknown, pinned: unknown) => {
