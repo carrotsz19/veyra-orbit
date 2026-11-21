@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { BrowserState, CompactRevealState, DownloadInfo, ExternalAppAsk, PermissionAsk, SettingsView, TabInfo, UpdateState } from '@shared/types'
+import type { BrowserState, CompactRevealState, DownloadInfo, ExternalAppAsk, PermissionAsk, SettingsView, TabInfo, UpdateState, WindowState } from '@shared/types'
+import './library.css'
+import './settings.css'
 import { Sidebar } from './components/Sidebar'
-import { Toolbar } from './components/Toolbar'
+import { TitleBar } from './components/TitleBar'
 import { StartPage } from './components/StartPage'
 import { ErrorPage } from './components/ErrorPage'
 import { ExternalAppBar, PermissionBar } from './components/PermissionBar'
@@ -17,7 +19,8 @@ const INITIAL_STATE: BrowserState = {
   workspaces: [],
   activeWorkspaceId: 'personal',
   tabCounts: {},
-  workspaceSwitchDir: 0
+  workspaceSwitchDir: 0,
+  canReopenClosed: false
 }
 
 export function App(): React.JSX.Element {
@@ -32,6 +35,8 @@ export function App(): React.JSX.Element {
   const [sidebarEditing, setSidebarEditing] = useState(false)
   const [omniboxEditing, setOmniboxEditing] = useState(false)
   const [compact, setCompact] = useState<CompactRevealState>({ enabled: false, sidebar: false, toolbar: false })
+  const [winState, setWinState] = useState<WindowState>({ focused: true, maximized: false, fullscreen: false })
+  const [newWorkspaceTick, setNewWorkspaceTick] = useState(0)
   const [findOpen, setFindOpen] = useState(false)
   const [findFocusTick, setFindFocusTick] = useState(0)
   const [pageFullscreen, setPageFullscreen] = useState(false)
@@ -49,6 +54,7 @@ export function App(): React.JSX.Element {
       api.onSettings(setSettings),
       api.onUpdateState(setUpdate),
       api.onCompactState(setCompact),
+      api.onWinState(setWinState),
       api.onDownloads((items) => {
         setDownloads(items)
         const newest = items.reduce((m, d) => Math.max(m, d.id), 0)
@@ -116,6 +122,16 @@ export function App(): React.JSX.Element {
   const updateKey = update?.availableVersion ?? (update?.status === 'ready' ? '__ready__' : null)
   const showUpdateNote = update?.status === 'ready' && dismissedUpdateVer !== updateKey
 
+  const handleNewWorkspace = useCallback((): void => {
+    setNewWorkspaceTick((n) => n + 1)
+  }, [])
+
+  const handleOpenSettingsSection = useCallback((sectionId: string): void => {
+    sessionStorage.setItem('orbit.settingsSection', sectionId)
+    api.openInternal('orbit://settings')
+    window.dispatchEvent(new CustomEvent('orbit:settings-section', { detail: sectionId }))
+  }, [])
+
   const compactClasses = compact.enabled
     ? `compact ${compact.sidebar ? 'reveal-side' : ''} ${compact.toolbar ? 'reveal-bar' : ''}`
     : ''
@@ -139,6 +155,17 @@ export function App(): React.JSX.Element {
           onMouseEnter={() => api.setCompactHover('toolbar', true)}
         />
       )}
+      <TitleBar
+        state={state}
+        tab={active}
+        settings={settings}
+        winState={winState}
+        onPageShot={setShot}
+        onEditingChange={setOmniboxEditing}
+        onPointerEdge={compact.enabled ? (inside) => api.setCompactHover('toolbar', inside) : undefined}
+        onNewWorkspace={handleNewWorkspace}
+        onOpenSettingsSection={handleOpenSettingsSection}
+      />
       <Sidebar
         state={state}
         downloads={downloads}
@@ -148,14 +175,9 @@ export function App(): React.JSX.Element {
         onDismissUpdate={() => setDismissedUpdateVer(updateKey)}
         onEditorOpenChange={setSidebarEditing}
         onPointerEdge={compact.enabled ? (inside) => api.setCompactHover('sidebar', inside) : undefined}
+        openNewWorkspaceTick={newWorkspaceTick}
       />
       <main className="main">
-        <Toolbar
-          tab={active}
-          onPageShot={setShot}
-          onEditingChange={setOmniboxEditing}
-          onPointerEdge={compact.enabled ? (inside) => api.setCompactHover('toolbar', inside) : undefined}
-        />
         {tabAsks.length > 0 && <PermissionBar ask={tabAsks[0]} />}
         {tabExternalAsks.length > 0 && <ExternalAppBar ask={tabExternalAsks[0]} />}
         <FindBar open={findOpen} focusTick={findFocusTick} onClose={() => setFindOpen(false)} />

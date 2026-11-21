@@ -8,7 +8,8 @@ import type {
   SleepMinutes,
   StartupBehavior,
   ThemeSource,
-  UpdateState
+  UpdateState,
+  WindowButtonsStyle
 } from '@shared/types'
 import { SEARCH_ENGINES } from '@shared/settings'
 import { SLEEP_MINUTES_OPTIONS } from '@shared/sleep'
@@ -156,6 +157,30 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
     return () => clearTimeout(timer)
   }, [clearDone])
 
+  useEffect(() => {
+    if (!loaded) return
+    const scrollTo = (id: string | null): void => {
+      if (!id) return
+      const el = document.getElementById(id)
+      if (el) {
+        setActiveSection(id)
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    }
+    const pending = sessionStorage.getItem('orbit.settingsSection')
+    if (pending) {
+      sessionStorage.removeItem('orbit.settingsSection')
+      requestAnimationFrame(() => scrollTo(pending))
+    }
+    const onJump = (e: Event): void => {
+      const id = (e as CustomEvent<string>).detail
+      sessionStorage.removeItem('orbit.settingsSection')
+      scrollTo(id)
+    }
+    window.addEventListener('orbit:settings-section', onJump)
+    return () => window.removeEventListener('orbit:settings-section', onJump)
+  }, [loaded])
+
   const patch = (
     next: Partial<{
       searchEngine: SearchEngineId
@@ -166,6 +191,7 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
       compactMode: boolean
       sleepAfterMinutes: SleepMinutes
       sleepPinnedTabs: boolean
+      windowButtons: WindowButtonsStyle
     }>
   ): void => {
     void api.updateSettings(next).then((s) => s && setSettings(s))
@@ -319,6 +345,48 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
                   <span className="set-switch-thumb" />
                 </button>
               </div>
+              {settings.supportsWindowButtons && (
+                <div className="set-row">
+                  <div className="set-row-info">
+                    <div className="set-label">Window buttons</div>
+                    <div className="set-desc">
+                      {settings.windowButtons === 'windows'
+                        ? "Windows' own minimise, maximise and close buttons (supports Snap layouts)."
+                        : 'Mac-style Veyra dots drawn in the title bar, in Windows order.'}
+                    </div>
+                    {settings.windowButtons !== settings.activeWindowButtons && (
+                      <div className="set-note">Takes effect after restarting Veyra Orbit.</div>
+                    )}
+                  </div>
+                  <div className="set-row-actions">
+                    <div className="set-seg" role="radiogroup" aria-label="Window buttons">
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={settings.windowButtons === 'windows'}
+                        className={`set-seg-btn ${settings.windowButtons === 'windows' ? 'on' : ''}`}
+                        onClick={() => patch({ windowButtons: 'windows' })}
+                      >
+                        Windows
+                      </button>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={settings.windowButtons === 'dots'}
+                        className={`set-seg-btn ${settings.windowButtons === 'dots' ? 'on' : ''}`}
+                        onClick={() => patch({ windowButtons: 'dots' })}
+                      >
+                        Veyra dots
+                      </button>
+                    </div>
+                    {settings.windowButtons !== settings.activeWindowButtons && (
+                      <button type="button" className="btn primary" onClick={() => api.relaunch()}>
+                        Restart now
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </section>
 
