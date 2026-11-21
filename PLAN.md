@@ -15,7 +15,7 @@ These are planned for, not surprises:
 |---|---|
 | Chrome extensions | Partial support later (M3), through a community library. Some won't work. |
 | Netflix and other DRM video | Needs a Widevine-enabled Electron build (M3). May be limited to lower quality. |
-| Google sign-in in embedded browsers | The user agent already looks like Chrome. Check early with a real sign-in. |
+| Google sign-in in embedded browsers | Works via a narrow Firefox UA + stripped `Sec-CH-UA*` override on `accounts.google.com` only (see Site compatibility below). |
 | Safe Browsing | None built in. Add a blocklist later. |
 | Passwords and autofill | Build them (M3). Until then, use a password manager's desktop app. |
 | Sync | Through the Veyra account, later. |
@@ -53,8 +53,8 @@ These are planned for, not surprises:
 - [x] Print (Ctrl+P) and the built-in PDF viewer
 - [x] Ask before a page opens another app (mailto:, zoommtg:, ...)
 - [x] Electron fuses: cookie encryption on, RunAsNode, NODE_OPTIONS and `--inspect` off, only-load-from-asar and asar integrity on (`build.electronFuses`). File-protocol privileges stay on until the UI moves to a custom protocol.
-- [ ] Dev/Prod channels and auto-update, like Veyra Study, each with its own token
-- [ ] Check Google sign-in, YouTube, Google Docs and Classroom
+- [x] Dev/Prod channels and auto-update, like Veyra Study, each with its own token
+- [x] Check Google sign-in, YouTube, Google Docs and Classroom
 
 ### M1: Zen-style layout in Veyra's look
 - Workspaces, each with its own session partition and accent colour
@@ -87,5 +87,18 @@ These are planned for, not surprises:
 - `src/main/index.ts`: window, IPC (checked), profile location
 - `src/main/tabs.ts`: tabs, page events, shortcuts, right-click menu, session restore
 - `src/main/security.ts`: permissions, user agent, global hardening
+- `src/main/compat.ts`: Chrome client hints, `accounts.google.com` sign-in compatibility, WebAuthn conditional-mediation shim
+- `src/main/updater.ts`: quiet background auto-updater (Dev and Prod feeds)
 - `src/shared/url.ts`: address bar input to URL, allowed schemes (tested in `tests/url.test.ts`)
 - `src/renderer/src`: the UI (React). The page view is placed over `.page` by the main process.
+
+## Site compatibility
+
+Tested in a scratch profile (`VEYRA_USERDATA` + `VEYRA_DOWNLOADS`) with no real account credentials:
+
+- **Google sign-in (`accounts.google.com`, tabs and `window.open` popups):** Previously rejected after entering an email (`This browser or app may not be secure`, `rrk=46`), even after adding `"Google Chrome"` to `Sec-CH-UA*` headers and `navigator.userAgentData.brands`. Google's sign-in checks for proprietary Google Chrome signals whenever a browser advertises Chrome. Fixed narrowly by using a current desktop Firefox UA and stripping `Sec-CH-UA*` headers for `accounts.google.com` only (both HTTP headers in `webRequest.onBeforeSendHeaders` and `navigator.userAgent` via CDP), while keeping consistent Chrome UA + Client Hints (`Google Chrome`, `Chromium`, `Not)A;Brand`) for all other sites. Verified in both tabs and sign-in popups that `accounts.google.com` now proceeds past the email step normally.
+- **Sign-in passkey auto-prompt (Google, Microsoft 365, GitHub):** Electron lacks WebAuthn conditional-UI autofill, so sign-in pages calling `navigator.credentials.get({ mediation: 'conditional' })` on load popped up a modal Windows Security dialog. Fixed via a tiny main-world script injected through `webContents.debugger` (`Page.addScriptToEvaluateOnNewDocument`) on tabs and popups that makes `PublicKeyCredential.isConditionalMediationAvailable()` resolve `false`, sets `conditionalGet`/`conditionalCreate` to `false` in `getClientCapabilities()`, and rejects conditional `credentials.get()` calls quietly with `NotAllowedError` while leaving explicit passkey clicks untouched. Verified DevTools (`openDevTools` / `closeDevTools`) coexists cleanly without detaching the debugger.
+- **YouTube (`youtube.com`):** Loads cleanly; 60fps video plays (`readyState === 4`, playback time advances) and HTML5 full screen enters and exits cleanly without leaving the UI stuck.
+- **Google Docs (`docs.google.com`) & Google Classroom (`classroom.google.com`):** Landing and sign-in redirects load cleanly with no unsupported-browser warnings (redirecting to `accounts.google.com` automatically switches to the Google auth compatibility rule).
+- **Wikipedia, GitHub (`/login`), Khan Academy, Quizlet, Microsoft 365 (`login.microsoftonline.com`):** All load cleanly with consistent Chrome UA + Client Hints, no unsupported-browser banners, and no unexpected Windows Security prompts.
+- **Not tested:** Full interactive login flows with real user accounts (Google, Microsoft, GitHub, Quizlet, Khan Academy), real Windows Hello explicit passkey sign-in, and DRM-protected streaming (still planned for M3).

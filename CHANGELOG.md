@@ -5,7 +5,7 @@ All notable changes to Veyra Orbit are documented here.
 ## Unreleased
 
 - Background auto-updates for Dev and Prod channels, with a calm restart prompt and a Check for updates row in Settings.
-- Improved browser compatibility (Google sign-in and major study sites).
+- Fixed Google sign-in ("This browser or app may not be secure") in tabs and sign-in popups, aligned Chrome Client Hints (`Sec-CH-UA*` and `navigator.userAgentData`), and stopped sign-in pages from auto-opening the Windows Security passkey dialog on load.
 
 ## 26.11.1 — 2026-11-21
 
