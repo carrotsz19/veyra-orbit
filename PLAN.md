@@ -47,6 +47,8 @@ These are planned for, not surprises:
 - [ ] Downloads panel (for now, Electron's own Save dialog)
 - [x] Bookmarks (star, Ctrl+D, orbit://bookmarks)
 - [ ] Find in page (Ctrl+F)
+- [x] Full screen video, tab sound indicator and mute, tab right-click menu
+- [x] Print (Ctrl+P) and the built-in PDF viewer
 - [ ] Settings page (search engine, theme)
 - [x] Electron fuses: cookie encryption on, RunAsNode, NODE_OPTIONS and `--inspect` off, only-load-from-asar and asar integrity on (`build.electronFuses`). File-protocol privileges stay on until the UI moves to a custom protocol.
 - [ ] Dev/Prod channels and auto-update, like Veyra Study, each with its own token

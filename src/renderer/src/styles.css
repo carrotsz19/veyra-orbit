@@ -112,6 +112,20 @@ kbd {
   grid-template-columns: var(--side) 1fr;
   height: 100%;
 }
+.shell.fullscreen {
+  grid-template-columns: 1fr;
+}
+.shell.fullscreen .side,
+.shell.fullscreen .bar,
+.shell.fullscreen .perm,
+.shell.fullscreen .find {
+  display: none;
+}
+.shell.fullscreen .page {
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
 .main {
   display: flex;
   flex-direction: column;
@@ -162,11 +176,13 @@ html[data-platform='darwin'] .side-top {
   margin-bottom: 6px;
 }
 .pin {
+  position: relative;
   height: 44px;
   display: grid;
   place-items: center;
   border-radius: var(--r-control);
   background: var(--fill-tertiary);
+  cursor: default;
   transition: background 0.15s, transform var(--spring-snappy-ms) var(--spring-snappy);
 }
 .pin:hover {
@@ -178,6 +194,33 @@ html[data-platform='darwin'] .side-top {
 .pin.on {
   background: var(--bg-elevated);
   box-shadow: var(--elev-1);
+}
+.pin.dragging {
+  opacity: 0.45;
+}
+.pin-audio {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  background: var(--bg-elevated);
+  color: var(--tint);
+  box-shadow: var(--elev-1);
+  transition: background 0.15s, color 0.15s, transform var(--spring-snappy-ms) var(--spring-snappy);
+}
+.pin-audio.muted {
+  color: var(--label-tertiary);
+}
+.pin-audio:hover {
+  background: var(--fill-secondary);
+  color: var(--label-primary);
+}
+.pin-audio:active {
+  transform: scale(0.9);
 }
 
 .tabs {
@@ -236,14 +279,29 @@ html[data-platform='darwin'] .side-top {
 .tab-btn {
   width: 24px;
   height: 24px;
+  flex: none;
   display: none;
   place-items: center;
   border-radius: 7px;
   color: var(--label-secondary);
 }
-.tab:hover .tab-btn,
-.tab.on .tab-btn:last-child {
+.tab-btn.tab-audio {
   display: grid;
+  width: 22px;
+  height: 22px;
+  margin: 0 -4px;
+  color: var(--tint);
+}
+.tab-btn.tab-audio.muted {
+  color: var(--label-tertiary);
+}
+.tab:hover .tab-btn,
+.tab.on .tab-close {
+  display: grid;
+}
+.tab-btn.tab-audio:hover {
+  background: var(--fill-hover);
+  color: var(--label-primary);
 }
 .tab-btn:hover {
   background: var(--fill-hover);

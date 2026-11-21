@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Bookmark, Clock, Globe, LoaderCircle, Pin, PinOff, Plus, X } from 'lucide-react'
+import { Bookmark, Clock, Globe, LoaderCircle, Pin, PinOff, Plus, Volume2, VolumeX, X } from 'lucide-react'
 import type { BrowserState, DownloadInfo, TabInfo } from '@shared/types'
 import { displayUrl } from '@shared/url'
 import { Downloads } from './Downloads'
@@ -56,17 +56,44 @@ export function Sidebar({ state, downloads, downloadsOpen, onCloseDownloads }: P
       {pinned.length > 0 && (
         <div className="pins">
           {pinned.map((t) => (
-            <button
+            <div
               key={t.id}
-              className={`pin ${t.id === state.activeId ? 'on' : ''}`}
+              role="tab"
+              tabIndex={0}
+              aria-selected={t.id === state.activeId}
+              className={`pin ${t.id === state.activeId ? 'on' : ''} ${dragId === t.id ? 'dragging' : ''}`}
               title={label(t)}
               onClick={() => api.activate(t.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  api.activate(t.id)
+                }
+              }}
               onAuxClick={(e) => e.button === 1 && api.closeTab(t.id)}
-              onContextMenu={(e) => (e.preventDefault(), api.togglePin(t.id))}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                api.tabMenu(t.id)
+              }}
               {...dragProps(t)}
             >
               <Favicon tab={t} />
-            </button>
+              {(t.audible || t.muted) && (
+                <button
+                  type="button"
+                  className={`pin-audio ${t.muted ? 'muted' : ''}`}
+                  aria-label={t.muted ? 'Unmute tab' : 'Mute tab'}
+                  title={t.muted ? 'Unmute tab' : 'Mute tab'}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    api.toggleMute(t.id)
+                  }}
+                >
+                  {t.muted ? <VolumeX size={11} /> : <Volume2 size={11} />}
+                </button>
+              )}
+            </div>
           ))}
         </div>
       )}
@@ -80,15 +107,34 @@ export function Sidebar({ state, downloads, downloadsOpen, onCloseDownloads }: P
             className={`tab ${t.id === state.activeId ? 'on' : ''} ${dragId === t.id ? 'dragging' : ''}`}
             onMouseDown={(e) => e.button === 0 && api.activate(t.id)}
             onAuxClick={(e) => e.button === 1 && api.closeTab(t.id)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              api.tabMenu(t.id)
+            }}
             title={t.url ? `${label(t)}\n${displayUrl(t.url)}` : label(t)}
             {...dragProps(t)}
           >
             <Favicon tab={t} />
+            {(t.audible || t.muted) && (
+              <button
+                type="button"
+                className={`tab-btn tab-audio ${t.muted ? 'muted' : ''}`}
+                aria-label={t.muted ? 'Unmute tab' : 'Mute tab'}
+                title={t.muted ? 'Unmute tab' : 'Mute tab'}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  api.toggleMute(t.id)
+                }}
+              >
+                {t.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+              </button>
+            )}
             <span className="tab-title">{label(t)}</span>
             <button className="tab-btn" aria-label="Pin tab" title="Pin" onMouseDown={(e) => e.stopPropagation()} onClick={() => api.togglePin(t.id)}>
               {t.pinned ? <PinOff size={14} /> : <Pin size={14} />}
             </button>
-            <button className="tab-btn" aria-label="Close tab" title="Close (Ctrl+W)" onMouseDown={(e) => e.stopPropagation()} onClick={() => api.closeTab(t.id)}>
+            <button className="tab-btn tab-close" aria-label="Close tab" title="Close (Ctrl+W)" onMouseDown={(e) => e.stopPropagation()} onClick={() => api.closeTab(t.id)}>
               <X size={14} />
             </button>
           </div>

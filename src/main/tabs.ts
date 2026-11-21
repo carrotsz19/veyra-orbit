@@ -43,6 +43,8 @@ export class Tabs {
   private bounds: Rect | null = null
   /** The tab whose page asked for full screen (a video, a slideshow); its page fills the window. */
   private fullscreenTab: Tab | null = null
+  /** True when Orbit put the window into full screen for the page (vs the user pressing F11 first). */
+  private fullscreenByPage = false
   private attached: WebContentsView | null = null
   private closed: { url: string; title: string; pinned: boolean }[] = []
   private emitQueued = false
@@ -139,9 +141,11 @@ export class Tabs {
     if (i < 0) return
     if (this.activeId === id) this.stopFind(true)
     if (this.fullscreenTab?.info.id === id) {
+      const restoreWindow = this.fullscreenByPage
       this.fullscreenTab = null
-      if (this.win.isFullScreen()) this.win.setFullScreen(false)
-      this.win.webContents.send('page-fullscreen', false)
+      this.fullscreenByPage = false
+      if (restoreWindow && this.win.isFullScreen()) this.win.setFullScreen(false)
+      if (!this.win.isDestroyed()) this.win.webContents.send('page-fullscreen', false)
     }
     const [tab] = this.tabs.splice(i, 1)
     if (tab.info.url) this.closed.push({ url: tab.info.url, title: tab.info.title, pinned: tab.info.pinned })
@@ -172,7 +176,7 @@ export class Tabs {
     if (!tab) return
     if (this.activeId !== null && this.activeId !== id) {
       this.stopFind(true)
-      if (this.fullscreenTab) this.exitPageFullscreen()
+      if (this.fullscreenTab) this.exitPageFullscreen(true)
     }
     this.activeId = id
     if (tab.pendingUrl) {
@@ -194,6 +198,7 @@ export class Tabs {
     tab.info.url = url
     tab.info.error = undefined
     if (isInternalUrl(url)) {
+      if (this.fullscreenTab === tab) this.exitPageFullscreen(true)
       // One of Orbit's own pages: the UI draws it, the web view stays where it was.
       tab.view.webContents.stop()
       tab.info.title = INTERNAL_PAGES[url]
@@ -404,25 +409,35 @@ export class Tabs {
 
   // ---- full screen ------------------------------------------------------------
 
+  isPageFullscreen(): boolean {
+    return !!this.fullscreenTab
+  }
+
   /** A page went full screen (or came back). The window follows, and the browser's own UI hides. */
   private setPageFullscreen(tab: Tab, on: boolean): void {
     if (on) {
+      if (this.fullscreenTab !== tab) this.fullscreenByPage = !this.win.isFullScreen()
       this.fullscreenTab = tab
       if (!this.win.isFullScreen()) this.win.setFullScreen(true)
     } else if (this.fullscreenTab === tab) {
+      const restoreWindow = this.fullscreenByPage
       this.fullscreenTab = null
-      if (this.win.isFullScreen()) this.win.setFullScreen(false)
+      this.fullscreenByPage = false
+      if (restoreWindow && this.win.isFullScreen()) this.win.setFullScreen(false)
     }
     if (!this.win.isDestroyed()) this.win.webContents.send('page-fullscreen', !!this.fullscreenTab)
     this.layout()
   }
 
   /** The window left full screen (Esc, F11, or switching tab): the page leaves it too. */
-  exitPageFullscreen(): void {
+  exitPageFullscreen(leaveWindow = false): void {
     const tab = this.fullscreenTab
     if (!tab) return
+    const restoreWindow = leaveWindow && this.fullscreenByPage
     this.fullscreenTab = null
+    this.fullscreenByPage = false
     if (!tab.view.webContents.isDestroyed()) void tab.view.webContents.executeJavaScript('document.fullscreenElement && document.exitFullscreen()', true).catch(() => {})
+    if (restoreWindow && this.win.isFullScreen()) this.win.setFullScreen(false)
     if (!this.win.isDestroyed()) this.win.webContents.send('page-fullscreen', false)
     this.layout()
   }
@@ -440,6 +455,7 @@ export class Tabs {
     const wc = tab.view.webContents
     wc.setAudioMuted(!wc.isAudioMuted())
     tab.info.muted = wc.isAudioMuted()
+    tab.info.audible = wc.isCurrentlyAudible()
     this.changed()
   }
 
@@ -467,10 +483,18 @@ export class Tabs {
     Menu.buildFromTemplate([
       { label: 'New tab', click: () => this.create() },
       { type: 'separator' },
-      { label: 'Reload', enabled: this.showsPage(tab), click: () => (this.activate(id), this.reload()) },
+      {
+        label: 'Reload',
+        enabled: this.showsPage(tab),
+        click: () => {
+          const wasLazy = !!tab.pendingUrl
+          this.activate(id)
+          if (!wasLazy) this.reload()
+        }
+      },
       { label: 'Duplicate', enabled: !!(tab.pendingUrl || tab.info.url), click: () => this.duplicate(id) },
       { label: tab.info.pinned ? 'Unpin tab' : 'Pin tab', click: () => this.togglePin(id) },
-      { label: wc.isAudioMuted() ? 'Unmute site' : 'Mute tab', click: () => this.toggleMute(id) },
+      { label: wc.isAudioMuted() ? 'Unmute tab' : 'Mute tab', click: () => this.toggleMute(id) },
       { type: 'separator' },
       { label: 'Close tab', accelerator: 'CmdOrCtrl+W', click: () => this.close(id) },
       { label: 'Close other tabs', enabled: this.tabs.some((t) => t.info.id !== id && !t.info.pinned), click: () => this.closeOthers(id) },
@@ -479,16 +503,19 @@ export class Tabs {
   }
 
   focusOmnibox(): void {
+    if (this.fullscreenTab) this.exitPageFullscreen(true)
     this.win.webContents.focus()
     this.win.webContents.send('focus-omnibox')
   }
 
   toggleDownloads(): void {
+    if (this.fullscreenTab) this.exitPageFullscreen(true)
     if (!this.win.isDestroyed()) this.win.webContents.send('downloads:toggle')
   }
 
   openFind(): void {
     if (!this.active || !this.showsPage(this.active)) return
+    if (this.fullscreenTab) this.exitPageFullscreen(true)
     this.findOpen = true
     this.win.webContents.focus()
     this.win.webContents.send('find:open')
@@ -686,6 +713,7 @@ export class Tabs {
     wc.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
       // -3 is "aborted": you clicked something else, or stopped it.
       if (!isMainFrame || code === -3) return
+      if (this.fullscreenTab === tab) this.exitPageFullscreen(true)
       if (info.id === this.activeId) this.stopFind(true)
       info.loading = false
       info.error = { code, description, url }
@@ -695,6 +723,7 @@ export class Tabs {
     })
     wc.on('render-process-gone', (_e, details) => {
       if (details.reason === 'clean-exit') return
+      if (this.fullscreenTab === tab) this.exitPageFullscreen(true)
       if (info.id === this.activeId) this.stopFind(true)
       info.loading = false
       info.error = { code: -1, description: 'PAGE_CRASHED', url: info.url }

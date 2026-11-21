@@ -17,9 +17,11 @@ export function App(): React.JSX.Element {
   const [downloadsOpen, setDownloadsOpen] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
   const [findFocusTick, setFindFocusTick] = useState(0)
+  const [pageFullscreen, setPageFullscreen] = useState(false)
   /** A picture of the page, shown in its place while floating UI (suggestions) is open over it. */
   const [shot, setShot] = useState<string | null>(null)
   const pageRef = useRef<HTMLDivElement>(null)
+  const pageFullscreenRef = useRef(false)
   const maxDownloadId = useRef(0)
 
   useEffect(() => {
@@ -41,7 +43,8 @@ export function App(): React.JSX.Element {
         setFindOpen(true)
         setFindFocusTick((n) => n + 1)
       }),
-      api.onFindClose(() => setFindOpen(false))
+      api.onFindClose(() => setFindOpen(false)),
+      api.onPageFullscreen(setPageFullscreen)
     ]
     api.ready()
     return () => offs.forEach((off) => off())
@@ -52,6 +55,7 @@ export function App(): React.JSX.Element {
     const el = pageRef.current
     if (!el) return
     const send = (): void => {
+      if (pageFullscreenRef.current) return
       const r = el.getBoundingClientRect()
       api.setBounds({ x: r.left, y: r.top, width: r.width, height: r.height })
     }
@@ -65,11 +69,20 @@ export function App(): React.JSX.Element {
     }
   }, [])
 
+  useLayoutEffect(() => {
+    pageFullscreenRef.current = pageFullscreen
+    if (pageFullscreen) return
+    const el = pageRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    api.setBounds({ x: r.left, y: r.top, width: r.width, height: r.height })
+  }, [pageFullscreen])
+
   const active: TabInfo | undefined = state.tabs.find((t) => t.id === state.activeId)
   const tabAsks = asks.filter((a) => a.tabId === null || a.tabId === state.activeId)
 
   return (
-    <div className="shell">
+    <div className={`shell ${pageFullscreen ? 'fullscreen' : ''}`}>
       <Sidebar state={state} downloads={downloads} downloadsOpen={downloadsOpen} onCloseDownloads={() => setDownloadsOpen(false)} />
       <main className="main">
         <Toolbar tab={active} onPageShot={setShot} />

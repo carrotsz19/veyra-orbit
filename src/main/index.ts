@@ -161,6 +161,7 @@ on('ready', () => {
   win.webContents.send('state', tabs.state())
   win.webContents.send('permissions', asks)
   win.webContents.send('downloads', downloads?.list() ?? [])
+  win.webContents.send('page-fullscreen', tabs.isPageFullscreen())
 })
 on('tab:new', (t, input?: unknown) => t.create((str(input) && toUrl(input)) || ''))
 on('tab:close', (t, id: unknown) => num(id) && t.close(id))
