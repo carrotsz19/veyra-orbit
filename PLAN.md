@@ -105,6 +105,9 @@ Tested in a scratch profile (`VEYRA_USERDATA` + `VEYRA_DOWNLOADS`) with no real 
 - **Wikipedia, GitHub (`/login`), Khan Academy, Quizlet, Microsoft 365 (`login.microsoftonline.com`):** All load cleanly with consistent Chrome UA + Client Hints, no unsupported-browser banners, and no unexpected Windows Security prompts.
 - **Not tested:** Full interactive login flows with real user accounts (Google, Microsoft, GitHub, Quizlet, Khan Academy), real Windows Hello explicit passkey sign-in, and DRM-protected streaming (still planned for M3).
 
+
+**Google sign-in on a brand-new profile:** Google may reject the first one or two sign-in attempts in a profile it has never seen ("This browser or app may not be secure"); trying again works. Orbit shows Google's sign-in page a consistent Firefox identity (Firefox user agent, no Chrome client hints, no `navigator.userAgentData` or `window.chrome`). That fixes the inconsistency but not, on its own, the first-attempt rejection, which looks like Google trusting new browsers less. Tested 2026-11-21 with fresh scratch profiles.
+
 ## Settings roadmap
 
 Settings grows towards Vivaldi-level customisation, in Orbit's calm style.

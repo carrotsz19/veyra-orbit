@@ -112,6 +112,22 @@ export function isGoogleAuthUrl(rawUrl: string): boolean {
 }
 
 /**
+ * Runs before page scripts in every frame, but only acts on Google's sign-in host. There Orbit
+ * sends a Firefox user agent, so the page must also look like Firefox: no navigator.userAgentData,
+ * no window.chrome, an empty navigator.vendor, so the identity is consistent. On its own this
+ * doesn't stop Google rejecting the FIRST sign-in on a brand-new profile ("This browser or app may
+ * not be secure"); retrying a couple of times works (tested 2026-11-21, see PLAN.md).
+ */
+export const GOOGLE_AUTH_FIREFOX_SHAPE = `(() => {
+  if (location.hostname !== 'accounts.google.com') return
+  const hide = (obj, prop) => { try { Object.defineProperty(obj, prop, { get: () => undefined, configurable: true }) } catch {} }
+  hide(Navigator.prototype, 'userAgentData')
+  try { Object.defineProperty(Navigator.prototype, 'vendor', { get: () => '', configurable: true }) } catch {}
+  try { delete window.chrome } catch {}
+  hide(window, 'chrome')
+})()`
+
+/**
  * Rewrites request headers for web compatibility:
  *  - accounts.google.com: Firefox UA and no Sec-CH-UA* headers (Google rejects non-Chrome Chromium).
  *  - everywhere else: Sec-CH-UA and Sec-CH-UA-Full-Version-List match ChromeIdentity.

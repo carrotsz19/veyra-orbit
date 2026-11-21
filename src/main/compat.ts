@@ -15,6 +15,7 @@ import {
   buildChromeIdentity,
   isGoogleAuthUrl,
   WEBAUTHN_CONDITIONAL_SHIM,
+  GOOGLE_AUTH_FIREFOX_SHAPE,
   type ChromeIdentity
 } from '../shared/compat'
 
@@ -167,6 +168,13 @@ export function attachPageCompat(wc: WebContents): void {
     void dbg
       .sendCommand('Page.addScriptToEvaluateOnNewDocument', {
         source: WEBAUTHN_CONDITIONAL_SHIM,
+        runImmediately: true
+      })
+      .catch(() => {})
+    // Google's sign-in page sees a consistent Firefox (the script does nothing on other hosts).
+    void dbg
+      .sendCommand('Page.addScriptToEvaluateOnNewDocument', {
+        source: GOOGLE_AUTH_FIREFOX_SHAPE,
         runImmediately: true
       })
       .catch(() => {})
