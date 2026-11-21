@@ -83,6 +83,11 @@ export function Toolbar({ tab }: { tab?: TabInfo }): React.JSX.Element {
           }}
         />
       </form>
+      {tab && tab.zoom !== 100 && (
+        <button className="zoom-pill" aria-label={`Zoom ${tab.zoom}%, click to reset`} title="Reset zoom (Ctrl+0)" onClick={() => api.resetZoom()}>
+          {tab.zoom}%
+        </button>
+      )}
       <div className="caption-space" />
     </header>
   )

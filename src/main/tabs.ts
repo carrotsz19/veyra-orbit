@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { BrowserState, Rect, TabInfo } from '../shared/types'
 import { SEARCH_URL, isAllowedUrl, toUrl } from '../shared/url'
+import { clampZoomLevel, zoomPercent } from '../shared/format'
 import { WEB_PARTITION } from './security'
 
 interface Tab {
@@ -84,7 +85,7 @@ export class Tabs {
     const id = this.nextId++
     const tab: Tab = {
       view,
-      info: { id, url, title: opts.title ?? '', loading: false, canGoBack: false, canGoForward: false, pinned: !!opts.pinned }
+      info: { id, url, title: opts.title ?? '', loading: false, canGoBack: false, canGoForward: false, pinned: !!opts.pinned, zoom: 100 }
     }
     this.wire(tab)
 
@@ -202,10 +203,17 @@ export class Tabs {
     this.active?.view.webContents.stop()
   }
 
-  private zoom(delta: number | null): void {
-    const wc = this.active?.view.webContents
-    if (!wc) return
-    wc.setZoomLevel(delta === null ? 0 : wc.getZoomLevel() + delta)
+  private zoom(delta: number | null, tab = this.active): void {
+    if (!tab || !this.showsPage(tab)) return
+    const wc = tab.view.webContents
+    const next = delta === null ? 0 : clampZoomLevel(wc.getZoomLevel() + delta)
+    wc.setZoomLevel(next)
+    tab.info.zoom = zoomPercent(next)
+    this.changed()
+  }
+
+  resetZoom(): void {
+    this.zoom(null)
   }
 
   setBounds(r: Rect | null): void {
@@ -295,11 +303,15 @@ export class Tabs {
       if (url) info.url = url
       info.canGoBack = wc.navigationHistory.canGoBack()
       info.canGoForward = wc.navigationHistory.canGoForward()
+      info.zoom = Math.round(wc.getZoomFactor() * 100)
       this.changed()
     }
 
     wc.on('before-input-event', (e, input) => {
       if (this.shortcut(input)) e.preventDefault()
+    })
+    wc.on('zoom-changed', (_e, direction) => {
+      this.zoom(direction === 'in' ? ZOOM_STEP : -ZOOM_STEP, tab)
     })
 
     // Only web addresses: no file:, javascript:, chrome: and the like.

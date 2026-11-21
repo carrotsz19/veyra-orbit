@@ -118,6 +118,7 @@ on('nav:back', (t) => t.back())
 on('nav:forward', (t) => t.forward())
 on('nav:reload', (t) => t.reload())
 on('nav:stop', (t) => t.stop())
+on('nav:zoom-reset', (t) => t.resetZoom())
 on('bounds', (t, r: unknown) => {
   const rect = r as Rect | null
   if (rect === null) return t.setBounds(null)

@@ -9,6 +9,8 @@ export interface TabInfo {
   canGoBack: boolean
   canGoForward: boolean
   pinned: boolean
+  /** Page zoom percentage, e.g. 100 for normal size. */
+  zoom: number
   /** Set when the last load failed; the UI shows it in place of the page. */
   error?: { code: number; description: string; url: string }
 }
@@ -47,6 +49,7 @@ export interface VeyraApi {
   forward(): void
   reload(): void
   stop(): void
+  resetZoom(): void
   togglePin(id: number): void
   move(id: number, toIndex: number): void
   setBounds(r: Rect | null): void
