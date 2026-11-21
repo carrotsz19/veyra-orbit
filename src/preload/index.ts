@@ -1,6 +1,22 @@
 // The bridge for the browser's own UI. Web pages in tabs get no preload at all.
 import { contextBridge, ipcRenderer } from 'electron'
-import type { BrowserState, DownloadInfo, ExternalAppAsk, FindState, PermissionAsk, Rect, SettingsView, SitePermission, UpdateState, VeyraApi } from '../shared/types'
+import type {
+  BrowserState,
+  CompactEdgeKind,
+  CompactPinKind,
+  CompactRevealState,
+  DownloadInfo,
+  ExternalAppAsk,
+  FindState,
+  PermissionAsk,
+  Rect,
+  SettingsView,
+  SitePermission,
+  UpdateState,
+  VeyraApi,
+  WorkspaceCreateInput,
+  WorkspaceUpdateInput
+} from '../shared/types'
 
 function listen<T>(channel: string, cb: (v: T) => void): () => void {
   const f = (_e: Electron.IpcRendererEvent, v: T): void => cb(v)
@@ -38,7 +54,16 @@ const api: VeyraApi = {
   find: (text, opts) => ipcRenderer.send('find:start', text, opts),
   stopFind: () => ipcRenderer.send('find:stop'),
   toggleMute: (id) => ipcRenderer.send('tab:mute', id),
+  sleepTab: (id) => ipcRenderer.send('tab:sleep', id),
   tabMenu: (id) => ipcRenderer.send('tab:menu', id),
+  switchWorkspace: (id) => ipcRenderer.send('workspace:switch', id),
+  createWorkspace: (input: WorkspaceCreateInput) => ipcRenderer.invoke('workspace:create', input),
+  updateWorkspace: (id: string, patch: WorkspaceUpdateInput) => ipcRenderer.invoke('workspace:update', id, patch),
+  deleteWorkspace: (id: string) => ipcRenderer.invoke('workspace:delete', id),
+  onCompactState: (cb) => listen<CompactRevealState>('compact:state', cb),
+  setCompactPin: (kind: CompactPinKind, pinned: boolean) => ipcRenderer.send('compact:pin', kind, pinned),
+  setCompactHover: (edge: CompactEdgeKind, hovering: boolean) => ipcRenderer.send('compact:hover', edge, hovering),
+  toggleCompactMode: () => ipcRenderer.send('compact:toggle'),
   onPageFullscreen: (cb) => listen<boolean>('page-fullscreen', cb),
   pauseDownload: (id) => ipcRenderer.send('download:pause', id),
   resumeDownload: (id) => ipcRenderer.send('download:resume', id),

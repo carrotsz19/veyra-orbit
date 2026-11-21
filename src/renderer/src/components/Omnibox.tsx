@@ -9,7 +9,15 @@ const api = window.veyra
  * The address bar. While its suggestions are open, the page (a native view that would cover
  * them) is swapped for a picture of itself, passed up through onPageShot.
  */
-export function Omnibox({ tab, onPageShot }: { tab?: TabInfo; onPageShot: (shot: string | null) => void }): React.JSX.Element {
+export function Omnibox({
+  tab,
+  onPageShot,
+  onEditingChange
+}: {
+  tab?: TabInfo
+  onPageShot: (shot: string | null) => void
+  onEditingChange?: (editing: boolean) => void
+}): React.JSX.Element {
   const input = useRef<HTMLInputElement>(null)
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState('')
@@ -26,11 +34,17 @@ export function Omnibox({ tab, onPageShot }: { tab?: TabInfo; onPageShot: (shot:
     if (!editing) setText(displayUrl(url))
   }, [url, editing, tab?.id])
 
+  useEffect(() => {
+    onEditingChange?.(editing)
+  }, [editing, onEditingChange])
+
   useEffect(
     () =>
       api.onFocusOmnibox(() => {
-        input.current?.focus()
-        input.current?.select()
+        requestAnimationFrame(() => {
+          input.current?.focus()
+          input.current?.select()
+        })
       }),
     []
   )

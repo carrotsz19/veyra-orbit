@@ -30,11 +30,15 @@ export function chromeIdentity(): ChromeIdentity {
   return cachedIdentity
 }
 
+const attachedCompatSessions = new WeakSet<Session>()
+
 /**
  * Rewrites HTTP User-Agent and Sec-CH-UA* headers for the web session so every request
  * (including initial navigations, redirects, and sign-in popups) matches our page identity.
  */
 export function attachSessionCompat(sess: Session): void {
+  if (attachedCompatSessions.has(sess)) return
+  attachedCompatSessions.add(sess)
   const id = chromeIdentity()
   sess.webRequest.onBeforeSendHeaders((details, callback) => {
     callback({ requestHeaders: applyCompatRequestHeaders(details.url, details.requestHeaders, id) })

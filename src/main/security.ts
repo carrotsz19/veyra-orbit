@@ -110,6 +110,11 @@ export class Permissions {
     this.onSavedChanged()
   }
 
+  /** True when this tab currently has an unanswered permission prompt. */
+  hasPendingPermission(tabId: number): boolean {
+    return this.pending.some((p) => p.tabId === tabId)
+  }
+
   /** A tab closed or navigated away: its open questions are answered no. */
   dropTab(tabId: number): void {
     const gone = this.pending.filter((p) => p.tabId === tabId)
@@ -202,6 +207,10 @@ export function hardenAll(): void {
   })
 }
 
+export function sessionForPartition(partition: string): Session {
+  return session.fromPartition(partition)
+}
+
 export function webSession(): Session {
-  return session.fromPartition(WEB_PARTITION)
+  return sessionForPartition(WEB_PARTITION)
 }

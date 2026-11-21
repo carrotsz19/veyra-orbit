@@ -1,25 +1,38 @@
 /*
- * The tabs. Each one is its own WebContentsView (its own sandboxed Chromium renderer). Only the
- * active tab's view is in the window, placed where the UI says the page goes. New tabs start
- * without a page, and tabs restored from last time load only when you open them.
+ * The tabs and workspaces. Each loaded tab is its own WebContentsView (its own sandboxed Chromium
+ * renderer). Only the active tab's view is in the window, placed where the UI says the page goes.
+ * Restored tabs load only when opened, and idle background tabs can sleep to free memory.
  */
 import { BrowserWindow, Menu, WebContentsView, clipboard, type Input, type WebContents } from 'electron'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { BrowserState, Rect, TabInfo } from '../shared/types'
+import type { BrowserState, Rect, TabInfo, WorkspaceCreateInput, WorkspaceInfo, WorkspaceUpdateInput } from '../shared/types'
 import { INTERNAL_PAGES, buildSearchUrl, isAllowedUrl, isInternalUrl, toUrl } from '../shared/url'
 import { isSafeSubframeUrl, parseExternalAppUrl } from '../shared/external'
 import { clampZoomLevel, zoomPercent } from '../shared/format'
-import { WEB_PARTITION } from './security'
+import {
+  createDefaultWorkspace,
+  createWorkspaceEntry,
+  deleteWorkspaceEntry,
+  nextWorkspaceId,
+  parseSavedSession,
+  updateWorkspaceEntry,
+  workspaceAtShortcut,
+  workspacePartition,
+  type SavedSession
+} from '../shared/workspaces'
+import { canSleepTab, type SleepPolicy } from '../shared/sleep'
 import { attachPageCompat } from './compat'
 
 interface Tab {
   info: TabInfo
-  view: WebContentsView
-  /** A restored tab's address, loaded the first time the tab is opened. */
+  view: WebContentsView | null
+  /** A restored or sleeping tab's address, loaded the next time the tab is opened. */
   pendingUrl?: string
   /** The next page this tab opens was typed in the address bar (for history ranking). */
   typed?: boolean
+  /** Timestamp when this tab was last active in the window (for sleeping tabs). */
+  lastActiveAt: number
 }
 
 /** What the tabs tell the rest of the browser about, and ask it. */
@@ -33,16 +46,27 @@ export interface TabHooks {
   searchUrl(): string
   /** A page tried to open an allowlisted external app scheme (mailto:, zoommtg:, ...). */
   externalApp(tabId: number, pageUrl: string, targetUrl: string): void
-}
-
-interface SavedSession {
-  tabs: { url: string; title: string; pinned: boolean }[]
-  active: number
+  /** Ensures a session partition has the full security, compat and downloads setup. */
+  ensureSession(partition: string): void
+  /** True when a tab currently has an unanswered permission prompt. */
+  hasPendingPermission(tabId: number): boolean
+  /** Current sleeping-tabs policy. */
+  sleepPolicy(): SleepPolicy
+  /** Toggles Zen-style compact mode (Ctrl+Shift+S). */
+  toggleCompactMode(): void
+  /** Notifies compact mode when a native context menu opens or closes. */
+  onMenuOpen?(open: boolean): void
+  /** Notifies compact mode when the address bar is about to be focused. */
+  onFocusOmnibox?(): void
 }
 
 const ZOOM_STEP = 0.5
 
 export class Tabs {
+  private workspaces: WorkspaceInfo[] = [createDefaultWorkspace()]
+  private activeWorkspaceId: string = this.workspaces[0].id
+  private workspaceActiveTab = new Map<string, number>()
+  private workspaceSwitchDir: -1 | 0 | 1 = 0
   private tabs: Tab[] = []
   private activeId: number | null = null
   private nextId = 1
@@ -52,9 +76,10 @@ export class Tabs {
   /** True when Orbit put the window into full screen for the page (vs the user pressing F11 first). */
   private fullscreenByPage = false
   private attached: WebContentsView | null = null
-  private closed: { url: string; title: string; pinned: boolean }[] = []
+  private closed: { url: string; title: string; pinned: boolean; workspaceId: string }[] = []
   private emitQueued = false
   private saveTimer: NodeJS.Timeout | null = null
+  private sleepTimer: NodeJS.Timeout | null = null
   private findOpen = false
   private findQuery = ''
 
@@ -67,16 +92,41 @@ export class Tabs {
     private win: BrowserWindow,
     private sessionFile: string,
     private hooks: TabHooks
-  ) {}
+  ) {
+    this.refreshSleepPolicy()
+  }
 
   // ---- reading ------------------------------------------------------------
 
   state(): BrowserState {
-    return { tabs: this.tabs.map((t) => ({ ...t.info, bookmarked: !!t.info.url && this.hooks.isBookmarked(t.info.url) })), activeId: this.activeId }
+    const wsTabs = this.workspaceTabs(this.activeWorkspaceId)
+    const tabCounts: Record<string, number> = {}
+    for (const ws of this.workspaces) tabCounts[ws.id] = 0
+    for (const t of this.tabs) tabCounts[t.info.workspaceId] = (tabCounts[t.info.workspaceId] ?? 0) + 1
+    return {
+      tabs: wsTabs.map((t) => ({ ...t.info, bookmarked: !!t.info.url && this.hooks.isBookmarked(t.info.url) })),
+      activeId: this.activeId,
+      workspaces: this.workspaces.map((w) => ({ ...w })),
+      activeWorkspaceId: this.activeWorkspaceId,
+      tabCounts,
+      workspaceSwitchDir: this.workspaceSwitchDir
+    }
+  }
+
+  /** All tabs across all workspaces, for omnibox "Switch to tab" suggestions. */
+  allTabs(): TabInfo[] {
+    return this.tabs.map((t) => ({ ...t.info, bookmarked: !!t.info.url && this.hooks.isBookmarked(t.info.url) }))
+  }
+
+  /** All session partitions currently configured by workspaces. */
+  workspacePartitions(): string[] {
+    const out = new Set<string>()
+    for (const ws of this.workspaces) out.add(workspacePartition(ws))
+    return [...out]
   }
 
   tabIdOf(wc: WebContents): number | null {
-    return this.tabs.find((t) => t.view.webContents === wc)?.info.id ?? null
+    return this.tabs.find((t) => t.view?.webContents === wc)?.info.id ?? null
   }
 
   private get(id: number): Tab | undefined {
@@ -87,13 +137,23 @@ export class Tabs {
     return this.activeId === null ? undefined : this.get(this.activeId)
   }
 
-  // ---- making and closing tabs -------------------------------------------
+  private workspaceTabs(wsId = this.activeWorkspaceId): Tab[] {
+    return this.tabs.filter((t) => t.info.workspaceId === wsId)
+  }
 
-  /** A new tab. With no URL it shows the start page. */
-  create(url = '', opts: { activate?: boolean; after?: number; pinned?: boolean; lazy?: boolean; title?: string } = {}): number {
+  private partitionFor(workspaceId: string): string {
+    const ws = this.workspaces.find((w) => w.id === workspaceId)
+    return ws ? workspacePartition(ws) : workspacePartition(createDefaultWorkspace())
+  }
+
+  // ---- view lifecycle -----------------------------------------------------
+
+  private createView(tab: Tab): WebContentsView {
+    const partition = this.partitionFor(tab.info.workspaceId)
+    this.hooks.ensureSession(partition)
     const view = new WebContentsView({
       webPreferences: {
-        partition: WEB_PARTITION,
+        partition,
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
@@ -105,16 +165,153 @@ export class Tabs {
       }
     })
     view.setBackgroundColor('#ffffffff')
-    try {
-      view.setBorderRadius(10)
-    } catch {
-      /* older Electron: square corners */
+    this.radius(view, 10)
+    if (tab.info.muted) view.webContents.setAudioMuted(true)
+    attachPageCompat(view.webContents)
+    this.wire(tab, view)
+    return view
+  }
+
+  private ensureView(tab: Tab): WebContentsView {
+    if (!tab.view || tab.view.webContents.isDestroyed()) {
+      tab.view = this.createView(tab)
     }
+    return tab.view
+  }
+
+  private destroyView(tab: Tab): void {
+    const view = tab.view
+    if (!view) return
+    tab.view = null
+    if (this.attached === view) {
+      if (!this.win.isDestroyed()) this.win.contentView.removeChildView(view)
+      this.attached = null
+    }
+    if (!view.webContents.isDestroyed()) view.webContents.close()
+  }
+
+  // ---- workspaces ---------------------------------------------------------
+
+  switchWorkspace(id: string, explicitDir?: -1 | 1): void {
+    if (id === this.activeWorkspaceId) return
+    const prevIdx = this.workspaces.findIndex((w) => w.id === this.activeWorkspaceId)
+    const nextIdx = this.workspaces.findIndex((w) => w.id === id)
+    if (nextIdx < 0) return
+
+    const dir: -1 | 1 = explicitDir ?? (nextIdx > prevIdx ? 1 : -1)
+    if (this.active) this.active.lastActiveAt = Date.now()
+    this.stopFind(true)
+    if (this.fullscreenTab) this.exitPageFullscreen(true)
+
+    this.activeWorkspaceId = id
+    this.workspaceSwitchDir = dir
+
+    const wsTabs = this.workspaceTabs(id)
+    const remembered = this.workspaceActiveTab.get(id)
+    const target = (remembered !== undefined ? wsTabs.find((t) => t.info.id === remembered) : undefined) ?? wsTabs[0]
+    if (target) {
+      this.activate(target.info.id, true)
+    } else {
+      this.activeId = null
+      this.create('', { workspaceId: id, activate: true })
+    }
+  }
+
+  createWorkspace(input: WorkspaceCreateInput): WorkspaceInfo {
+    const { workspaces, created } = createWorkspaceEntry(this.workspaces, input)
+    this.workspaces = workspaces
+    this.hooks.ensureSession(workspacePartition(created))
+    this.switchWorkspace(created.id, 1)
+    return { ...created }
+  }
+
+  updateWorkspace(id: string, patch: WorkspaceUpdateInput): WorkspaceInfo | null {
+    const { workspaces, updated, isolationChanged } = updateWorkspaceEntry(this.workspaces, id, patch)
+    if (!updated) return null
+    this.workspaces = workspaces
+    this.workspaceSwitchDir = 0
+
+    if (isolationChanged) {
+      this.hooks.ensureSession(workspacePartition(updated))
+      for (const tab of this.workspaceTabs(id)) {
+        const currentUrl = tab.pendingUrl ?? (tab.info.error?.url || tab.info.url)
+        if (tab.view) {
+          this.onTabGone(tab.info.id)
+          this.destroyView(tab)
+        }
+        if (currentUrl && isAllowedUrl(currentUrl) && !tab.info.error) {
+          if (tab.info.id === this.activeId) {
+            tab.info.sleeping = false
+            tab.pendingUrl = undefined
+            const view = this.ensureView(tab)
+            void view.webContents.loadURL(currentUrl).catch(() => {})
+          } else {
+            tab.pendingUrl = currentUrl
+            tab.info.loading = false
+            tab.info.audible = false
+          }
+        }
+      }
+      this.layout()
+    }
+    this.changed()
+    return { ...updated }
+  }
+
+  deleteWorkspace(id: string): boolean {
+    const { workspaces, deleted, nextActiveId } = deleteWorkspaceEntry(this.workspaces, id, this.activeWorkspaceId)
+    if (!deleted) return false
+
+    const wasActive = this.activeWorkspaceId === id
+    if (wasActive) {
+      this.stopFind(true)
+      if (this.fullscreenTab && this.fullscreenTab.info.workspaceId === id) this.exitPageFullscreen(true)
+    }
+
+    const toClose = this.workspaceTabs(id)
+    for (const tab of toClose) {
+      if (this.fullscreenTab === tab) this.fullscreenTab = null
+      this.onTabGone(tab.info.id)
+      this.destroyView(tab)
+    }
+    this.tabs = this.tabs.filter((t) => t.info.workspaceId !== id)
+    this.closed = this.closed.filter((c) => c.workspaceId !== id)
+    this.workspaceActiveTab.delete(id)
+    this.workspaces = workspaces
+
+    if (wasActive) {
+      this.activeWorkspaceId = nextActiveId
+      this.workspaceSwitchDir = -1
+      this.activeId = null
+      const nextTabs = this.workspaceTabs(nextActiveId)
+      const remembered = this.workspaceActiveTab.get(nextActiveId)
+      const target = (remembered !== undefined ? nextTabs.find((t) => t.info.id === remembered) : undefined) ?? nextTabs[0]
+      if (target) this.activate(target.info.id, true)
+      else this.create('', { workspaceId: nextActiveId, activate: true })
+    } else {
+      this.workspaceSwitchDir = 0
+      this.changed()
+    }
+    return true
+  }
+
+  // ---- making and closing tabs -------------------------------------------
+
+  /** A new tab. With no URL it shows the start page. */
+  create(
+    url = '',
+    opts: { activate?: boolean; after?: number; pinned?: boolean; lazy?: boolean; title?: string; workspaceId?: string } = {}
+  ): number {
+    const workspaceId =
+      opts.workspaceId && this.workspaces.some((w) => w.id === opts.workspaceId) ? opts.workspaceId : this.activeWorkspaceId
     const id = this.nextId++
+    const now = Date.now()
     const tab: Tab = {
-      view,
+      view: null,
+      lastActiveAt: now,
       info: {
         id,
+        workspaceId,
         url,
         title: opts.title ?? (isInternalUrl(url) ? INTERNAL_PAGES[url] : ''),
         loading: false,
@@ -124,28 +321,43 @@ export class Tabs {
         bookmarked: false,
         zoom: 100,
         audible: false,
-        muted: false
+        muted: false,
+        sleeping: false
       }
     }
-    attachPageCompat(view.webContents)
-    this.wire(tab)
 
     const at = opts.after !== undefined ? this.tabs.findIndex((t) => t.info.id === opts.after) + 1 : this.tabs.length
     this.tabs.splice(at > 0 ? at : this.tabs.length, 0, tab)
-    this.sortPinned()
+    this.sortPinned(workspaceId)
 
     if (url && isAllowedUrl(url)) {
-      if (opts.lazy) tab.pendingUrl = url
-      else void view.webContents.loadURL(url).catch(() => {})
+      if (opts.lazy) {
+        tab.pendingUrl = url
+      } else {
+        const view = this.ensureView(tab)
+        void view.webContents.loadURL(url).catch(() => {})
+      }
     }
-    if (opts.activate !== false) this.activate(id)
-    else this.changed()
+
+    if (opts.activate !== false) {
+      if (workspaceId !== this.activeWorkspaceId) {
+        this.activeWorkspaceId = workspaceId
+        this.workspaceSwitchDir = 0
+      }
+      this.activate(id)
+    } else {
+      this.changed()
+    }
     return id
   }
 
   close(id: number): void {
-    const i = this.tabs.findIndex((t) => t.info.id === id)
-    if (i < 0) return
+    const tab = this.get(id)
+    if (!tab) return
+    const wsId = tab.info.workspaceId
+    const wsBefore = this.workspaceTabs(wsId)
+    const wsIndex = wsBefore.findIndex((t) => t.info.id === id)
+
     if (this.activeId === id) this.stopFind(true)
     if (this.fullscreenTab?.info.id === id) {
       const restoreWindow = this.fullscreenByPage
@@ -154,46 +366,92 @@ export class Tabs {
       if (restoreWindow && this.win.isFullScreen()) this.win.setFullScreen(false)
       if (!this.win.isDestroyed()) this.win.webContents.send('page-fullscreen', false)
     }
-    const [tab] = this.tabs.splice(i, 1)
-    if (tab.info.url) this.closed.push({ url: tab.info.url, title: tab.info.title, pinned: tab.info.pinned })
-    if (this.closed.length > 25) this.closed.shift()
-    if (this.attached === tab.view) {
-      this.win.contentView.removeChildView(tab.view)
-      this.attached = null
+
+    const globalIdx = this.tabs.indexOf(tab)
+    if (globalIdx >= 0) this.tabs.splice(globalIdx, 1)
+    if (tab.info.url) {
+      this.closed.push({ url: tab.info.url, title: tab.info.title, pinned: tab.info.pinned, workspaceId: wsId })
+      if (this.closed.length > 25) this.closed.shift()
     }
     this.onTabGone(id)
-    tab.view.webContents.close()
+    this.destroyView(tab)
+
+    const wsAfter = this.workspaceTabs(wsId)
+    if (this.workspaceActiveTab.get(wsId) === id) {
+      const next = wsAfter[wsIndex] ?? wsAfter[wsIndex - 1]
+      if (next) this.workspaceActiveTab.set(wsId, next.info.id)
+      else this.workspaceActiveTab.delete(wsId)
+    }
+
     if (this.activeId === id) {
-      // The tab that slides into its place, or the one before it.
-      const next = this.tabs[i] ?? this.tabs[i - 1]
+      const next = wsAfter[wsIndex] ?? wsAfter[wsIndex - 1]
       this.activeId = null
       if (next) this.activate(next.info.id)
     }
-    if (!this.tabs.length) this.create()
+
+    if (wsId === this.activeWorkspaceId && !wsAfter.length) {
+      this.create('', { workspaceId: wsId })
+    }
+    this.workspaceSwitchDir = 0
     this.changed()
   }
 
   reopenClosed(): void {
-    const last = this.closed.pop()
-    if (last) this.create(last.url, { pinned: last.pinned, title: last.title })
+    let idx = -1
+    for (let i = this.closed.length - 1; i >= 0; i--) {
+      if (this.closed[i].workspaceId === this.activeWorkspaceId) {
+        idx = i
+        break
+      }
+    }
+    if (idx < 0) idx = this.closed.length - 1
+    if (idx < 0) return
+    const [last] = this.closed.splice(idx, 1)
+    this.create(last.url, { pinned: last.pinned, title: last.title, workspaceId: this.activeWorkspaceId })
   }
 
-  activate(id: number): void {
+  activate(id: number, keepSwitchDir = false): void {
     const tab = this.get(id)
     if (!tab) return
-    if (this.activeId !== null && this.activeId !== id) {
+    const now = Date.now()
+    if (this.active && this.active.info.id !== id) {
+      this.active.lastActiveAt = now
       this.stopFind(true)
       if (this.fullscreenTab) this.exitPageFullscreen(true)
     }
+    if (tab.info.workspaceId !== this.activeWorkspaceId) {
+      const prevIdx = this.workspaces.findIndex((w) => w.id === this.activeWorkspaceId)
+      const nextIdx = this.workspaces.findIndex((w) => w.id === tab.info.workspaceId)
+      this.activeWorkspaceId = tab.info.workspaceId
+      if (!keepSwitchDir) this.workspaceSwitchDir = nextIdx > prevIdx ? 1 : -1
+    } else if (!keepSwitchDir) {
+      this.workspaceSwitchDir = 0
+    }
+
     this.activeId = id
+    this.workspaceActiveTab.set(tab.info.workspaceId, id)
+    tab.lastActiveAt = now
+
+    if (tab.info.sleeping) {
+      tab.info.sleeping = false
+      if (!tab.pendingUrl && this.showsPage(tab)) tab.pendingUrl = tab.info.url
+    }
+
     if (tab.pendingUrl) {
       const url = tab.pendingUrl
       tab.pendingUrl = undefined
-      void tab.view.webContents.loadURL(url).catch(() => {})
+      if (isAllowedUrl(url)) {
+        const view = this.ensureView(tab)
+        void view.webContents.loadURL(url).catch(() => {})
+      }
     }
+
     this.layout()
-    if (this.showsPage(tab)) tab.view.webContents.focus()
-    else this.focusOmnibox()
+    if (this.showsPage(tab) && tab.view && !tab.view.webContents.isDestroyed()) {
+      tab.view.webContents.focus()
+    } else {
+      this.focusOmnibox()
+    }
     this.changed()
   }
 
@@ -202,17 +460,20 @@ export class Tabs {
     const url = toUrl(input, this.hooks.searchUrl())
     if (!tab || !url) return
     tab.pendingUrl = undefined
+    tab.info.sleeping = false
     tab.info.url = url
     tab.info.error = undefined
+    tab.lastActiveAt = Date.now()
+
     if (isInternalUrl(url)) {
       if (this.fullscreenTab === tab) this.exitPageFullscreen(true)
       // One of Orbit's own pages: the UI draws it, the web view stays where it was.
-      tab.view.webContents.stop()
+      if (tab.view && !tab.view.webContents.isDestroyed()) tab.view.webContents.stop()
       tab.info.title = INTERNAL_PAGES[url]
       tab.info.favicon = undefined
       tab.info.loading = false
       // Back returns to the page that was open underneath.
-      tab.info.canGoBack = !!tab.view.webContents.getURL()
+      tab.info.canGoBack = !!(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.getURL())
       tab.info.canGoForward = false
       this.layout()
       this.win.webContents.focus()
@@ -220,15 +481,17 @@ export class Tabs {
       return
     }
     tab.typed = typed
-    void tab.view.webContents.loadURL(url).catch(() => {})
+    const view = this.ensureView(tab)
+    void view.webContents.loadURL(url).catch(() => {})
     this.layout()
-    tab.view.webContents.focus()
+    view.webContents.focus()
     this.changed()
   }
 
-  /** Opens one of Orbit's own pages, reusing a tab that already shows it. */
+  /** Opens one of Orbit's own pages, reusing a tab in the active workspace that already shows it. */
   openInternal(url: keyof typeof INTERNAL_PAGES): void {
-    const open = this.tabs.find((t) => t.info.url === url)
+    const wsTabs = this.workspaceTabs(this.activeWorkspaceId)
+    const open = wsTabs.find((t) => t.info.url === url)
     if (open) return this.activate(open.info.id)
     const blank = this.active && !this.active.info.url ? this.active : undefined
     if (blank) this.navigate(blank.info.id, url)
@@ -247,7 +510,7 @@ export class Tabs {
    * Chrome); a tab that already had a page goes back to showing that page's address.
    */
   downloadStarted(wc: WebContents): void {
-    const tab = this.tabs.find((t) => t.view.webContents === wc)
+    const tab = this.tabs.find((t) => t.view?.webContents === wc)
     if (!tab) return
     const committed = wc.getURL()
     tab.info.loading = false
@@ -265,6 +528,7 @@ export class Tabs {
 
   /** Tells the UI to read state again (after a bookmark changed elsewhere). */
   refresh(): void {
+    this.workspaceSwitchDir = 0
     this.changed()
   }
 
@@ -280,7 +544,7 @@ export class Tabs {
     }
     const view = this.attached
     let shot: string | null = null
-    if (view) {
+    if (view && !view.webContents.isDestroyed()) {
       try {
         const img = await view.webContents.capturePage()
         if (!img.isEmpty()) shot = 'data:image/jpeg;base64,' + img.toJPEG(82).toString('base64')
@@ -301,30 +565,103 @@ export class Tabs {
     const tab = this.get(id)
     if (!tab) return
     tab.info.pinned = !tab.info.pinned
-    this.sortPinned()
+    this.sortPinned(tab.info.workspaceId)
+    this.workspaceSwitchDir = 0
     this.changed()
   }
 
   move(id: number, toIndex: number): void {
-    const from = this.tabs.findIndex((t) => t.info.id === id)
+    const tab = this.get(id)
+    if (!tab) return
+    const wsId = tab.info.workspaceId
+    const wsTabs = this.workspaceTabs(wsId)
+    const from = wsTabs.findIndex((t) => t.info.id === id)
     if (from < 0) return
-    const [tab] = this.tabs.splice(from, 1)
-    this.tabs.splice(Math.max(0, Math.min(toIndex, this.tabs.length)), 0, tab)
-    this.sortPinned()
+    const [moved] = wsTabs.splice(from, 1)
+    wsTabs.splice(Math.max(0, Math.min(toIndex, wsTabs.length)), 0, moved)
+    const sorted = [...wsTabs.filter((t) => t.info.pinned), ...wsTabs.filter((t) => !t.info.pinned)]
+    this.replaceWorkspaceTabs(wsId, sorted)
+    this.workspaceSwitchDir = 0
     this.changed()
   }
 
-  /** Pinned tabs always sit at the top, in the order they were in. */
-  private sortPinned(): void {
-    this.tabs = [...this.tabs.filter((t) => t.info.pinned), ...this.tabs.filter((t) => !t.info.pinned)]
+  /** Pinned tabs always sit at the top within each workspace, in the order they were in. */
+  private sortPinned(wsId: string): void {
+    const wsTabs = this.workspaceTabs(wsId)
+    const sorted = [...wsTabs.filter((t) => t.info.pinned), ...wsTabs.filter((t) => !t.info.pinned)]
+    this.replaceWorkspaceTabs(wsId, sorted)
+  }
+
+  private replaceWorkspaceTabs(wsId: string, ordered: Tab[]): void {
+    let cursor = 0
+    this.tabs = this.tabs.map((t) => (t.info.workspaceId === wsId ? ordered[cursor++] : t))
+  }
+
+  // ---- sleeping tabs ------------------------------------------------------
+
+  refreshSleepPolicy(): void {
+    if (this.sleepTimer) {
+      clearInterval(this.sleepTimer)
+      this.sleepTimer = null
+    }
+    const { timeoutMs } = this.hooks.sleepPolicy()
+    if (timeoutMs <= 0) return
+    const intervalMs = Math.max(250, Math.min(30_000, Math.floor(timeoutMs / 4)))
+    this.sleepTimer = setInterval(() => this.sweepSleepingTabs(), intervalMs)
+  }
+
+  private canSleep(tab: Tab, manual: boolean, now = Date.now()): boolean {
+    return canSleepTab(
+      {
+        isActive: tab.info.id === this.activeId,
+        sleeping: tab.info.sleeping,
+        hasLoadedWebView: !!tab.view && !tab.view.webContents.isDestroyed(),
+        url: tab.info.url,
+        hasError: !!tab.info.error,
+        audible: tab.info.audible,
+        pinned: tab.info.pinned,
+        hasPendingPermission: this.hooks.hasPendingPermission(tab.info.id),
+        hasActiveFind: this.findOpen && this.activeId === tab.info.id,
+        isFullscreen: this.fullscreenTab === tab,
+        lastActiveAt: tab.lastActiveAt
+      },
+      this.hooks.sleepPolicy(),
+      now,
+      manual
+    )
+  }
+
+  sweepSleepingTabs(now = Date.now()): number {
+    let slept = 0
+    for (const tab of this.tabs) {
+      if (this.canSleep(tab, false, now)) {
+        if (this.sleepTab(tab.info.id, false)) slept++
+      }
+    }
+    return slept
+  }
+
+  sleepTab(id: number, manual = true): boolean {
+    const tab = this.get(id)
+    if (!tab || !this.canSleep(tab, manual)) return false
+    tab.pendingUrl = tab.info.url
+    tab.info.sleeping = true
+    tab.info.loading = false
+    tab.info.audible = false
+    tab.info.canGoBack = false
+    tab.info.canGoForward = false
+    this.destroyView(tab)
+    this.workspaceSwitchDir = 0
+    this.changed()
+    return true
   }
 
   // ---- the active page ----------------------------------------------------
 
   back(): void {
     const tab = this.active
-    const wc = tab?.view.webContents
-    if (!tab || !wc) return
+    const wc = tab?.view?.webContents
+    if (!tab || !wc || wc.isDestroyed()) return
     if (isInternalUrl(tab.info.url)) {
       // Leave the Orbit page for the web page underneath it, if there is one.
       const under = wc.getURL()
@@ -342,25 +679,27 @@ export class Tabs {
   }
 
   forward(): void {
-    const wc = this.active?.view.webContents
-    if (wc?.navigationHistory.canGoForward()) wc.navigationHistory.goForward()
+    const wc = this.active?.view?.webContents
+    if (wc && !wc.isDestroyed() && wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward()
   }
 
   reload(hard = false): void {
     const tab = this.active
     if (!tab) return
     if (tab.info.error) return this.navigate(tab.info.id, tab.info.error.url)
-    if (isInternalUrl(tab.info.url)) return
-    if (hard) tab.view.webContents.reloadIgnoringCache()
-    else tab.view.webContents.reload()
+    if (!tab.info.url || isInternalUrl(tab.info.url)) return
+    const view = this.ensureView(tab)
+    if (hard) view.webContents.reloadIgnoringCache()
+    else view.webContents.reload()
   }
 
   stop(): void {
-    this.active?.view.webContents.stop()
+    const wc = this.active?.view?.webContents
+    if (wc && !wc.isDestroyed()) wc.stop()
   }
 
   private zoom(delta: number | null, tab = this.active): void {
-    if (!tab || !this.showsPage(tab)) return
+    if (!tab || !this.showsPage(tab) || !tab.view || tab.view.webContents.isDestroyed()) return
     const wc = tab.view.webContents
     const next = delta === null ? 0 : clampZoomLevel(wc.getZoomLevel() + delta)
     wc.setZoomLevel(next)
@@ -373,7 +712,10 @@ export class Tabs {
   }
 
   setBounds(r: Rect | null): void {
-    this.bounds = r && r.width > 0 && r.height > 0 ? { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) } : null
+    this.bounds =
+      r && r.width > 0 && r.height > 0
+        ? { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) }
+        : null
     this.layout()
   }
 
@@ -384,8 +726,9 @@ export class Tabs {
 
   /** Puts the active tab's page in the window (or takes it out), at the place the UI gave. */
   private layout(): void {
+    if (this.win.isDestroyed()) return
     const tab = this.active
-    const want = tab && this.bounds && !this.overlayOpen && this.showsPage(tab) ? tab.view : null
+    const want = tab && tab.view && !tab.view.webContents.isDestroyed() && this.bounds && !this.overlayOpen && this.showsPage(tab) ? tab.view : null
     if (this.attached && this.attached !== want) {
       this.win.contentView.removeChildView(this.attached)
       this.attached = null
@@ -443,7 +786,9 @@ export class Tabs {
     const restoreWindow = leaveWindow && this.fullscreenByPage
     this.fullscreenTab = null
     this.fullscreenByPage = false
-    if (!tab.view.webContents.isDestroyed()) void tab.view.webContents.executeJavaScript('document.fullscreenElement && document.exitFullscreen()', true).catch(() => {})
+    if (tab.view && !tab.view.webContents.isDestroyed()) {
+      void tab.view.webContents.executeJavaScript('document.fullscreenElement && document.exitFullscreen()', true).catch(() => {})
+    }
     if (restoreWindow && this.win.isFullScreen()) this.win.setFullScreen(false)
     if (!this.win.isDestroyed()) this.win.webContents.send('page-fullscreen', false)
     this.layout()
@@ -459,58 +804,77 @@ export class Tabs {
   toggleMute(id: number): void {
     const tab = this.get(id)
     if (!tab) return
-    const wc = tab.view.webContents
-    wc.setAudioMuted(!wc.isAudioMuted())
-    tab.info.muted = wc.isAudioMuted()
-    tab.info.audible = wc.isCurrentlyAudible()
+    const wc = tab.view?.webContents
+    if (wc && !wc.isDestroyed()) {
+      wc.setAudioMuted(!wc.isAudioMuted())
+      tab.info.muted = wc.isAudioMuted()
+      tab.info.audible = wc.isCurrentlyAudible()
+    } else {
+      tab.info.muted = !tab.info.muted
+    }
     this.changed()
   }
 
   print(): void {
     const tab = this.active
-    if (!tab || !this.showsPage(tab)) return
+    if (!tab || !this.showsPage(tab) || !tab.view || tab.view.webContents.isDestroyed()) return
     tab.view.webContents.print({}, () => {})
   }
 
   duplicate(id: number): void {
     const tab = this.get(id)
     const url = tab?.pendingUrl ?? tab?.info.url
-    if (tab && url) this.create(url, { after: id, title: tab.info.title })
+    if (tab && url) this.create(url, { after: id, title: tab.info.title, workspaceId: tab.info.workspaceId })
   }
 
   closeOthers(id: number): void {
-    for (const t of [...this.tabs]) if (t.info.id !== id && !t.info.pinned) this.close(t.info.id)
+    const tab = this.get(id)
+    if (!tab) return
+    for (const t of [...this.workspaceTabs(tab.info.workspaceId)]) {
+      if (t.info.id !== id && !t.info.pinned) this.close(t.info.id)
+    }
   }
 
   /** The right-click menu for a tab in the sidebar. */
   tabMenu(id: number): void {
     const tab = this.get(id)
     if (!tab) return
-    const wc = tab.view.webContents
+    const wsTabs = this.workspaceTabs(tab.info.workspaceId)
+    const muted = tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents.isAudioMuted() : tab.info.muted
+    this.hooks.onMenuOpen?.(true)
     Menu.buildFromTemplate([
-      { label: 'New tab', click: () => this.create() },
+      { label: 'New tab', click: () => this.create('', { workspaceId: tab.info.workspaceId }) },
       { type: 'separator' },
       {
         label: 'Reload',
         enabled: this.showsPage(tab),
         click: () => {
-          const wasLazy = !!tab.pendingUrl
+          const wasDeferred = !!tab.pendingUrl || tab.info.sleeping
           this.activate(id)
-          if (!wasLazy) this.reload()
+          if (!wasDeferred) this.reload()
         }
       },
       { label: 'Duplicate', enabled: !!(tab.pendingUrl || tab.info.url), click: () => this.duplicate(id) },
       { label: tab.info.pinned ? 'Unpin tab' : 'Pin tab', click: () => this.togglePin(id) },
-      { label: wc.isAudioMuted() ? 'Unmute tab' : 'Mute tab', click: () => this.toggleMute(id) },
+      { label: muted ? 'Unmute tab' : 'Mute tab', click: () => this.toggleMute(id) },
+      { label: 'Sleep tab', enabled: this.canSleep(tab, true), click: () => this.sleepTab(id, true) },
       { type: 'separator' },
       { label: 'Close tab', accelerator: 'CmdOrCtrl+W', click: () => this.close(id) },
-      { label: 'Close other tabs', enabled: this.tabs.some((t) => t.info.id !== id && !t.info.pinned), click: () => this.closeOthers(id) },
+      {
+        label: 'Close other tabs',
+        enabled: wsTabs.some((t) => t.info.id !== id && !t.info.pinned),
+        click: () => this.closeOthers(id)
+      },
       { label: 'Reopen closed tab', accelerator: 'CmdOrCtrl+Shift+T', enabled: this.closed.length > 0, click: () => this.reopenClosed() }
-    ]).popup({ window: this.win })
+    ]).popup({
+      window: this.win,
+      callback: () => this.hooks.onMenuOpen?.(false)
+    })
   }
 
   focusOmnibox(): void {
     if (this.fullscreenTab) this.exitPageFullscreen(true)
+    this.hooks.onFocusOmnibox?.()
     this.win.webContents.focus()
     this.win.webContents.send('focus-omnibox')
   }
@@ -530,7 +894,7 @@ export class Tabs {
 
   find(text: string, opts?: { forward?: boolean; findNext?: boolean }): void {
     const tab = this.active
-    if (!tab || !this.showsPage(tab)) return
+    if (!tab || !this.showsPage(tab) || !tab.view || tab.view.webContents.isDestroyed()) return
     this.findOpen = true
     this.findQuery = text
     if (!text) {
@@ -549,12 +913,12 @@ export class Tabs {
     const wasOpen = this.findOpen || this.findQuery !== ''
     this.findOpen = false
     this.findQuery = ''
-    if (tab && !tab.view.webContents.isDestroyed()) {
+    if (tab?.view && !tab.view.webContents.isDestroyed()) {
       tab.view.webContents.stopFindInPage('clearSelection')
     }
     if (notifyUi) {
       if (wasOpen && !this.win.isDestroyed()) this.win.webContents.send('find:close')
-    } else if (tab && this.showsPage(tab)) {
+    } else if (tab && this.showsPage(tab) && tab.view && !tab.view.webContents.isDestroyed()) {
       tab.view.webContents.focus()
     }
   }
@@ -573,7 +937,26 @@ export class Tabs {
     const key = input.key.toLowerCase()
     const run = (f: () => void): true => (f(), true)
 
+    // Workspace shortcuts: Ctrl+Alt+1..9 and Ctrl+Alt+Left/Right
+    if (mod && input.alt && !input.shift) {
+      if (key === 'arrowleft') {
+        const next = nextWorkspaceId(this.workspaces, this.activeWorkspaceId, -1)
+        return run(() => next && this.switchWorkspace(next, -1))
+      }
+      if (key === 'arrowright') {
+        const next = nextWorkspaceId(this.workspaces, this.activeWorkspaceId, 1)
+        return run(() => next && this.switchWorkspace(next, 1))
+      }
+      const digitMatch = /^[1-9]$/.exec(key) ?? /^Digit([1-9])$/.exec(input.code)
+      if (digitMatch) {
+        const n = Number(digitMatch[1] ?? digitMatch[0])
+        const ws = workspaceAtShortcut(this.workspaces, n)
+        return run(() => ws && this.switchWorkspace(ws.id))
+      }
+    }
+
     if (mod && !input.alt) {
+      if (key === 's' && input.shift) return run(() => this.hooks.toggleCompactMode())
       if (key === 't' && input.shift) return run(() => this.reopenClosed())
       if (key === 't') return run(() => this.create())
       if (key === 'w') return run(() => this.activeId !== null && this.close(this.activeId))
@@ -592,8 +975,9 @@ export class Tabs {
       if (key === '-') return run(() => this.zoom(-ZOOM_STEP))
       if (key === '0') return run(() => this.zoom(null))
       if (/^[1-9]$/.test(key)) {
+        const wsTabs = this.workspaceTabs(this.activeWorkspaceId)
         const n = Number(key)
-        const tab = n === 9 ? this.tabs[this.tabs.length - 1] : this.tabs[n - 1]
+        const tab = n === 9 ? wsTabs[wsTabs.length - 1] : wsTabs[n - 1]
         return run(() => tab && this.activate(tab.info.id))
       }
     }
@@ -605,25 +989,29 @@ export class Tabs {
     if (mod && !input.alt && !input.shift && key === 'p') return run(() => this.print())
     if (key === 'f11' && !mod) return run(() => this.win.setFullScreen(!this.win.isFullScreen()))
     if (key === 'f5') return run(() => this.reload(mod))
-    if (key === 'f12') return run(() => this.active?.view.webContents.toggleDevTools())
+    if (key === 'f12') return run(() => this.active?.view?.webContents.toggleDevTools())
     if (key === 'browserback') return run(() => this.back())
     if (key === 'browserforward') return run(() => this.forward())
     return false
   }
 
   private cycle(dir: number): void {
-    if (!this.tabs.length) return
-    const i = this.tabs.findIndex((t) => t.info.id === this.activeId)
-    const next = this.tabs[(i + dir + this.tabs.length) % this.tabs.length]
+    const wsTabs = this.workspaceTabs(this.activeWorkspaceId)
+    if (!wsTabs.length) return
+    const i = wsTabs.findIndex((t) => t.info.id === this.activeId)
+    const next = wsTabs[(i + dir + wsTabs.length) % wsTabs.length]
     this.activate(next.info.id)
   }
 
   // ---- page events ----------------------------------------------------------
 
-  private wire(tab: Tab): void {
-    const wc = tab.view.webContents
+  private wire(tab: Tab, view: WebContentsView): void {
+    const wc = view.webContents
     const info = tab.info
+    const isCurrent = (): boolean => tab.view === view && !wc.isDestroyed()
+
     const sync = (): void => {
+      if (!isCurrent()) return
       const url = wc.getURL()
       // An Orbit page sits on top of whatever the tab had; the old page can't take its place.
       if (isInternalUrl(info.url)) return this.changed()
@@ -638,6 +1026,7 @@ export class Tabs {
       if (this.shortcut(input)) e.preventDefault()
     })
     wc.on('zoom-changed', (_e, direction) => {
+      if (!isCurrent()) return
       this.zoom(direction === 'in' ? ZOOM_STEP : -ZOOM_STEP, tab)
     })
 
@@ -662,17 +1051,33 @@ export class Tabs {
       }
     })
 
-    // Links that open a new tab become a tab here. Real pop-ups (window.open with a size, used by
-    // "Sign in with ..." buttons) stay pop-ups, so the page that opened them can hear back.
+    // Links that open a new tab become a tab in the same workspace. Real pop-ups stay pop-ups
+    // and inherit the workspace's session partition and security baseline.
     wc.setWindowOpenHandler(({ url, disposition }) => {
       if (!isAllowedUrl(url)) {
         if (parseExternalAppUrl(url)) this.hooks.externalApp(info.id, wc.getURL(), url)
         return { action: 'deny' }
       }
       if (disposition === 'new-window') {
-        return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true, width: 520, height: 680 } }
+        const partition = this.partitionFor(info.workspaceId)
+        this.hooks.ensureSession(partition)
+        return {
+          action: 'allow',
+          overrideBrowserWindowOptions: {
+            autoHideMenuBar: true,
+            width: 520,
+            height: 680,
+            webPreferences: {
+              partition,
+              sandbox: true,
+              contextIsolation: true,
+              nodeIntegration: false,
+              webSecurity: true
+            }
+          }
+        }
       }
-      this.create(url, { activate: disposition !== 'background-tab', after: info.id })
+      this.create(url, { activate: disposition !== 'background-tab', after: info.id, workspaceId: info.workspaceId })
       return { action: 'deny' }
     })
     wc.on('did-create-window', (popup) => {
@@ -690,13 +1095,14 @@ export class Tabs {
         }
       })
       popup.webContents.setWindowOpenHandler(({ url }) => {
-        if (isAllowedUrl(url)) this.create(url, { after: info.id })
+        if (isAllowedUrl(url)) this.create(url, { after: info.id, workspaceId: info.workspaceId })
         else if (parseExternalAppUrl(url)) this.hooks.externalApp(info.id, popup.webContents.getURL() || wc.getURL(), url)
         return { action: 'deny' }
       })
     })
 
     wc.on('did-start-loading', () => {
+      if (!isCurrent()) return
       info.loading = true
       if (info.error) {
         info.error = undefined
@@ -705,10 +1111,12 @@ export class Tabs {
       this.changed()
     })
     wc.on('did-stop-loading', () => {
+      if (!isCurrent()) return
       info.loading = false
       sync()
     })
     wc.on('did-start-navigation', (details) => {
+      if (!isCurrent()) return
       if (details.isMainFrame && !details.isSameDocument) {
         info.favicon = undefined
         // A question from the page you're leaving is answered no.
@@ -717,6 +1125,7 @@ export class Tabs {
       }
     })
     wc.on('found-in-page', (_e, result) => {
+      if (!isCurrent()) return
       if (info.id !== this.activeId || !this.findOpen || !this.findQuery) return
       if (!this.win.isDestroyed()) {
         this.win.webContents.send('find:result', {
@@ -727,25 +1136,30 @@ export class Tabs {
       }
     })
     wc.on('did-navigate', (_e, url) => {
+      if (!isCurrent()) return
       sync()
       // Pages that answered (even with 404) count as a visit, as in Chrome; failed loads don't.
       this.hooks.visit(url, wc.getTitle(), !!tab.typed)
       tab.typed = false
     })
     wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
+      if (!isCurrent()) return
       sync()
       if (isMainFrame) this.hooks.visit(url, wc.getTitle(), false)
     })
     wc.on('page-title-updated', (_e, title) => {
+      if (!isCurrent()) return
       info.title = title
       this.hooks.title(wc.getURL(), title)
       this.changed()
     })
     wc.on('page-favicon-updated', (_e, icons) => {
+      if (!isCurrent()) return
       info.favicon = icons.find((u) => /^(https?|data):/.test(u))
       this.changed()
     })
     wc.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
+      if (!isCurrent()) return
       // -3 is "aborted": you clicked something else, or stopped it.
       if (!isMainFrame || code === -3) return
       if (this.fullscreenTab === tab) this.exitPageFullscreen(true)
@@ -757,6 +1171,7 @@ export class Tabs {
       this.changed()
     })
     wc.on('render-process-gone', (_e, details) => {
+      if (!isCurrent()) return
       if (details.reason === 'clean-exit') return
       if (this.fullscreenTab === tab) this.exitPageFullscreen(true)
       if (info.id === this.activeId) this.stopFind(true)
@@ -765,18 +1180,20 @@ export class Tabs {
       this.layout()
       this.changed()
     })
-    wc.on('context-menu', (_e, p) => this.contextMenu(tab, p))
-    wc.on('enter-html-full-screen', () => this.setPageFullscreen(tab, true))
-    wc.on('leave-html-full-screen', () => this.setPageFullscreen(tab, false))
+    wc.on('context-menu', (_e, p) => isCurrent() && this.contextMenu(tab, view, p))
+    wc.on('enter-html-full-screen', () => isCurrent() && this.setPageFullscreen(tab, true))
+    wc.on('leave-html-full-screen', () => isCurrent() && this.setPageFullscreen(tab, false))
     wc.on('audio-state-changed', (e) => {
+      if (!isCurrent()) return
       info.audible = e.audible
       info.muted = wc.isAudioMuted()
       this.changed()
     })
   }
 
-  private contextMenu(tab: Tab, p: Electron.ContextMenuParams): void {
-    const wc = tab.view.webContents
+  private contextMenu(tab: Tab, view: WebContentsView, p: Electron.ContextMenuParams): void {
+    const wc = view.webContents
+    const wsId = tab.info.workspaceId
     const items: Electron.MenuItemConstructorOptions[] = []
     const gap = (): void => {
       if (items.length && items[items.length - 1].type !== 'separator') items.push({ type: 'separator' })
@@ -789,14 +1206,14 @@ export class Tabs {
     }
     if (p.linkURL && isAllowedUrl(p.linkURL)) {
       items.push(
-        { label: 'Open link in new tab', click: () => this.create(p.linkURL, { activate: false, after: tab.info.id }) },
+        { label: 'Open link in new tab', click: () => this.create(p.linkURL, { activate: false, after: tab.info.id, workspaceId: wsId }) },
         { label: 'Copy link', click: () => clipboard.writeText(p.linkURL) }
       )
       gap()
     }
     if (p.mediaType === 'image' && isAllowedUrl(p.srcURL)) {
       items.push(
-        { label: 'Open image in new tab', click: () => this.create(p.srcURL, { activate: false, after: tab.info.id }) },
+        { label: 'Open image in new tab', click: () => this.create(p.srcURL, { activate: false, after: tab.info.id, workspaceId: wsId }) },
         { label: 'Copy image', click: () => wc.copyImageAt(p.x, p.y) },
         { label: 'Save image…', click: () => wc.downloadURL(p.srcURL) }
       )
@@ -808,7 +1225,10 @@ export class Tabs {
     } else if (p.selectionText.trim()) {
       const text = p.selectionText.trim()
       const short = text.length > 24 ? text.slice(0, 24) + '…' : text
-      items.push({ role: 'copy' }, { label: `Search for “${short}”`, click: () => this.create(buildSearchUrl(text, this.hooks.searchUrl()), { after: tab.info.id }) })
+      items.push(
+        { role: 'copy' },
+        { label: `Search for “${short}”`, click: () => this.create(buildSearchUrl(text, this.hooks.searchUrl()), { after: tab.info.id, workspaceId: wsId }) }
+      )
       gap()
     }
     if (!p.linkURL && !p.isEditable && !p.selectionText.trim()) {
@@ -824,7 +1244,11 @@ export class Tabs {
       gap()
     }
     items.push({ label: 'Inspect', click: () => wc.inspectElement(p.x, p.y) })
-    Menu.buildFromTemplate(items).popup({ window: this.win })
+    this.hooks.onMenuOpen?.(true)
+    Menu.buildFromTemplate(items).popup({
+      window: this.win,
+      callback: () => this.hooks.onMenuOpen?.(false)
+    })
   }
 
   // ---- telling the UI, and remembering ---------------------------------------
@@ -841,14 +1265,41 @@ export class Tabs {
     this.saveTimer = setTimeout(() => this.save(), 800)
   }
 
-  /** Writes the open tabs to disk, so they come back next time. */
+  dispose(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer)
+      this.saveTimer = null
+    }
+    if (this.sleepTimer) {
+      clearInterval(this.sleepTimer)
+      this.sleepTimer = null
+    }
+    for (const tab of this.tabs) {
+      this.destroyView(tab)
+    }
+  }
+
+  /** Writes workspaces and open tabs to disk, so they come back next time. */
   save(): void {
     if (this.saveTimer) clearTimeout(this.saveTimer)
     this.saveTimer = null
-    const kept = this.tabs.filter((t) => t.info.url || t.pendingUrl)
     const data: SavedSession = {
-      tabs: kept.map((t) => ({ url: t.pendingUrl ?? (t.info.error?.url || t.info.url), title: t.info.title, pinned: t.info.pinned })),
-      active: Math.max(0, kept.findIndex((t) => t.info.id === this.activeId))
+      version: 2,
+      activeWorkspaceId: this.activeWorkspaceId,
+      workspaces: this.workspaces.map((ws) => {
+        const wsTabs = this.workspaceTabs(ws.id)
+        const kept = wsTabs.filter((t) => t.info.url || t.pendingUrl)
+        const activeTabId = ws.id === this.activeWorkspaceId ? this.activeId : this.workspaceActiveTab.get(ws.id)
+        return {
+          ...ws,
+          tabs: kept.map((t) => ({
+            url: t.pendingUrl ?? (t.info.error?.url || t.info.url),
+            title: t.info.title,
+            pinned: t.info.pinned
+          })),
+          active: Math.max(0, kept.findIndex((t) => t.info.id === activeTabId))
+        }
+      })
     }
     try {
       mkdirSync(dirname(this.sessionFile), { recursive: true })
@@ -858,20 +1309,42 @@ export class Tabs {
     }
   }
 
-  /** Opens last time's tabs (without loading them yet), or one new tab. */
-  restore(): void {
-    let saved: SavedSession | null = null
+  /** Opens last time's workspaces and tabs (without loading them yet), or a clean new tab. */
+  restore(restoreTabs = true): void {
+    let raw: unknown = null
     try {
-      saved = JSON.parse(readFileSync(this.sessionFile, 'utf8')) as SavedSession
+      raw = JSON.parse(readFileSync(this.sessionFile, 'utf8')) as unknown
     } catch {
-      saved = null
+      raw = null
     }
-    const tabs = (saved?.tabs ?? []).filter((t) => typeof t.url === 'string' && (isAllowedUrl(t.url) || isInternalUrl(t.url)))
-    if (!tabs.length) {
-      this.create()
+    const saved = parseSavedSession(raw)
+    this.workspaces = saved.workspaces.map(({ tabs: _t, active: _a, ...info }) => info)
+    this.activeWorkspaceId = saved.activeWorkspaceId
+    this.workspaceSwitchDir = 0
+
+    for (const ws of this.workspaces) {
+      this.hooks.ensureSession(workspacePartition(ws))
+    }
+
+    if (!restoreTabs) {
+      this.create('', { workspaceId: this.activeWorkspaceId, activate: true })
       return
     }
-    const ids = tabs.map((t) => this.create(t.url, { activate: false, lazy: true, pinned: !!t.pinned, title: t.title }))
-    this.activate(ids[Math.min(saved?.active ?? 0, ids.length - 1)])
+
+    for (const ws of saved.workspaces) {
+      if (!ws.tabs.length) continue
+      const ids = ws.tabs.map((t) =>
+        this.create(t.url, { activate: false, lazy: true, pinned: t.pinned, title: t.title, workspaceId: ws.id })
+      )
+      const activeIdx = Math.max(0, Math.min(ws.active, ids.length - 1))
+      this.workspaceActiveTab.set(ws.id, ids[activeIdx])
+    }
+
+    const activeTabId = this.workspaceActiveTab.get(this.activeWorkspaceId)
+    if (activeTabId !== undefined) {
+      this.activate(activeTabId)
+    } else {
+      this.create('', { workspaceId: this.activeWorkspaceId, activate: true })
+    }
   }
 }
