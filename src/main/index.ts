@@ -127,6 +127,15 @@ on('bounds', (t, r: unknown) => {
 ipcMain.on('permission:answer', (e, id: unknown, allow: unknown) => {
   if (fromUi(e) && num(id)) perms?.answer(id, allow === true)
 })
+on('find:start', (t, text: unknown, opts: unknown) => {
+  if (!str(text)) return
+  const o = opts && typeof opts === 'object' ? (opts as { forward?: unknown; findNext?: unknown }) : undefined
+  t.find(text, {
+    forward: o?.forward === undefined ? true : o.forward === true,
+    findNext: o?.findNext === undefined ? true : o.findNext === true
+  })
+})
+on('find:stop', (t) => t.stopFind())
 
 nativeTheme.on('updated', () => {
   if (win && isWin) win.setTitleBarOverlay(overlay())

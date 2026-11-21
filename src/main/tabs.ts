@@ -34,6 +34,8 @@ export class Tabs {
   private closed: { url: string; title: string; pinned: boolean }[] = []
   private emitQueued = false
   private saveTimer: NodeJS.Timeout | null = null
+  private findOpen = false
+  private findQuery = ''
 
   /** Called when a tab closes or leaves its page, so its open permission questions can be dropped. */
   onTabGone: (id: number) => void = () => {}
@@ -105,6 +107,7 @@ export class Tabs {
   close(id: number): void {
     const i = this.tabs.findIndex((t) => t.info.id === id)
     if (i < 0) return
+    if (this.activeId === id) this.stopFind(true)
     const [tab] = this.tabs.splice(i, 1)
     if (tab.info.url) this.closed.push({ url: tab.info.url, title: tab.info.title, pinned: tab.info.pinned })
     if (this.closed.length > 25) this.closed.shift()
@@ -132,6 +135,7 @@ export class Tabs {
   activate(id: number): void {
     const tab = this.get(id)
     if (!tab) return
+    if (this.activeId !== null && this.activeId !== id) this.stopFind(true)
     this.activeId = id
     if (tab.pendingUrl) {
       const url = tab.pendingUrl
@@ -248,6 +252,49 @@ export class Tabs {
     this.win.webContents.send('focus-omnibox')
   }
 
+  openFind(): void {
+    if (!this.active || !this.showsPage(this.active)) return
+    this.findOpen = true
+    this.win.webContents.focus()
+    this.win.webContents.send('find:open')
+  }
+
+  find(text: string, opts?: { forward?: boolean; findNext?: boolean }): void {
+    const tab = this.active
+    if (!tab || !this.showsPage(tab)) return
+    this.findOpen = true
+    this.findQuery = text
+    if (!text) {
+      tab.view.webContents.stopFindInPage('clearSelection')
+      if (!this.win.isDestroyed()) this.win.webContents.send('find:result', { activeMatch: 0, matches: 0, finalUpdate: true })
+      return
+    }
+    tab.view.webContents.findInPage(text, {
+      forward: opts?.forward ?? true,
+      findNext: opts?.findNext ?? true
+    })
+  }
+
+  stopFind(notifyUi = false): void {
+    const tab = this.active
+    const wasOpen = this.findOpen || this.findQuery !== ''
+    this.findOpen = false
+    this.findQuery = ''
+    if (tab && !tab.view.webContents.isDestroyed()) {
+      tab.view.webContents.stopFindInPage('clearSelection')
+    }
+    if (notifyUi) {
+      if (wasOpen && !this.win.isDestroyed()) this.win.webContents.send('find:close')
+    } else if (tab && this.showsPage(tab)) {
+      tab.view.webContents.focus()
+    }
+  }
+
+  private findStep(forward: boolean): void {
+    if (this.findOpen && this.findQuery) this.find(this.findQuery, { forward, findNext: false })
+    else this.openFind()
+  }
+
   // ---- keyboard -------------------------------------------------------------
 
   /** Browser shortcuts, from the UI or from a page. True when one was used. */
@@ -262,6 +309,7 @@ export class Tabs {
       if (key === 't') return run(() => this.create())
       if (key === 'w') return run(() => this.activeId !== null && this.close(this.activeId))
       if (key === 'l') return run(() => this.focusOmnibox())
+      if (key === 'f') return run(() => this.openFind())
       if (key === 'r') return run(() => this.reload(input.shift))
       if (key === 'tab') return run(() => this.cycle(input.shift ? -1 : 1))
       if (key === 'pagedown') return run(() => this.cycle(1))
@@ -279,6 +327,7 @@ export class Tabs {
       if (key === 'arrowleft') return run(() => this.back())
       if (key === 'arrowright') return run(() => this.forward())
     }
+    if (key === 'f3' && !mod && !input.alt) return run(() => this.findStep(!input.shift))
     if (key === 'f5') return run(() => this.reload(mod))
     if (key === 'f12') return run(() => this.active?.view.webContents.toggleDevTools())
     if (key === 'browserback') return run(() => this.back())
@@ -359,6 +408,17 @@ export class Tabs {
         info.favicon = undefined
         // A question from the page you're leaving is answered no.
         this.onTabGone(info.id)
+        if (info.id === this.activeId) this.stopFind(true)
+      }
+    })
+    wc.on('found-in-page', (_e, result) => {
+      if (info.id !== this.activeId || !this.findOpen || !this.findQuery) return
+      if (!this.win.isDestroyed()) {
+        this.win.webContents.send('find:result', {
+          activeMatch: result.activeMatchOrdinal,
+          matches: result.matches,
+          finalUpdate: result.finalUpdate
+        })
       }
     })
     wc.on('did-navigate', sync)
@@ -374,6 +434,7 @@ export class Tabs {
     wc.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
       // -3 is "aborted": you clicked something else, or stopped it.
       if (!isMainFrame || code === -3) return
+      if (info.id === this.activeId) this.stopFind(true)
       info.loading = false
       info.error = { code, description, url }
       info.url = url
@@ -382,6 +443,7 @@ export class Tabs {
     })
     wc.on('render-process-gone', (_e, details) => {
       if (details.reason === 'clean-exit') return
+      if (info.id === this.activeId) this.stopFind(true)
       info.loading = false
       info.error = { code: -1, description: 'PAGE_CRASHED', url: info.url }
       this.layout()

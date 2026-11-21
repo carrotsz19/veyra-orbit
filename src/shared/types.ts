@@ -36,10 +36,20 @@ export interface Rect {
   height: number
 }
 
+/** Match counts reported by Chromium's find-in-page for the active tab. */
+export interface FindState {
+  activeMatch: number
+  matches: number
+  finalUpdate: boolean
+}
+
 export interface VeyraApi {
   onState(cb: (s: BrowserState) => void): () => void
   onFocusOmnibox(cb: () => void): () => void
   onPermission(cb: (asks: PermissionAsk[]) => void): () => void
+  onFindOpen(cb: () => void): () => void
+  onFindClose(cb: () => void): () => void
+  onFindResult(cb: (r: FindState) => void): () => void
   ready(): void
   newTab(input?: string): void
   closeTab(id: number): void
@@ -54,4 +64,6 @@ export interface VeyraApi {
   move(id: number, toIndex: number): void
   setBounds(r: Rect | null): void
   answerPermission(id: number, allow: boolean): void
+  find(text: string, opts?: { forward?: boolean; findNext?: boolean }): void
+  stopFind(): void
 }

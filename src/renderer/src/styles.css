@@ -403,6 +403,67 @@ html[data-platform='darwin'] .caption-space {
   gap: 6px;
 }
 
+/* ---- find in page ------------------------------------------------------- */
+.find {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 0 var(--gap) var(--gap) 0;
+  padding: 5px 6px 5px 10px;
+  border-radius: var(--r-control);
+  background: var(--bg-elevated);
+  box-shadow: var(--elev-1);
+  animation: perm-in var(--spring-bouncy-ms) var(--spring-bouncy);
+}
+.find-field {
+  flex: 1;
+  max-width: 340px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--fill-tertiary);
+  transition: box-shadow 0.2s var(--ease-out);
+}
+.find-field:focus-within {
+  background: var(--bg-grouped);
+  box-shadow: 0 0 0 2px var(--tint-soft);
+}
+.find-field.empty:focus-within {
+  box-shadow: 0 0 0 2px rgba(154, 106, 18, 0.25);
+}
+.find-icon {
+  flex: none;
+  color: var(--label-tertiary);
+}
+.find-field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  user-select: text;
+}
+.find-count {
+  flex: none;
+  font-size: 12px;
+  color: var(--label-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.find-count.empty {
+  color: var(--warning);
+}
+.find-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .btn {
   height: 30px;
   padding: 0 14px;
