@@ -4,6 +4,9 @@ All notable changes to Veyra Orbit are documented here.
 
 ## Unreleased
 
+- Chrome extensions (phase 1): install Manifest V3 extensions from the Chrome Web Store with a plain-English permission prompt before adding, pin buttons with live badges to the title bar or use the puzzle overflow menu, and manage installed extensions in Settings → Extensions (enable/disable, permissions, details, live memory readout, remove, and Developer mode for loading unpacked extensions). Extensions load lazily in isolated workspaces only when opened and never run in private workspaces.
+- Compact mode: dragging the revealed title bar now moves the window (with double-click to maximise/restore and screen-edge snapping), Windows minimise/maximise/close buttons now work inside the revealed compact title bar, tab drag-to-reorder keeps the sidebar open, and revealed panels no longer get stuck open when the pointer leaves.
+
 ## 26.11.4 — 2026-11-21
 
 - Compact mode no longer makes the page jump: the sidebar and title bar now slide in over the page while it stays where it is.

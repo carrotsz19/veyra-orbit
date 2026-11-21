@@ -64,8 +64,6 @@ const DNR_RESOURCE_TYPES = [
   'csp_report',
   'media',
   'websocket',
-  'webtransport',
-  'webbundle',
   'other'
 ]
 

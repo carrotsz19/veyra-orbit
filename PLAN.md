@@ -13,7 +13,7 @@ These are planned for, not surprises:
 
 | Gap | Plan |
 |---|---|
-| Chrome extensions | Partial support later (M3), through a community library. Some won't work. |
+| Chrome extensions | Phase 1 built through `electron-chrome-extensions` + Chrome Web Store (uBlock Origin Lite and Bitwarden verified). Some MV3 APIs (`sidePanel`, `offscreen`, `identity`, `commands` hotkeys) are unavailable in Electron 45. |
 | Netflix and other DRM video | Needs a Widevine-enabled Electron build (M3). May be limited to lower quality. |
 | Google sign-in in embedded browsers | Works via a narrow Firefox UA + stripped `Sec-CH-UA*` override on `accounts.google.com` only (see Site compatibility below). |
 | Safe Browsing | None built in. Add a blocklist later. |
@@ -74,7 +74,8 @@ These are planned for, not surprises:
 - **Study time per site** feeds into Stats
 
 ### M3: hardening
-- Extensions, DRM, passwords and autofill, a Safe Browsing-style blocklist, and a steady update schedule
+- [x] Chrome extensions (phase 1): Chrome Web Store installs with CRX3 signature check & plain-English permission prompt, toolbar buttons + puzzle overflow + popups, Settings → Extensions with live memory readout and Developer mode, internal DNR `orbit-compat` extension, lazy isolated-workspace loading, never loaded in private workspaces
+- [ ] DRM, passwords and autofill, a Safe Browsing-style blocklist, and a steady update schedule
 
 ## Veyra Study changes this depends on
 
@@ -97,7 +98,7 @@ These are planned for, not surprises:
 
 Tested in a scratch profile (`VEYRA_USERDATA` + `VEYRA_DOWNLOADS`) with no real account credentials:
 
-- **Google sign-in (`accounts.google.com`, tabs and `window.open` popups):** Previously rejected after entering an email (`This browser or app may not be secure`, `rrk=46`), even after adding `"Google Chrome"` to `Sec-CH-UA*` headers and `navigator.userAgentData.brands`. Google's sign-in checks for proprietary Google Chrome signals whenever a browser advertises Chrome. Fixed narrowly by using a current desktop Firefox UA and stripping `Sec-CH-UA*` headers for `accounts.google.com` only (both HTTP headers in `webRequest.onBeforeSendHeaders` and `navigator.userAgent` via CDP), while keeping consistent Chrome UA + Client Hints (`Google Chrome`, `Chromium`, `Not)A;Brand`) for all other sites. Verified in both tabs and sign-in popups that `accounts.google.com` now proceeds past the email step normally.
+- **Google sign-in (`accounts.google.com`, tabs and `window.open` popups):** Previously rejected after entering an email (`This browser or app may not be secure`, `rrk=46`), even after adding `"Google Chrome"` to `Sec-CH-UA*` headers and `navigator.userAgentData.brands`. Google's sign-in checks for proprietary Google Chrome signals whenever a browser advertises Chrome. Fixed narrowly by using a current desktop Firefox UA and stripping `Sec-CH-UA*` headers for `accounts.google.com` only (via Orbit's internal hidden DNR `orbit-compat` extension in persistent sessions so extension `declarativeNetRequest` stays active, via `webRequest.onBeforeSendHeaders` in private workspaces, and `navigator.userAgent` via CDP), while keeping consistent Chrome UA + Client Hints (`Google Chrome`, `Chromium`, `Not)A;Brand`) for all other sites. Verified in both tabs and sign-in popups that `accounts.google.com` proceeds past the email step normally. A brand-new profile may occasionally be rejected on the first one or two sign-in attempts; retrying works.
 - **Sign-in passkey auto-prompt (Google, Microsoft 365, GitHub):** Electron lacks WebAuthn conditional-UI autofill, so sign-in pages calling `navigator.credentials.get({ mediation: 'conditional' })` on load popped up a modal Windows Security dialog. Fixed via a tiny main-world script injected through `webContents.debugger` (`Page.addScriptToEvaluateOnNewDocument`) on tabs and popups that makes `PublicKeyCredential.isConditionalMediationAvailable()` resolve `false`, sets `conditionalGet`/`conditionalCreate` to `false` in `getClientCapabilities()`, and rejects conditional `credentials.get()` calls quietly with `NotAllowedError` while leaving explicit passkey clicks untouched. Verified DevTools (`openDevTools` / `closeDevTools`) coexists cleanly without detaching the debugger.
 - **YouTube (`youtube.com`):** Loads cleanly; 60fps video plays (`readyState === 4`, playback time advances) and HTML5 full screen enters and exits cleanly without leaving the UI stuck.
 - **Google Docs (`docs.google.com`) & Google Classroom (`classroom.google.com`):** Landing and sign-in redirects load cleanly with no unsupported-browser warnings (redirecting to `accounts.google.com` automatically switches to the Google auth compatibility rule).
@@ -131,11 +132,10 @@ Settings grows towards Vivaldi-level customisation, in Orbit's calm style.
   - site permissions, and asking before opening other apps
 - **Downloads:** folder, ask each time, auto-clear the list. Rules per file type later.
 - **Passwords & autofill:** saved passwords using Windows encryption. Addresses and cards later.
-- **Extensions:**
-  - Chrome extensions through a community Electron library: turn each one on or off, see its permissions, and show its toolbar button.
-  - uBlock Origin Lite and Bitwarden come first.
-  - Some extensions won't work. Installing from the Chrome Web Store takes extra work. A memory read-out for each extension keeps Orbit light.
-  - Planned for M3.
+- **Extensions:** (phase 1 done)
+  - Chrome extensions through `electron-chrome-extensions`: turn each one on or off, see its plain-English permissions, show its toolbar button or puzzle overflow menu, and install from the Chrome Web Store with CRX3 signature verification.
+  - uBlock Origin Lite and Bitwarden verified.
+  - Some MV3 APIs (`sidePanel`, `offscreen`, `identity`, `commands` hotkeys) aren't in Electron 45. A live memory read-out per extension and lazy loading in isolated workspaces keep Orbit light; extensions never load in private workspaces.
 - **Study** (the Veyra twist): Veyra Study connection, workspaces as subjects, focus-mode blocked sites and how strict to be, logging time on study sites, the save-to-note target.
 - **Performance:** sleeping tabs, memory saver, hardware acceleration, preloading on hover, memory used by each tab.
 - **Accessibility:** minimum font size, focus outlines, contrast, larger click targets.

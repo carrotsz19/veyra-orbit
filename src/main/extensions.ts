@@ -196,6 +196,8 @@ const WEBSTORE_IPC_REGISTERED = Symbol('orbitWebstoreIpcRegistered')
 function resolvePreloadFile(filename: string): string {
   const bundled = resolve(__dirname, '../preload', filename)
   if (existsSync(bundled)) return bundled
+  const outFallback = resolve(process.cwd(), 'out/preload', filename)
+  if (existsSync(outFallback)) return outFallback
   if (filename === 'chrome-extension-api.preload.js') {
     const mod = resolve(process.cwd(), 'node_modules/electron-chrome-extensions/dist', filename)
     if (existsSync(mod)) return mod
@@ -556,17 +558,20 @@ export class ExtensionManager {
 
     // Ensure the bundled chrome-extension-api preload, then Orbit's browser<-chrome mirror, then hardened Web Store preload are registered in order.
     if (typeof sess.registerPreloadScript === 'function') {
-      if (existsSync(ecePreload)) {
-        sess.registerPreloadScript({ id: 'crx-mv2-preload', type: 'frame', filePath: ecePreload })
-        sess.registerPreloadScript({ id: 'crx-mv3-preload', type: 'service-worker', filePath: ecePreload })
+      const registerOrReplace = (id: string, type: 'frame' | 'service-worker', filePath: string): void => {
+        if (!existsSync(filePath)) return
+        try {
+          sess.unregisterPreloadScript(id)
+        } catch {
+          /* not yet registered */
+        }
+        sess.registerPreloadScript({ id, type, filePath })
       }
-      if (existsSync(compatPreload)) {
-        sess.registerPreloadScript({ id: 'orbit-ext-compat-frame', type: 'frame', filePath: compatPreload })
-        sess.registerPreloadScript({ id: 'orbit-ext-compat-sw', type: 'service-worker', filePath: compatPreload })
-      }
-      if (existsSync(webstorePreload)) {
-        sess.registerPreloadScript({ id: 'orbit-webstore-frame', type: 'frame', filePath: webstorePreload })
-      }
+      registerOrReplace('crx-mv2-preload', 'frame', ecePreload)
+      registerOrReplace('crx-mv3-preload', 'service-worker', ecePreload)
+      registerOrReplace('orbit-ext-compat-frame', 'frame', compatPreload)
+      registerOrReplace('orbit-ext-compat-sw', 'service-worker', compatPreload)
+      registerOrReplace('orbit-webstore-frame', 'frame', webstorePreload)
     }
 
     webStoreManagers.set(sess, this)
