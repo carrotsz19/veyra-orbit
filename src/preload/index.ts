@@ -38,7 +38,21 @@ const api: VeyraApi = {
   cancelDownload: (id) => ipcRenderer.send('download:cancel', id),
   openDownload: (id) => ipcRenderer.send('download:open', id),
   showDownload: (id) => ipcRenderer.send('download:show', id),
-  clearFinishedDownloads: () => ipcRenderer.send('download:clear')
+  clearFinishedDownloads: () => ipcRenderer.send('download:clear'),
+  suggest: (input) => ipcRenderer.invoke('suggest', input),
+  overlay: async (open) => {
+    const shot = (await ipcRenderer.invoke('overlay', open)) as string | null
+    return shot
+  },
+  history: (query, before) => ipcRenderer.invoke('history:list', query, before),
+  deleteHistory: (id) => void ipcRenderer.invoke('history:delete', id),
+  clearHistory: (msAgo) => ipcRenderer.invoke('history:clear', msAgo),
+  bookmarks: () => ipcRenderer.invoke('bookmarks:list'),
+  toggleBookmark: () => ipcRenderer.send('bookmark:toggle'),
+  removeBookmark: (url) => ipcRenderer.invoke('bookmark:remove', url),
+  renameBookmark: (url, title) => ipcRenderer.invoke('bookmark:rename', url, title),
+  onDataChanged: (cb) => listen<void>('data-changed', () => cb()),
+  hidePageForOverlay: () => ipcRenderer.send('overlay:hide')
 }
 
 contextBridge.exposeInMainWorld('veyra', api)

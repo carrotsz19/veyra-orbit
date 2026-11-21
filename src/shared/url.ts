@@ -18,10 +18,26 @@ export function isAllowedUrl(url: string): boolean {
   return url === 'about:blank'
 }
 
+/**
+ * Veyra Orbit's own pages (history, bookmarks). The UI draws them; no web page can open them,
+ * and isAllowedUrl() stays false for them so a page can never navigate to one.
+ */
+export const INTERNAL_PAGES = {
+  'orbit://history': 'History',
+  'orbit://bookmarks': 'Bookmarks'
+} as const
+export type InternalUrl = keyof typeof INTERNAL_PAGES
+
+export function isInternalUrl(url: string): url is InternalUrl {
+  return Object.prototype.hasOwnProperty.call(INTERNAL_PAGES, url)
+}
+
 /** Turns address bar input into a URL to load. Empty input gives null. */
 export function toUrl(input: string): string | null {
   const text = input.trim()
   if (!text) return null
+  const internal = text.toLowerCase().replace(/\/$/, '')
+  if (isInternalUrl(internal)) return internal
   if (!/\s/.test(text)) {
     const host = HOSTLIKE.exec(text)
     if (host) {
@@ -37,6 +53,7 @@ export function toUrl(input: string): string | null {
 /** The address as shown when you're not editing it: no https://, no www., no lone trailing slash. */
 export function displayUrl(url: string): string {
   if (!url) return ''
+  if (isInternalUrl(url)) return url
   try {
     const u = new URL(url)
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return url

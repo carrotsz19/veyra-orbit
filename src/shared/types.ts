@@ -11,6 +11,8 @@ export interface TabInfo {
   pinned: boolean
   /** Page zoom percentage, e.g. 100 for normal size. */
   zoom: number
+  /** Whether this page's address is bookmarked (the star in the address bar). */
+  bookmarked: boolean
   /** Set when the last load failed; the UI shows it in place of the page. */
   error?: { code: number; description: string; url: string }
 }
@@ -58,6 +60,22 @@ export interface DownloadInfo {
   startedAt: number
 }
 
+export interface HistoryEntry {
+  id: number
+  url: string
+  title: string
+  /** ms since 1970 */
+  time: number
+}
+
+export interface Bookmark {
+  url: string
+  title: string
+  created: number
+}
+
+export type { Suggestion } from './suggest'
+
 export interface VeyraApi {
   onState(cb: (s: BrowserState) => void): () => void
   onFocusOmnibox(cb: () => void): () => void
@@ -89,4 +107,22 @@ export interface VeyraApi {
   openDownload(id: number): void
   showDownload(id: number): void
   clearFinishedDownloads(): void
+  /** Address bar suggestions for what's typed. */
+  suggest(input: string): Promise<import('./suggest').Suggestion[]>
+  /**
+   * Floating UI (the suggestions list) has to sit above the page, which is a native view.
+   * Opening takes the page out and returns a picture of it to show in its place; closing puts it back.
+   */
+  overlay(open: boolean): Promise<string | null>
+  history(query: string, before: number | null): Promise<HistoryEntry[]>
+  deleteHistory(id: number): void
+  /** Clears history from this many ms ago up to now; 0 clears it all. */
+  clearHistory(sinceMsAgo: number): Promise<void>
+  bookmarks(): Promise<Bookmark[]>
+  toggleBookmark(): void
+  removeBookmark(url: string): Promise<void>
+  renameBookmark(url: string, title: string): Promise<void>
+  onDataChanged(cb: () => void): () => void
+  /** Sent once the UI shows the page's picture, so the real page can be taken out without a flash. */
+  hidePageForOverlay(): void
 }

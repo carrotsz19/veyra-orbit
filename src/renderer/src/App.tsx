@@ -6,6 +6,7 @@ import { StartPage } from './components/StartPage'
 import { ErrorPage } from './components/ErrorPage'
 import { PermissionBar } from './components/PermissionBar'
 import { FindBar } from './components/FindBar'
+import { BookmarksPage, HistoryPage } from './components/Library'
 
 const api = window.veyra
 
@@ -16,6 +17,8 @@ export function App(): React.JSX.Element {
   const [downloadsOpen, setDownloadsOpen] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
   const [findFocusTick, setFindFocusTick] = useState(0)
+  /** A picture of the page, shown in its place while floating UI (suggestions) is open over it. */
+  const [shot, setShot] = useState<string | null>(null)
   const pageRef = useRef<HTMLDivElement>(null)
   const maxDownloadId = useRef(0)
 
@@ -69,12 +72,15 @@ export function App(): React.JSX.Element {
     <div className="shell">
       <Sidebar state={state} downloads={downloads} downloadsOpen={downloadsOpen} onCloseDownloads={() => setDownloadsOpen(false)} />
       <main className="main">
-        <Toolbar tab={active} />
+        <Toolbar tab={active} onPageShot={setShot} />
         {tabAsks.length > 0 && <PermissionBar ask={tabAsks[0]} />}
         <FindBar open={findOpen} focusTick={findFocusTick} onClose={() => setFindOpen(false)} />
         <div className="page" ref={pageRef}>
           {active && !active.url && <StartPage tabId={active.id} />}
+          {active?.url === 'orbit://history' && <HistoryPage key={active.id} tabId={active.id} />}
+          {active?.url === 'orbit://bookmarks' && <BookmarksPage key={active.id} tabId={active.id} />}
           {active?.error && <ErrorPage tab={active} />}
+          {shot && <img className="page-shot" src={shot} alt="" />}
         </div>
       </main>
     </div>

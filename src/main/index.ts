@@ -1,9 +1,11 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, shell, type IpcMainEvent } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
 import { release } from 'node:os'
 import type { PermissionAsk, Rect } from '../shared/types'
 import { toUrl } from '../shared/url'
+import { suggest, type Candidate } from '../shared/suggest'
 import { Tabs } from './tabs'
+import { Store } from './store'
 import { Permissions, cleanUserAgent, hardenAll, webSession } from './security'
 import { Downloads } from './downloads'
 
@@ -33,6 +35,13 @@ let tabs: Tabs | null = null
 let perms: Permissions | null = null
 let downloads: Downloads | null = null
 let asks: PermissionAsk[] = []
+let store: Store | null = null
+
+/** History and bookmarks changed: the UI re-reads them (the Library page, the star). */
+function dataChanged(): void {
+  tabs?.refresh()
+  if (win && !win.isDestroyed()) win.webContents.send('data-changed')
+}
 
 function createWindow(): void {
   const w = new BrowserWindow({
@@ -60,7 +69,20 @@ function createWindow(): void {
   w.webContents.on('will-navigate', (e) => e.preventDefault())
   w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
 
-  tabs = new Tabs(w, join(app.getPath('userData'), 'session.json'))
+  store ??= new Store(join(app.getPath('userData'), 'orbit.db'))
+  const db = store
+  tabs = new Tabs(w, join(app.getPath('userData'), 'session.json'), {
+    visit: (url, title, typed) => {
+      db.visit(url, title, typed)
+      if (win) win.webContents.send('data-changed')
+    },
+    title: (url, title) => db.title(url, title),
+    isBookmarked: (url) => db.isBookmarked(url),
+    toggleBookmark: (url, title) => {
+      db.toggleBookmark(url, title)
+      dataChanged()
+    }
+  })
   const t = tabs
   w.webContents.on('before-input-event', (e, input) => {
     if (t.shortcut(input)) e.preventDefault()
@@ -101,7 +123,7 @@ function createWindow(): void {
 }
 
 /** Only the browser's own UI may call these; pages have no preload and can't reach them anyway. */
-function fromUi(e: IpcMainEvent): boolean {
+function fromUi(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
   return !!win && e.sender === win.webContents
 }
 
@@ -123,7 +145,8 @@ on('ready', () => {
 on('tab:new', (t, input?: unknown) => t.create((str(input) && toUrl(input)) || ''))
 on('tab:close', (t, id: unknown) => num(id) && t.close(id))
 on('tab:activate', (t, id: unknown) => num(id) && t.activate(id))
-on('tab:navigate', (t, id: unknown, input: unknown) => num(id) && str(input) && t.navigate(id, input))
+// Everything the UI navigates to was typed (address bar, start page), which history ranks higher.
+on('tab:navigate', (t, id: unknown, input: unknown) => num(id) && str(input) && t.navigate(id, input, true))
 on('tab:pin', (t, id: unknown) => num(id) && t.togglePin(id))
 on('tab:move', (t, id: unknown, to: unknown) => num(id) && num(to) && t.move(id, to))
 on('nav:back', (t) => t.back())
@@ -136,6 +159,45 @@ on('bounds', (t, r: unknown) => {
   if (rect === null) return t.setBounds(null)
   if (rect && num(rect.x) && num(rect.y) && num(rect.width) && num(rect.height)) t.setBounds(rect)
 })
+/** Calls from the UI that answer back. Pages can't reach these either. */
+function handle(channel: string, f: (...args: unknown[]) => unknown): void {
+  ipcMain.handle(channel, (e, ...args) => {
+    if (!fromUi(e)) throw new Error('not allowed')
+    return f(...args)
+  })
+}
+
+handle('suggest', (input) => {
+  if (!str(input) || !store || !tabs) return []
+  const open: Candidate[] = tabs
+    .state()
+    .tabs.filter((t) => /^https?:/.test(t.url))
+    .map((t) => ({ url: t.url, title: t.title, visits: 0, typed: 0, last: 0, bookmarked: t.bookmarked, tabId: t.id }))
+  return suggest(input, [...open, ...store.candidates(input)])
+})
+handle('overlay', (open) => tabs?.setOverlay(open === true) ?? null)
+on('overlay:hide', (t) => t.hidePageForOverlay())
+handle('history:list', (query, before) => store?.history(str(query) ? query : '', num(before) ? before : null) ?? [])
+handle('history:delete', (id) => {
+  if (num(id)) store?.deleteVisit(id)
+  dataChanged()
+})
+handle('history:clear', (msAgo) => {
+  if (!num(msAgo) || msAgo < 0) return
+  store?.clear(msAgo === 0 ? 0 : Date.now() - msAgo)
+  dataChanged()
+})
+handle('bookmarks:list', () => store?.bookmarks() ?? [])
+on('bookmark:toggle', (t) => t.toggleBookmark())
+handle('bookmark:remove', (url) => {
+  if (str(url)) store?.removeBookmark(url)
+  dataChanged()
+})
+handle('bookmark:rename', (url, title) => {
+  if (str(url) && str(title)) store?.renameBookmark(url, title)
+  dataChanged()
+})
+
 ipcMain.on('permission:answer', (e, id: unknown, allow: unknown) => {
   if (fromUi(e) && num(id)) perms?.answer(id, allow === true)
 })
@@ -188,6 +250,10 @@ app.on('web-contents-created', (_e, wc) => {
 })
 
 void app.whenReady().then(createWindow)
+app.on('will-quit', () => {
+  store?.close()
+  store = null
+})
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })

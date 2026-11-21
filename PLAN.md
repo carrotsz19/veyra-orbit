@@ -42,13 +42,13 @@ These are planned for, not surprises:
 - [x] Permission prompts
 - [x] Right-click menu (links, images, selection, spelling)
 - [x] Tabs restored on launch, loading only when opened
-- [ ] Address bar suggestions (history, open tabs). Needs a floating layer above the page view.
-- [ ] History
+- [x] Address bar suggestions (searches, open tabs, bookmarks, history). The page is swapped for a snapshot while they're open.
+- [x] History (orbit://history, Ctrl+H)
 - [ ] Downloads panel (for now, Electron's own Save dialog)
-- [ ] Bookmarks / saved pages
+- [x] Bookmarks (star, Ctrl+D, orbit://bookmarks)
 - [ ] Find in page (Ctrl+F)
 - [ ] Settings page (search engine, theme)
-- [ ] **Electron fuses, before the first installer anyone uses.** Turn on cookie encryption, turn off RunAsNode, NODE_OPTIONS and `--inspect`, and turn on only-load-from-asar and asar integrity. Without these, a packaged app stores cookies unencrypted on disk. Switching cookie encryption on later wipes existing sign-ins, so settle it before the first real build (electron-builder's fuse settings).
+- [x] Electron fuses: cookie encryption on, RunAsNode, NODE_OPTIONS and `--inspect` off, only-load-from-asar and asar integrity on (`build.electronFuses`). File-protocol privileges stay on until the UI moves to a custom protocol.
 - [ ] Dev/Prod channels and auto-update, like Veyra Study, each with its own token
 - [ ] Check Google sign-in, YouTube, Google Docs and Classroom
 

@@ -10,8 +10,9 @@
     "build": "npm run typecheck && electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "electron-vite preview",
-    "test": "node --test tests/url.test.ts tests/format.test.ts tests/downloads.test.ts",
-    "dist": "npm run build && electron-builder --win --publish never"
+    "test": "node --test tests/url.test.ts tests/suggest.test.ts tests/store.test.ts tests/format.test.ts tests/downloads.test.ts",
+    "dist": "npm run build && electron-builder --win --publish never",
+    "postinstall": "node node_modules/electron/install.js"
   },
   "build": {
     "appId": "app.veyra.orbit",
@@ -38,6 +39,14 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true
+    },
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
     }
   },
   "devDependencies": {
