@@ -58,7 +58,8 @@
         "repo": "veyra-orbit",
         "releaseType": "release"
       }
-    ]
+    ],
+    "artifactName": "Veyra-Orbit-Setup-${version}.${ext}"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
