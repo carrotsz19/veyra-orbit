@@ -4,6 +4,13 @@ All notable changes to Veyra Orbit are documented here.
 
 ## Unreleased
 
+- A new title bar like Veyra Study's: the Orbit mark and name, then File, Edit, View, History, Bookmarks, Workspaces and Help menus, with the address bar on the same row. Menus open above the page and work from the keyboard (Alt, arrows, Enter, Esc). In a narrow window they fold into one ☰ menu.
+- Choose Windows window buttons or Veyra's coloured dots in Settings → Appearance.
+- Workspaces: each has its own name, icon, colour and tabs. Switch at the bottom of the sidebar or with Ctrl+Alt+1–9. They share your sign-ins unless you choose "Keep sign-ins separate". Your tabs from before are in "Personal".
+- Compact mode (Ctrl+Shift+S): the page fills the window. Move to the left or top edge to bring back the sidebar or the title bar.
+- Sleeping tabs: tabs you haven't used for 30 minutes free their memory and reload when you open them. Change or turn it off in Settings → Performance.
+- In Settings, the highlighted section now follows where you are on the page.
+
 ## 26.11.2 — 2026-11-21
 
 - A new icon: a clay moon on its orbit. Veyra Orbit Dev has a dark tile with a clay corner, so you can tell the two apart.
