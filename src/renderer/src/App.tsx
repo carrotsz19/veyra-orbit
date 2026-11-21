@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { BrowserState, PermissionAsk, TabInfo } from '@shared/types'
+import type { BrowserState, DownloadInfo, PermissionAsk, TabInfo } from '@shared/types'
 import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
 import { StartPage } from './components/StartPage'
@@ -12,14 +12,28 @@ const api = window.veyra
 export function App(): React.JSX.Element {
   const [state, setState] = useState<BrowserState>({ tabs: [], activeId: null })
   const [asks, setAsks] = useState<PermissionAsk[]>([])
+  const [downloads, setDownloads] = useState<DownloadInfo[]>([])
+  const [downloadsOpen, setDownloadsOpen] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
   const [findFocusTick, setFindFocusTick] = useState(0)
   const pageRef = useRef<HTMLDivElement>(null)
+  const maxDownloadId = useRef(0)
 
   useEffect(() => {
     const offs = [
       api.onState(setState),
       api.onPermission(setAsks),
+      api.onDownloads((items) => {
+        setDownloads(items)
+        const newest = items.reduce((m, d) => Math.max(m, d.id), 0)
+        if (newest > maxDownloadId.current) {
+          maxDownloadId.current = newest
+          setDownloadsOpen(true)
+        } else if (items.length === 0) {
+          setDownloadsOpen(false)
+        }
+      }),
+      api.onToggleDownloads(() => setDownloadsOpen((v) => !v)),
       api.onFindOpen(() => {
         setFindOpen(true)
         setFindFocusTick((n) => n + 1)
@@ -53,7 +67,7 @@ export function App(): React.JSX.Element {
 
   return (
     <div className="shell">
-      <Sidebar state={state} />
+      <Sidebar state={state} downloads={downloads} downloadsOpen={downloadsOpen} onCloseDownloads={() => setDownloadsOpen(false)} />
       <main className="main">
         <Toolbar tab={active} />
         {tabAsks.length > 0 && <PermissionBar ask={tabAsks[0]} />}

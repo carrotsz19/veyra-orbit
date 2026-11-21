@@ -43,10 +43,27 @@ export interface FindState {
   finalUpdate: boolean
 }
 
+export type DownloadState = 'progressing' | 'paused' | 'completed' | 'cancelled' | 'interrupted'
+
+export interface DownloadInfo {
+  id: number
+  filename: string
+  savePath: string
+  url: string
+  state: DownloadState
+  receivedBytes: number
+  totalBytes: number
+  speed: number
+  canResume: boolean
+  startedAt: number
+}
+
 export interface VeyraApi {
   onState(cb: (s: BrowserState) => void): () => void
   onFocusOmnibox(cb: () => void): () => void
   onPermission(cb: (asks: PermissionAsk[]) => void): () => void
+  onDownloads(cb: (items: DownloadInfo[]) => void): () => void
+  onToggleDownloads(cb: () => void): () => void
   onFindOpen(cb: () => void): () => void
   onFindClose(cb: () => void): () => void
   onFindResult(cb: (r: FindState) => void): () => void
@@ -66,4 +83,10 @@ export interface VeyraApi {
   answerPermission(id: number, allow: boolean): void
   find(text: string, opts?: { forward?: boolean; findNext?: boolean }): void
   stopFind(): void
+  pauseDownload(id: number): void
+  resumeDownload(id: number): void
+  cancelDownload(id: number): void
+  openDownload(id: number): void
+  showDownload(id: number): void
+  clearFinishedDownloads(): void
 }

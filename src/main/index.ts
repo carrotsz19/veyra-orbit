@@ -5,6 +5,7 @@ import type { PermissionAsk, Rect } from '../shared/types'
 import { toUrl } from '../shared/url'
 import { Tabs } from './tabs'
 import { Permissions, cleanUserAgent, hardenAll, webSession } from './security'
+import { Downloads } from './downloads'
 
 const APP_NAME = 'Veyra Orbit'
 app.setName(APP_NAME)
@@ -30,6 +31,7 @@ function overlay(): Electron.TitleBarOverlayOptions {
 let win: BrowserWindow | null = null
 let tabs: Tabs | null = null
 let perms: Permissions | null = null
+let downloads: Downloads | null = null
 let asks: PermissionAsk[] = []
 
 function createWindow(): void {
@@ -75,9 +77,18 @@ function createWindow(): void {
   const p = perms
   t.onTabGone = (id) => p.dropTab(id)
 
+  downloads?.detach()
+  downloads = new Downloads(app.getPath('downloads'), (list) => {
+    if (!w.isDestroyed()) w.webContents.send('downloads', list)
+  })
+  downloads.attach(webSession())
+  const d = downloads
+
   w.once('ready-to-show', () => w.show())
   w.on('close', () => t.save())
   w.on('closed', () => {
+    d.detach()
+    if (downloads === d) downloads = null
     win = null
     tabs = null
   })
@@ -107,6 +118,7 @@ on('ready', () => {
   if (!win || !tabs) return
   win.webContents.send('state', tabs.state())
   win.webContents.send('permissions', asks)
+  win.webContents.send('downloads', downloads?.list() ?? [])
 })
 on('tab:new', (t, input?: unknown) => t.create((str(input) && toUrl(input)) || ''))
 on('tab:close', (t, id: unknown) => num(id) && t.close(id))
@@ -136,6 +148,24 @@ on('find:start', (t, text: unknown, opts: unknown) => {
   })
 })
 on('find:stop', (t) => t.stopFind())
+ipcMain.on('download:pause', (e, id: unknown) => {
+  if (fromUi(e) && num(id)) downloads?.pause(id)
+})
+ipcMain.on('download:resume', (e, id: unknown) => {
+  if (fromUi(e) && num(id)) downloads?.resume(id)
+})
+ipcMain.on('download:cancel', (e, id: unknown) => {
+  if (fromUi(e) && num(id)) downloads?.cancel(id)
+})
+ipcMain.on('download:open', (e, id: unknown) => {
+  if (fromUi(e) && num(id)) downloads?.open(id)
+})
+ipcMain.on('download:show', (e, id: unknown) => {
+  if (fromUi(e) && num(id)) downloads?.show(id)
+})
+ipcMain.on('download:clear', (e) => {
+  if (fromUi(e)) downloads?.clearFinished()
+})
 
 nativeTheme.on('updated', () => {
   if (win && isWin) win.setTitleBarOverlay(overlay())

@@ -252,6 +252,10 @@ export class Tabs {
     this.win.webContents.send('focus-omnibox')
   }
 
+  toggleDownloads(): void {
+    if (!this.win.isDestroyed()) this.win.webContents.send('downloads:toggle')
+  }
+
   openFind(): void {
     if (!this.active || !this.showsPage(this.active)) return
     this.findOpen = true
@@ -310,6 +314,7 @@ export class Tabs {
       if (key === 'w') return run(() => this.activeId !== null && this.close(this.activeId))
       if (key === 'l') return run(() => this.focusOmnibox())
       if (key === 'f') return run(() => this.openFind())
+      if (key === 'j') return run(() => this.toggleDownloads())
       if (key === 'r') return run(() => this.reload(input.shift))
       if (key === 'tab') return run(() => this.cycle(input.shift ? -1 : 1))
       if (key === 'pagedown') return run(() => this.cycle(1))

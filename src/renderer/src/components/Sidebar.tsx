@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Globe, LoaderCircle, Pin, PinOff, Plus, X } from 'lucide-react'
-import type { BrowserState, TabInfo } from '@shared/types'
+import type { BrowserState, DownloadInfo, TabInfo } from '@shared/types'
 import { displayUrl } from '@shared/url'
+import { Downloads } from './Downloads'
 
 const api = window.veyra
 
@@ -16,7 +17,14 @@ function Favicon({ tab }: { tab: TabInfo }): React.JSX.Element {
   return <Globe className="fav" size={16} strokeWidth={1.75} />
 }
 
-export function Sidebar({ state }: { state: BrowserState }): React.JSX.Element {
+interface Props {
+  state: BrowserState
+  downloads: DownloadInfo[]
+  downloadsOpen: boolean
+  onCloseDownloads: () => void
+}
+
+export function Sidebar({ state, downloads, downloadsOpen, onCloseDownloads }: Props): React.JSX.Element {
   const [dragId, setDragId] = useState<number | null>(null)
   const pinned = state.tabs.filter((t) => t.pinned)
   const open = state.tabs.filter((t) => !t.pinned)
@@ -89,6 +97,7 @@ export function Sidebar({ state }: { state: BrowserState }): React.JSX.Element {
           <kbd>Ctrl T</kbd>
         </button>
       </div>
+      {downloadsOpen && <Downloads items={downloads} onClose={onCloseDownloads} />}
     </aside>
   )
 }
