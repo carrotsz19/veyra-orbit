@@ -57,12 +57,13 @@ These are planned for, not surprises:
 - [x] Check Google sign-in, YouTube, Google Docs and Classroom
 
 ### M1: Zen-style layout in Veyra's look
-- Workspaces, each with its own session partition and accent colour
-- Split view (two or more pages side by side)
-- Compact mode (sidebar and toolbar hide until you hover)
-- Link preview pop-up ("peek")
-- Ctrl+K command palette, following Veyra Study's `Palette.tsx`
-- Floating layer for menus and the palette above pages
+- [x] Workspaces, each with its own tabs, pinned tabs, accent colour, and optional separate sign-in session (`persist:ws-<id>`)
+- [ ] Split view (two or more pages side by side)
+- [x] Compact mode (sidebar and toolbar hide until you move to the left or top edge, `Ctrl+Shift+S`)
+- [x] Sleeping tabs (idle background tabs discard to free memory and reload when opened)
+- [ ] Link preview pop-up ("peek")
+- [ ] Ctrl+K command palette, following Veyra Study's `Palette.tsx`
+- [ ] Floating layer for menus and the palette above pages
 
 ### M2: the study twist
 - Workspaces are Veyra Study **Subjects**
