@@ -127,6 +127,7 @@ export type { SplitGroup } from './split'
 export type { PaletteItem, PaletteMode, PaletteOpenState, PaletteResultsPayload } from './palette'
 export type { PeekAction, PeekState } from './peek'
 export type { InternalUrl } from './url'
+export type { ImportBrowserId, ImportProfile, ImportRequest, ImportResult, ImportStatus } from './importer'
 
 export type CompactPinKind = 'omnibox' | 'sidebar'
 export type CompactEdgeKind = 'sidebar' | 'toolbar'
@@ -251,6 +252,7 @@ export interface VeyraApi {
   swapSplit(groupId: string): void
   switchWorkspace(id: string): void
   createWorkspace(input: import('./workspaces').WorkspaceCreateInput): Promise<import('./workspaces').WorkspaceInfo | null>
+  createPrivateWorkspace(): Promise<import('./workspaces').WorkspaceInfo | null>
   updateWorkspace(id: string, patch: import('./workspaces').WorkspaceUpdateInput): Promise<import('./workspaces').WorkspaceInfo | null>
   deleteWorkspace(id: string): Promise<boolean>
   onCompactState(cb: (s: import('./compact').CompactRevealState) => void): () => void
@@ -310,4 +312,7 @@ export interface VeyraApi {
   onOpenSettingsSection(cb: (sectionId: string) => void): () => void
   onNewWorkspaceRequest(cb: () => void): () => void
   menu: MenuBridgeApi
+  getImportStatus(): Promise<import('./importer').ImportStatus>
+  runImport(req: import('./importer').ImportRequest): Promise<import('./importer').ImportResult>
+  dismissImportPrompt(): Promise<void>
 }

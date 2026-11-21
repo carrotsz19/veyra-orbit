@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Menu as MenuIcon, RotateCw, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, EyeOff, Menu as MenuIcon, RotateCw, X } from 'lucide-react'
 import type {
   Bookmark,
   BrowserState,
@@ -175,7 +175,7 @@ export function TitleBar({
               hasError: !!tab.error
             }
           : null,
-        workspaces: state.workspaces.map((w) => ({ id: w.id, name: w.name })),
+        workspaces: state.workspaces.map((w) => ({ id: w.id, name: w.name, private: w.private })),
         activeWorkspaceId: state.activeWorkspaceId,
         compactMode: !!settings?.compactMode,
         isSplit: !!tab && state.splits.some((g) => g.tabIds.includes(tab.id)),
@@ -242,6 +242,15 @@ export function TitleBar({
         case 'file:new-workspace':
         case 'workspaces:new':
           onNewWorkspace()
+          return
+        case 'file:new-private-workspace':
+        case 'workspaces:new-private':
+          void api.createPrivateWorkspace()
+          return
+        case 'workspaces:close-private':
+          if (state.workspaces.find((w) => w.id === state.activeWorkspaceId)?.private) {
+            void api.deleteWorkspace(state.activeWorkspaceId)
+          }
           return
         case 'file:reopen-closed':
           api.reopenClosedTab()
@@ -339,7 +348,7 @@ export function TitleBar({
           return
       }
     },
-    [bookmarks, onNewWorkspace, onOpenSettingsSection, openUrlInTab, recentUrls, refreshLibraryData, tab]
+    [bookmarks, onNewWorkspace, onOpenSettingsSection, openUrlInTab, recentUrls, refreshLibraryData, state.activeWorkspaceId, state.workspaces, tab]
   )
 
   const liveRef = useRef({ openTarget, sections, runAction, collapsed })
@@ -613,6 +622,12 @@ export function TitleBar({
           onOpenChange={onOmniboxOpenChange}
           useOverlay={useOmniboxOverlay}
         />
+        {state.workspaces.find((w) => w.id === state.activeWorkspaceId)?.private && (
+          <span className="private-pill" title="Private workspace — history, cookies and site data are not saved">
+            <EyeOff size={12} aria-hidden />
+            <span>Private</span>
+          </span>
+        )}
         {tab && tab.zoom !== 100 && (
           <button
             type="button"

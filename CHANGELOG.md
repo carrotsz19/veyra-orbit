@@ -4,6 +4,9 @@ All notable changes to Veyra Orbit are documented here.
 
 ## Unreleased
 
+- Import bookmarks and the last 90 days of browsing history from Google Chrome, Microsoft Edge, or Brave in Settings → Import data (and offered once on first run on the start page). Nested bookmark folders are kept in titles as "Folder › Title", duplicates are skipped, and source browser files are never modified. Saved passwords are not imported yet.
+- Private workspaces (File → New private workspace, or Ctrl+Shift+N): browse in a separate in-memory workspace with a dark private accent and eye-off icon. History, cookies, site data, permissions and open tabs are never saved and are cleared when you close the private workspace or quit Orbit. You can still bookmark pages deliberately.
+
 ## 26.11.3 — 2026-11-21
 
 - A new title bar like Veyra Study's: the Orbit mark and name, then File, Edit, View, History, Bookmarks, Workspaces and Help menus, with the address bar on the same row. Menus open above the page and work from the keyboard (Alt, arrows, Enter, Esc). In a narrow window they fold into one ☰ menu.

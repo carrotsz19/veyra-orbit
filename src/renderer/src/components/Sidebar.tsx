@@ -6,6 +6,7 @@ import {
   Clock,
   Code,
   Compass,
+  EyeOff,
   FlaskConical,
   Globe,
   GraduationCap,
@@ -47,6 +48,9 @@ const ICON_COMPONENTS: Record<WorkspaceIconId, typeof Home> = {
 }
 
 function WorkspaceGlyph({ icon, size = 14 }: { icon: string; size?: number }): React.JSX.Element {
+  if (icon === 'eye-off') {
+    return <EyeOff size={size} strokeWidth={1.85} aria-hidden />
+  }
   if (isBuiltInWorkspaceIcon(icon)) {
     const Icon = ICON_COMPONENTS[icon]
     return <Icon size={size} strokeWidth={1.85} aria-hidden />
@@ -249,20 +253,32 @@ export function Sidebar({
           <span className="ws-head-name" title={activeWorkspace.name}>
             {activeWorkspace.name}
           </span>
-          {activeWorkspace.isolated && (
+          {activeWorkspace.isolated && !activeWorkspace.private && (
             <span className="ws-head-lock" title="Separate sign-ins & cookies">
               <Lock size={11} aria-hidden />
             </span>
           )}
-          <button
-            type="button"
-            className="ws-head-edit"
-            aria-label={`Edit ${activeWorkspace.name} workspace`}
-            title="Edit workspace"
-            onClick={() => openEditEditor(activeWorkspace)}
-          >
-            <Pencil size={12} />
-          </button>
+          {activeWorkspace.private ? (
+            <button
+              type="button"
+              className="ws-head-close"
+              aria-label={`Close ${activeWorkspace.name} workspace and clear data`}
+              title="Close private workspace and clear data"
+              onClick={() => void api.deleteWorkspace(activeWorkspace.id)}
+            >
+              <X size={13} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="ws-head-edit"
+              aria-label={`Edit ${activeWorkspace.name} workspace`}
+              title="Edit workspace"
+              onClick={() => openEditEditor(activeWorkspace)}
+            >
+              <Pencil size={12} />
+            </button>
+          )}
         </div>
       )}
 
@@ -592,7 +608,7 @@ export function Sidebar({
             const isActive = ws.id === state.activeWorkspaceId
             const count = state.tabCounts[ws.id] ?? 0
             const shortcutHint = idx < 9 ? ` · Ctrl+Alt+${idx + 1}` : ''
-            const isoHint = ws.isolated ? ' · Separate sign-ins' : ''
+            const isoHint = ws.private ? ' · Private (not saved)' : ws.isolated ? ' · Separate sign-ins' : ''
             return (
               <button
                 key={ws.id}
@@ -601,16 +617,16 @@ export function Sidebar({
                 aria-selected={isActive}
                 aria-label={ws.name}
                 data-accent={ws.accent}
-                className={`ws-dot ${isActive ? 'on' : ''}`}
-                title={`${ws.name} (${count} ${count === 1 ? 'tab' : 'tabs'})${shortcutHint}${isoHint}\nRight-click to edit`}
+                className={`ws-dot ${isActive ? 'on' : ''} ${ws.private ? 'private' : ''}`}
+                title={`${ws.name} (${count} ${count === 1 ? 'tab' : 'tabs'})${shortcutHint}${isoHint}${ws.private ? '' : '\nRight-click to edit'}`}
                 onClick={() => api.switchWorkspace(ws.id)}
                 onContextMenu={(e) => {
                   e.preventDefault()
-                  openEditEditor(ws)
+                  if (!ws.private) openEditEditor(ws)
                 }}
               >
-                <WorkspaceGlyph icon={ws.icon} size={14} />
-                {ws.isolated && <span className="ws-dot-iso" aria-hidden />}
+                <WorkspaceGlyph icon={ws.private ? 'eye-off' : ws.icon} size={14} />
+                {ws.isolated && !ws.private && <span className="ws-dot-iso" aria-hidden />}
               </button>
             )
           })}

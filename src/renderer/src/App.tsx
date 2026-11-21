@@ -13,6 +13,7 @@ import type {
 import { DEFAULT_SPLIT_RATIO, computeSplitLayout, findSplitGroup, ratioFromPointer } from '@shared/split'
 import './library.css'
 import './settings.css'
+import './import-private.css'
 import { Sidebar } from './components/Sidebar'
 import { TitleBar } from './components/TitleBar'
 import { StartPage } from './components/StartPage'
@@ -39,9 +40,10 @@ function renderTabSurface(
   tab: TabInfo,
   settings: SettingsView | null,
   update: UpdateState | null,
-  shot?: string
+  shot?: string,
+  isPrivate = false
 ): React.JSX.Element | null {
-  if (!tab.url) return <StartPage tabId={tab.id} />
+  if (!tab.url) return <StartPage tabId={tab.id} isPrivate={isPrivate} />
   if (tab.url === 'orbit://history') return <HistoryPage key={tab.id} tabId={tab.id} />
   if (tab.url === 'orbit://bookmarks') return <BookmarksPage key={tab.id} tabId={tab.id} />
   if (tab.url === 'orbit://settings') return <SettingsPage key={tab.id} settings={settings} update={update} />
@@ -267,6 +269,7 @@ export function App(): React.JSX.Element {
     <div
       className={`shell ${pageFullscreen ? 'fullscreen' : ''} ${compactClasses}`}
       data-ws-accent={activeWorkspace?.accent ?? 'clay'}
+      data-ws-private={activeWorkspace?.private ? 'true' : undefined}
     >
       {compact.enabled && !pageFullscreen && (
         <>
@@ -343,7 +346,7 @@ export function App(): React.JSX.Element {
                       if (!focused) api.activate(pane.id)
                     }}
                   >
-                    <div className="split-pane-inner">{renderTabSurface(pane, settings, update, shots?.[pane.id])}</div>
+                    <div className="split-pane-inner">{renderTabSurface(pane, settings, update, shots?.[pane.id], !!activeWorkspace?.private)}</div>
                   </div>
                 )
               })}
@@ -369,7 +372,7 @@ export function App(): React.JSX.Element {
               ))}
             </>
           ) : (
-            active && renderTabSurface(active, settings, update, shots?.[active.id])
+            active && renderTabSurface(active, settings, update, shots?.[active.id], !!activeWorkspace?.private)
           )}
 
           {dragTabId !== null && dropSide && (

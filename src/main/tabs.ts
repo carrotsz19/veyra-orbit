@@ -11,7 +11,9 @@ import { INTERNAL_PAGES, buildSearchUrl, isAllowedUrl, isInternalUrl, toUrl } fr
 import { isSafeSubframeUrl, parseExternalAppUrl } from '../shared/external'
 import { clampZoomLevel, zoomPercent } from '../shared/format'
 import {
+  buildSavedSession,
   createDefaultWorkspace,
+  createPrivateWorkspaceEntry,
   createWorkspaceEntry,
   deleteWorkspaceEntry,
   nextWorkspaceId,
@@ -19,7 +21,6 @@ import {
   updateWorkspaceEntry,
   workspaceAtShortcut,
   workspacePartition,
-  type SavedSession,
   type SavedSplitGroup
 } from '../shared/workspaces'
 import {
@@ -61,6 +62,8 @@ export interface TabHooks {
   externalApp(tabId: number, pageUrl: string, targetUrl: string): void
   /** Ensures a session partition has the full security, compat and downloads setup. */
   ensureSession(partition: string): void
+  /** Clears storage, cache and listeners when an ephemeral private workspace closes. */
+  discardSession?(partition: string): void | Promise<void>
   /** True when a tab currently has an unanswered permission prompt. */
   hasPendingPermission(tabId: number): boolean
   /** Current sleeping-tabs policy. */
@@ -159,7 +162,7 @@ export class Tabs {
       activeWorkspaceId: this.activeWorkspaceId,
       tabCounts,
       workspaceSwitchDir: this.workspaceSwitchDir,
-      canReopenClosed: this.closed.length > 0
+      canReopenClosed: !this.isPrivateWorkspace(this.activeWorkspaceId) && this.closed.length > 0
     }
   }
 
@@ -205,6 +208,26 @@ export class Tabs {
   /** All tabs across all workspaces, for omnibox "Switch to tab" suggestions. */
   allTabs(): TabInfo[] {
     return this.tabs.map((t) => ({ ...t.info, bookmarked: !!t.info.url && this.hooks.isBookmarked(t.info.url) }))
+  }
+
+  /**
+   * Tabs eligible for omnibox "Switch to tab" suggestions.
+   * Private workspace tabs never leak into normal workspaces or other private workspaces.
+   */
+  suggestableTabs(): TabInfo[] {
+    return this.tabs
+      .filter((t) => !this.isPrivateWorkspace(t.info.workspaceId) || t.info.workspaceId === this.activeWorkspaceId)
+      .map((t) => ({ ...t.info, bookmarked: !!t.info.url && this.hooks.isBookmarked(t.info.url) }))
+  }
+
+  isPrivateWorkspace(wsId: string): boolean {
+    return !!this.workspaces.find((w) => w.id === wsId)?.private
+  }
+
+  isPrivateTab(tabId: number | null): boolean {
+    if (tabId === null) return false
+    const tab = this.get(tabId)
+    return !!tab && this.isPrivateWorkspace(tab.info.workspaceId)
   }
 
   /** All session partitions currently configured by workspaces. */
@@ -315,6 +338,14 @@ export class Tabs {
     return { ...created }
   }
 
+  createPrivateWorkspace(): WorkspaceInfo {
+    const { workspaces, created } = createPrivateWorkspaceEntry(this.workspaces)
+    this.workspaces = workspaces
+    this.hooks.ensureSession(workspacePartition(created))
+    this.switchWorkspace(created.id, 1)
+    return { ...created }
+  }
+
   updateWorkspace(id: string, patch: WorkspaceUpdateInput): WorkspaceInfo | null {
     const { workspaces, updated, isolationChanged } = updateWorkspaceEntry(this.workspaces, id, patch)
     if (!updated) return null
@@ -349,6 +380,7 @@ export class Tabs {
   }
 
   deleteWorkspace(id: string): boolean {
+    const existing = this.workspaces.find((w) => w.id === id)
     const { workspaces, deleted, nextActiveId } = deleteWorkspaceEntry(this.workspaces, id, this.activeWorkspaceId)
     if (!deleted) return false
 
@@ -369,6 +401,9 @@ export class Tabs {
     this.closed = this.closed.filter((c) => c.workspaceId !== id)
     this.workspaceActiveTab.delete(id)
     this.workspaces = workspaces
+    if (existing?.private) {
+      void this.hooks.discardSession?.(workspacePartition(existing))
+    }
 
     if (wasActive) {
       this.activeWorkspaceId = nextActiveId
@@ -465,7 +500,7 @@ export class Tabs {
     if (prevGroup) {
       this.setWorkspaceSplits(wsId, removeTabFromSplit(this.workspaceSplits(wsId), id))
     }
-    if (tab.info.url) {
+    if (tab.info.url && !this.isPrivateWorkspace(wsId)) {
       this.closed.push({ url: tab.info.url, title: tab.info.title, pinned: tab.info.pinned, workspaceId: wsId })
       if (this.closed.length > 25) this.closed.shift()
     }
@@ -497,6 +532,7 @@ export class Tabs {
   }
 
   reopenClosed(): void {
+    if (this.isPrivateWorkspace(this.activeWorkspaceId)) return
     let idx = -1
     for (let i = this.closed.length - 1; i >= 0; i--) {
       if (this.closed[i].workspaceId === this.activeWorkspaceId) {
@@ -1331,6 +1367,7 @@ export class Tabs {
     if (mod && !input.alt) {
       if (key === 'q' && !input.shift) return run(() => this.hooks.quit?.())
       if (key === 'k' && !input.shift) return run(() => this.hooks.onTogglePalette?.('command'))
+      if (key === 'n' && input.shift) return run(() => this.createPrivateWorkspace())
       if (key === 's' && input.shift) return run(() => this.hooks.toggleCompactMode())
       if (input.shift && (key === '\\' || key === '|' || input.code === 'Backslash')) return run(() => this.splitWithNext())
       if (key === 't' && input.shift) return run(() => this.reopenClosed())
@@ -1542,19 +1579,25 @@ export class Tabs {
     wc.on('did-navigate', (_e, url) => {
       if (!isCurrent()) return
       sync()
-      // Pages that answered (even with 404) count as a visit, as in Chrome; failed loads don't.
-      this.hooks.visit(url, wc.getTitle(), !!tab.typed)
+      // Pages that answered (even with 404) count as a visit, as in Chrome; failed loads and private workspaces don't.
+      if (!this.isPrivateWorkspace(info.workspaceId)) {
+        this.hooks.visit(url, wc.getTitle(), !!tab.typed)
+      }
       tab.typed = false
     })
     wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
       if (!isCurrent()) return
       sync()
-      if (isMainFrame) this.hooks.visit(url, wc.getTitle(), false)
+      if (isMainFrame && !this.isPrivateWorkspace(info.workspaceId)) {
+        this.hooks.visit(url, wc.getTitle(), false)
+      }
     })
     wc.on('page-title-updated', (_e, title) => {
       if (!isCurrent()) return
       info.title = title
-      this.hooks.title(wc.getURL(), title)
+      if (!this.isPrivateWorkspace(info.workspaceId)) {
+        this.hooks.title(wc.getURL(), title)
+      }
       this.changed()
     })
     wc.on('page-favicon-updated', (_e, icons) => {
@@ -1689,42 +1732,38 @@ export class Tabs {
     for (const tab of this.tabs) {
       this.destroyView(tab)
     }
+    for (const ws of this.workspaces) {
+      if (ws.private) void this.hooks.discardSession?.(workspacePartition(ws))
+    }
   }
 
-  /** Writes workspaces and open tabs to disk, so they come back next time. */
+  /** Writes non-private workspaces and open tabs to disk, so they come back next time. */
   save(): void {
     if (this.saveTimer) clearTimeout(this.saveTimer)
     this.saveTimer = null
-    const data: SavedSession = {
-      version: 2,
-      activeWorkspaceId: this.activeWorkspaceId,
-      workspaces: this.workspaces.map((ws) => {
-        const wsTabs = this.workspaceTabs(ws.id)
-        const kept = wsTabs.filter((t) => t.info.url || t.pendingUrl)
-        const activeTabId = ws.id === this.activeWorkspaceId ? this.activeId : this.workspaceActiveTab.get(ws.id)
-        const indexById = new Map<number, number>()
-        kept.forEach((t, idx) => indexById.set(t.info.id, idx))
-        const savedSplits: SavedSplitGroup[] = []
-        for (const group of this.workspaceSplits(ws.id)) {
-          const indices = group.tabIds
-            .map((tid) => indexById.get(tid))
-            .filter((idx): idx is number => idx !== undefined && !kept[idx].info.pinned)
-          if (indices.length >= 2) {
-            savedSplits.push({ tabs: indices, colRatio: group.colRatio, rowRatio: group.rowRatio })
-          }
-        }
-        return {
-          ...ws,
-          tabs: kept.map((t) => ({
-            url: t.pendingUrl ?? (t.info.error?.url || t.info.url),
-            title: t.info.title,
-            pinned: t.info.pinned
-          })),
-          active: Math.max(0, kept.findIndex((t) => t.info.id === activeTabId)),
-          ...(savedSplits.length ? { splits: savedSplits } : {})
-        }
-      })
-    }
+    const data = buildSavedSession(this.workspaces, this.activeWorkspaceId, (wsId) => {
+      const wsTabs = this.workspaceTabs(wsId)
+      const kept = wsTabs.filter((t) => t.info.url || t.pendingUrl)
+      const activeTabId = wsId === this.activeWorkspaceId ? this.activeId : this.workspaceActiveTab.get(wsId)
+      const indexById = new Map<number, number>()
+      kept.forEach((t, idx) => indexById.set(t.info.id, idx))
+      const splits: SavedSplitGroup[] = []
+      for (const group of this.workspaceSplits(wsId)) {
+        const indices = group.tabIds
+          .map((tid) => indexById.get(tid))
+          .filter((idx): idx is number => idx !== undefined && !kept[idx].info.pinned)
+        if (indices.length >= 2) splits.push({ tabs: indices, colRatio: group.colRatio, rowRatio: group.rowRatio })
+      }
+      return {
+        tabs: kept.map((t) => ({
+          url: t.pendingUrl ?? (t.info.error?.url || t.info.url),
+          title: t.info.title,
+          pinned: t.info.pinned
+        })),
+        active: Math.max(0, kept.findIndex((t) => t.info.id === activeTabId)),
+        splits
+      }
+    })
     try {
       mkdirSync(dirname(this.sessionFile), { recursive: true })
       writeFileSync(this.sessionFile, JSON.stringify(data))

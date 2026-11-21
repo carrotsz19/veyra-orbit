@@ -63,6 +63,7 @@ const api: VeyraApi = {
   swapSplit: (groupId) => ipcRenderer.send('split:swap', groupId),
   switchWorkspace: (id) => ipcRenderer.send('workspace:switch', id),
   createWorkspace: (input: WorkspaceCreateInput) => ipcRenderer.invoke('workspace:create', input),
+  createPrivateWorkspace: () => ipcRenderer.invoke('workspace:create-private'),
   updateWorkspace: (id: string, patch: WorkspaceUpdateInput) => ipcRenderer.invoke('workspace:update', id, patch),
   deleteWorkspace: (id: string) => ipcRenderer.invoke('workspace:delete', id),
   onCompactState: (cb) => listen<CompactRevealState>('compact:state', cb),
@@ -122,7 +123,10 @@ const api: VeyraApi = {
     onPicked: (cb) => listen<string>('menu:picked', cb),
     onClosed: (cb) => listen<void>('menu:closed', () => cb()),
     onStep: (cb) => listen<-1 | 1>('menu:step', cb)
-  }
+  },
+  getImportStatus: () => ipcRenderer.invoke('import:status'),
+  runImport: (req) => ipcRenderer.invoke('import:run', req),
+  dismissImportPrompt: () => ipcRenderer.invoke('import:dismiss-prompt')
 }
 
 contextBridge.exposeInMainWorld('veyra', api)

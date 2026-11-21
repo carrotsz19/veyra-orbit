@@ -34,6 +34,7 @@ import { attachSessionCompat } from './compat'
 import { Downloads } from './downloads'
 import { Updater } from './updater'
 import { CompactPanel, MenuPopup, PalettePopup, PeekPopup } from './floating'
+import { BrowserImporter } from './importer'
 
 const APP_NAME = __CHANNEL__ === 'dev' ? 'Veyra Orbit Dev' : 'Veyra Orbit'
 app.setName(APP_NAME)
@@ -80,6 +81,7 @@ let externalAsks: ExternalAppAsk[] = []
 let store: Store | null = null
 let settings: SettingsStore | null = null
 let updater: Updater | null = null
+let importer: BrowserImporter | null = null
 
 /** Compact mode runtime state for the active window. */
 let compactState: CompactRevealState = { enabled: false, sidebar: false, toolbar: false }
@@ -697,6 +699,7 @@ function createWindow(): void {
   w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
 
   store ??= new Store(join(app.getPath('userData'), 'orbit.db'))
+  importer ??= new BrowserImporter(join(app.getPath('userData'), 'import-state.json'))
   const db = store
 
   externalApps = new ExternalApps((list) => {
@@ -725,8 +728,9 @@ function createWindow(): void {
   }
 
   /**
-   * Single setup path for every web session partition (the shared persist:web partition and every
-   * isolated workspace persist:ws-<id> partition) so security, site compat and downloads never drift.
+   * Single setup path for every web session partition (the shared persist:web partition, every
+   * isolated workspace persist:ws-<id> partition, and every ephemeral private-ws-<id> partition)
+   * so security, site compat and downloads never drift.
    */
   const setupWebSession = (partition: string): Session => {
     // Without the permission handler a session falls back to Electron's default, which allows every
@@ -742,6 +746,23 @@ function createWindow(): void {
     d.attach(sess)
     sess.on('will-download', onDownload)
     return sess
+  }
+
+  /** Clears storage, caches and listeners when an ephemeral private workspace closes or Orbit quits. */
+  const discardWebSession = async (partition: string): Promise<void> => {
+    const sess = sessionForPartition(partition)
+    configuredSessions.delete(sess)
+    sess.off('will-download', onDownload)
+    d.detachSession(sess)
+    try {
+      await sess.clearStorageData()
+      await sess.clearCache()
+      await sess.clearAuthCache()
+      await sess.clearHostResolverCache()
+      await sess.closeAllConnections()
+    } catch {
+      /* session may already be tearing down during app quit */
+    }
   }
 
   // Reusable floating Link Preview ("Peek") window hosting a sandboxed WebContentsView.
@@ -780,6 +801,7 @@ function createWindow(): void {
     ensureSession: (partition) => {
       setupWebSession(partition)
     },
+    discardSession: (partition) => discardWebSession(partition),
     hasPendingPermission: (tabId) => perms?.hasPendingPermission(tabId) ?? false,
     sleepPolicy: () => {
       const cur = s.get()
@@ -887,7 +909,8 @@ function createWindow(): void {
     db,
     () => {
       if (!w.isDestroyed()) w.webContents.send('permissions:saved', perms?.listSaved() ?? [])
-    }
+    },
+    (tabId) => t.isPrivateTab(tabId)
   )
   const p = perms
   t.onTabGone = (id) => {
@@ -1351,6 +1374,10 @@ handleSurface('workspace:create', (input) => {
   return tabs.createWorkspace(req)
 })
 
+handle('workspace:create-private', () => {
+  return tabs?.createPrivateWorkspace() ?? null
+})
+
 handleSurface('workspace:update', (id, patch) => {
   if (!tabs || !str(id) || !patch || typeof patch !== 'object' || Array.isArray(patch)) return null
   const raw = patch as Record<string, unknown>
@@ -1370,7 +1397,7 @@ handleSurface('workspace:delete', (id) => {
 handleSurface('suggest', (input) => {
   if (!str(input) || !store || !tabs) return []
   const open: Candidate[] = tabs
-    .allTabs()
+    .suggestableTabs()
     .filter((t) => /^https?:/.test(t.url))
     .map((t) => ({ url: t.url, title: t.title, visits: 0, typed: 0, last: 0, bookmarked: t.bookmarked, tabId: t.id }))
   return suggest(input, [...open, ...store.candidates(input)], Date.now(), 7, settings?.searchUrl())
@@ -1491,6 +1518,44 @@ onSurface('download:clear', () => {
 handle('update:state', () => updater?.state() ?? null)
 handleSurface('update:check', () => updater?.check(true) ?? null)
 onSurface('update:install', () => updater?.install())
+
+handle('import:status', () => importer?.status() ?? { profiles: [], showFirstRunPrompt: false })
+handle('import:dismiss-prompt', () => importer?.dismissPrompt())
+handle('import:run', (raw) => {
+  if (!importer || !store || !raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {
+      ok: false,
+      browserName: '',
+      profileName: '',
+      bookmarksImported: 0,
+      bookmarksSkipped: 0,
+      historyImported: 0,
+      historySkipped: 0,
+      error: 'Invalid import request.'
+    }
+  }
+  const r = raw as Record<string, unknown>
+  if (!str(r.profileId)) {
+    return {
+      ok: false,
+      browserName: '',
+      profileName: '',
+      bookmarksImported: 0,
+      bookmarksSkipped: 0,
+      historyImported: 0,
+      historySkipped: 0,
+      error: 'Missing browser profile.'
+    }
+  }
+  const result = importer.runImport(
+    { profileId: r.profileId, bookmarks: r.bookmarks === true, history: r.history === true },
+    store
+  )
+  if (result.ok && (result.bookmarksImported > 0 || result.historyImported > 0)) {
+    dataChanged()
+  }
+  return result
+})
 
 nativeTheme.on('updated', () => {
   if (!win || win.isDestroyed()) return

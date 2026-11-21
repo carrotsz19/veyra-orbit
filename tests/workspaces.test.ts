@@ -2,10 +2,14 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   DEFAULT_WEB_PARTITION,
+  PRIVATE_WORKSPACE_ICON,
   WORKSPACE_ACCENTS,
+  buildSavedSession,
   createDefaultWorkspace,
+  createPrivateWorkspaceEntry,
   createWorkspaceEntry,
   deleteWorkspaceEntry,
+  isPrivatePartition,
   nextWorkspaceId,
   parseSavedSession,
   updateWorkspaceEntry,
@@ -191,4 +195,82 @@ test('parseSavedSession preserves valid per-workspace split groups and drops inv
   }
   const parsed = parseSavedSession(v2)
   assert.deepEqual(parsed.workspaces[0].splits, [{ tabs: [1, 2], colRatio: 0.62, rowRatio: 0.5 }])
+})
+
+test('private workspaces use unique non-persistent partitions and are excluded from session save and restore', () => {
+  const personal = createDefaultWorkspace()
+  const { workspaces: w2, created: p1 } = createPrivateWorkspaceEntry([personal], 'run1')
+  const { workspaces: w3, created: p2 } = createPrivateWorkspaceEntry(w2, 'run2')
+
+  assert.equal(p1.private, true)
+  assert.equal(p1.name, 'Private')
+  assert.equal(p1.icon, PRIVATE_WORKSPACE_ICON)
+  assert.equal(p2.name, 'Private 2')
+  assert.notEqual(p1.id, p2.id)
+
+  const part1 = workspacePartition(p1)
+  const part2 = workspacePartition(p2)
+  assert.equal(part1.startsWith('persist:'), false)
+  assert.equal(part2.startsWith('persist:'), false)
+  assert.equal(isPrivatePartition(part1), true)
+  assert.equal(isPrivatePartition(part2), true)
+  assert.notEqual(part1, part2)
+
+  // Cannot delete the last non-private workspace while only private workspaces remain.
+  const keepNormal = deleteWorkspaceEntry(w2, personal.id, p1.id)
+  assert.equal(keepNormal.deleted, false)
+
+  // Closing a private workspace succeeds and returns to the non-private workspace.
+  const closePriv = deleteWorkspaceEntry(w2, p1.id, p1.id)
+  assert.equal(closePriv.deleted, true)
+  assert.equal(closePriv.nextActiveId, personal.id)
+  assert.deepEqual(closePriv.workspaces.map((w) => w.id), [personal.id])
+
+  // buildSavedSession strips all private workspaces and falls back activeWorkspaceId when private was active.
+  const saved = buildSavedSession(w3, p2.id, (wsId) => ({
+    tabs: [{ url: `https://${wsId}.example/`, title: wsId, pinned: false }],
+    active: 0
+  }))
+  assert.equal(saved.activeWorkspaceId, personal.id)
+  assert.deepEqual(
+    saved.workspaces.map((w) => w.id),
+    [personal.id]
+  )
+  assert.equal(
+    saved.workspaces.some((w) => w.id === p1.id || w.id === p2.id),
+    false
+  )
+
+  // parseSavedSession also drops any private workspace entry defensively.
+  const restored = parseSavedSession({
+    version: 2,
+    activeWorkspaceId: p1.id,
+    workspaces: [
+      { ...personal, tabs: [{ url: 'https://normal.example/', title: 'Normal', pinned: false }], active: 0 },
+      { ...p1, tabs: [{ url: 'https://secret.example/', title: 'Secret', pinned: false }], active: 0 }
+    ]
+  })
+  assert.equal(restored.activeWorkspaceId, personal.id)
+  assert.deepEqual(
+    restored.workspaces.map((w) => w.id),
+    [personal.id]
+  )
+})
+
+test('saving keeps split groups for normal workspaces and still drops private ones', () => {
+  const personal = createDefaultWorkspace()
+  const { workspaces, created: priv } = createPrivateWorkspaceEntry([personal], 'run-split')
+  const saved = buildSavedSession(workspaces, personal.id, (wsId) => ({
+    tabs: [
+      { url: `https://${wsId}-a.example/`, title: 'A', pinned: false },
+      { url: `https://${wsId}-b.example/`, title: 'B', pinned: false }
+    ],
+    active: 0,
+    splits: [{ tabs: [0, 1], colRatio: 0.6, rowRatio: 0.5 }]
+  }))
+  assert.deepEqual(saved.workspaces.map((w) => w.id), [personal.id])
+  assert.equal(saved.workspaces.some((w) => w.id === priv.id), false)
+  assert.deepEqual(saved.workspaces[0].splits, [{ tabs: [0, 1], colRatio: 0.6, rowRatio: 0.5 }])
+  // Round trip through the loader keeps the split.
+  assert.deepEqual(parseSavedSession(saved).workspaces[0].splits, [{ tabs: [0, 1], colRatio: 0.6, rowRatio: 0.5 }])
 })

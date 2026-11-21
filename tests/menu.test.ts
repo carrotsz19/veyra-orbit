@@ -67,6 +67,7 @@ test('buildMenus produces all seven Orbit menus with shortcuts and checked/disab
   // File menu
   const file = byId.get('file')!
   assert.equal(file.find((i) => i.id === 'file:new-tab')?.keys, 'Ctrl+T')
+  assert.equal(file.find((i) => i.id === 'file:new-private-workspace')?.keys, 'Ctrl+Shift+N')
   assert.equal(file.find((i) => i.id === 'file:reopen-closed')?.disabled, false)
   assert.equal(file.find((i) => i.id === 'file:print')?.disabled, false)
   assert.equal(file.find((i) => i.id === 'file:quit')?.keys, 'Ctrl+Q')
@@ -116,6 +117,20 @@ test('buildMenus produces all seven Orbit menus with shortcuts and checked/disab
   assert.equal(workspaces.find((i) => i.id === 'workspaces:switch:study')?.checked, true)
   assert.equal(workspaces.find((i) => i.id === 'workspaces:switch:study')?.keys, 'Ctrl+Alt+2')
   assert.ok(workspaces.some((i) => i.id === 'workspaces:new'))
+  assert.equal(workspaces.find((i) => i.id === 'workspaces:new-private')?.keys, 'Ctrl+Shift+N')
+  assert.equal(workspaces.some((i) => i.id === 'workspaces:close-private'), false)
+
+  const privSections = buildMenus(
+    baseCtx({
+      workspaces: [
+        { id: 'personal', name: 'Personal' },
+        { id: 'private-1', name: 'Private', private: true }
+      ],
+      activeWorkspaceId: 'private-1'
+    })
+  )
+  const privWorkspaces = itemsOnly(privSections.find((s) => s.id === 'workspaces')!.items)
+  assert.equal(privWorkspaces.some((i) => i.id === 'workspaces:close-private'), true)
 
   // Help menu
   const help = byId.get('help')!
