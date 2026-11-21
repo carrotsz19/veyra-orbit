@@ -1,7 +1,7 @@
 # Veyra Orbit — Chrome Extension Support: Verified Research & Implementation Plan
 
 **Target runtime:** Electron `45.3.0` (Chromium `156.0.8078.96`)  
-**Research workspace & test harness:** `C:\Users\garre\AppData\Local\Temp\orbit-ext-research`  
+**Research workspace & test harness:** `%TEMP%\orbit-ext-research`  
 **Status legend:** Every technical claim below is explicitly tagged **[VERIFIED]** (empirically executed and observed in the Electron 45.3.0 throwaway test app) or **[UNVERIFIED]** (code-inspected, documented, or inferred without end-to-end execution).
 
 ---
@@ -37,7 +37,7 @@
 
 ## 2. Verified Findings from the Electron 45.3.0 Test App
 
-All test scripts and raw JSON logs are kept in `C:\Users\garre\AppData\Local\Temp\orbit-ext-research`:
+All test scripts and raw JSON logs are kept in `%TEMP%\orbit-ext-research`:
 - `test-core.js` → `result-core.json` (synthetic MV3 ext + no-perm ext + sandboxed `WebContentsView` + CDP + `<browser-action-list>` + `PopupView`)
 - `test-sw-diag.js` → `diag-{plain,with-ece,with-ece-and-wr}.{out,err}` (MV3 service worker boot diagnostics)
 - `test-real-extensions.js` → `result-real.json`, `test-real.err.log` (real uBlock Origin Lite `2026.1116.1650` + Bitwarden `2026.11.0` + Chrome Web Store + Omaha update check)
