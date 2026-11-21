@@ -41,6 +41,8 @@ export class Tabs {
   private activeId: number | null = null
   private nextId = 1
   private bounds: Rect | null = null
+  /** The tab whose page asked for full screen (a video, a slideshow); its page fills the window. */
+  private fullscreenTab: Tab | null = null
   private attached: WebContentsView | null = null
   private closed: { url: string; title: string; pinned: boolean }[] = []
   private emitQueued = false
@@ -89,7 +91,9 @@ export class Tabs {
         nodeIntegration: false,
         webSecurity: true,
         spellcheck: true,
-        safeDialogs: true
+        safeDialogs: true,
+        // Chromium's built-in PDF viewer.
+        plugins: true
       }
     })
     view.setBackgroundColor('#ffffffff')
@@ -110,7 +114,9 @@ export class Tabs {
         canGoForward: false,
         pinned: !!opts.pinned,
         bookmarked: false,
-        zoom: 100
+        zoom: 100,
+        audible: false,
+        muted: false
       }
     }
     this.wire(tab)
@@ -132,6 +138,11 @@ export class Tabs {
     const i = this.tabs.findIndex((t) => t.info.id === id)
     if (i < 0) return
     if (this.activeId === id) this.stopFind(true)
+    if (this.fullscreenTab?.info.id === id) {
+      this.fullscreenTab = null
+      if (this.win.isFullScreen()) this.win.setFullScreen(false)
+      this.win.webContents.send('page-fullscreen', false)
+    }
     const [tab] = this.tabs.splice(i, 1)
     if (tab.info.url) this.closed.push({ url: tab.info.url, title: tab.info.title, pinned: tab.info.pinned })
     if (this.closed.length > 25) this.closed.shift()
@@ -159,7 +170,10 @@ export class Tabs {
   activate(id: number): void {
     const tab = this.get(id)
     if (!tab) return
-    if (this.activeId !== null && this.activeId !== id) this.stopFind(true)
+    if (this.activeId !== null && this.activeId !== id) {
+      this.stopFind(true)
+      if (this.fullscreenTab) this.exitPageFullscreen()
+    }
     this.activeId = id
     if (tab.pendingUrl) {
       const url = tab.pendingUrl
@@ -369,8 +383,99 @@ export class Tabs {
         this.win.contentView.addChildView(want)
         this.attached = want
       }
-      want.setBounds(this.bounds)
+      if (this.fullscreenTab?.view === want) {
+        const [width, height] = this.win.getContentSize()
+        want.setBounds({ x: 0, y: 0, width, height })
+        this.radius(want, 0)
+      } else {
+        want.setBounds(this.bounds)
+        this.radius(want, 10)
+      }
     }
+  }
+
+  private radius(view: WebContentsView, r: number): void {
+    try {
+      view.setBorderRadius(r)
+    } catch {
+      /* older Electron: square corners */
+    }
+  }
+
+  // ---- full screen ------------------------------------------------------------
+
+  /** A page went full screen (or came back). The window follows, and the browser's own UI hides. */
+  private setPageFullscreen(tab: Tab, on: boolean): void {
+    if (on) {
+      this.fullscreenTab = tab
+      if (!this.win.isFullScreen()) this.win.setFullScreen(true)
+    } else if (this.fullscreenTab === tab) {
+      this.fullscreenTab = null
+      if (this.win.isFullScreen()) this.win.setFullScreen(false)
+    }
+    if (!this.win.isDestroyed()) this.win.webContents.send('page-fullscreen', !!this.fullscreenTab)
+    this.layout()
+  }
+
+  /** The window left full screen (Esc, F11, or switching tab): the page leaves it too. */
+  exitPageFullscreen(): void {
+    const tab = this.fullscreenTab
+    if (!tab) return
+    this.fullscreenTab = null
+    if (!tab.view.webContents.isDestroyed()) void tab.view.webContents.executeJavaScript('document.fullscreenElement && document.exitFullscreen()', true).catch(() => {})
+    if (!this.win.isDestroyed()) this.win.webContents.send('page-fullscreen', false)
+    this.layout()
+  }
+
+  /** The window changed size: a full screen page follows it. */
+  relayout(): void {
+    this.layout()
+  }
+
+  // ---- sound, printing, tab menu ----------------------------------------------
+
+  toggleMute(id: number): void {
+    const tab = this.get(id)
+    if (!tab) return
+    const wc = tab.view.webContents
+    wc.setAudioMuted(!wc.isAudioMuted())
+    tab.info.muted = wc.isAudioMuted()
+    this.changed()
+  }
+
+  print(): void {
+    const tab = this.active
+    if (!tab || !this.showsPage(tab)) return
+    tab.view.webContents.print({}, () => {})
+  }
+
+  duplicate(id: number): void {
+    const tab = this.get(id)
+    const url = tab?.pendingUrl ?? tab?.info.url
+    if (tab && url) this.create(url, { after: id, title: tab.info.title })
+  }
+
+  closeOthers(id: number): void {
+    for (const t of [...this.tabs]) if (t.info.id !== id && !t.info.pinned) this.close(t.info.id)
+  }
+
+  /** The right-click menu for a tab in the sidebar. */
+  tabMenu(id: number): void {
+    const tab = this.get(id)
+    if (!tab) return
+    const wc = tab.view.webContents
+    Menu.buildFromTemplate([
+      { label: 'New tab', click: () => this.create() },
+      { type: 'separator' },
+      { label: 'Reload', enabled: this.showsPage(tab), click: () => (this.activate(id), this.reload()) },
+      { label: 'Duplicate', enabled: !!(tab.pendingUrl || tab.info.url), click: () => this.duplicate(id) },
+      { label: tab.info.pinned ? 'Unpin tab' : 'Pin tab', click: () => this.togglePin(id) },
+      { label: wc.isAudioMuted() ? 'Unmute site' : 'Mute tab', click: () => this.toggleMute(id) },
+      { type: 'separator' },
+      { label: 'Close tab', accelerator: 'CmdOrCtrl+W', click: () => this.close(id) },
+      { label: 'Close other tabs', enabled: this.tabs.some((t) => t.info.id !== id && !t.info.pinned), click: () => this.closeOthers(id) },
+      { label: 'Reopen closed tab', accelerator: 'CmdOrCtrl+Shift+T', enabled: this.closed.length > 0, click: () => this.reopenClosed() }
+    ]).popup({ window: this.win })
   }
 
   focusOmnibox(): void {
@@ -462,6 +567,8 @@ export class Tabs {
       if (key === 'arrowright') return run(() => this.forward())
     }
     if (key === 'f3' && !mod && !input.alt) return run(() => this.findStep(!input.shift))
+    if (mod && !input.alt && !input.shift && key === 'p') return run(() => this.print())
+    if (key === 'f11' && !mod) return run(() => this.win.setFullScreen(!this.win.isFullScreen()))
     if (key === 'f5') return run(() => this.reload(mod))
     if (key === 'f12') return run(() => this.active?.view.webContents.toggleDevTools())
     if (key === 'browserback') return run(() => this.back())
@@ -595,6 +702,13 @@ export class Tabs {
       this.changed()
     })
     wc.on('context-menu', (_e, p) => this.contextMenu(tab, p))
+    wc.on('enter-html-full-screen', () => this.setPageFullscreen(tab, true))
+    wc.on('leave-html-full-screen', () => this.setPageFullscreen(tab, false))
+    wc.on('audio-state-changed', (e) => {
+      info.audible = e.audible
+      info.muted = wc.isAudioMuted()
+      this.changed()
+    })
   }
 
   private contextMenu(tab: Tab, p: Electron.ContextMenuParams): void {
@@ -619,7 +733,8 @@ export class Tabs {
     if (p.mediaType === 'image' && isAllowedUrl(p.srcURL)) {
       items.push(
         { label: 'Open image in new tab', click: () => this.create(p.srcURL, { activate: false, after: tab.info.id }) },
-        { label: 'Copy image', click: () => wc.copyImageAt(p.x, p.y) }
+        { label: 'Copy image', click: () => wc.copyImageAt(p.x, p.y) },
+        { label: 'Save image…', click: () => wc.downloadURL(p.srcURL) }
       )
       gap()
     }
@@ -638,6 +753,10 @@ export class Tabs {
         { label: 'Forward', enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
         { label: 'Reload', click: () => wc.reload() }
       )
+      gap()
+    }
+    if (!p.linkURL && !p.isEditable && !p.selectionText.trim() && p.mediaType === 'none') {
+      items.push({ label: 'Print…', accelerator: 'CmdOrCtrl+P', click: () => wc.print({}, () => {}) })
       gap()
     }
     items.push({ label: 'Inspect', click: () => wc.inspectElement(p.x, p.y) })
