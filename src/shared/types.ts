@@ -39,6 +39,16 @@ export interface SitePermission {
   updated: number
 }
 
+/** A page asking to launch an external app (mailto:, zoommtg:, ...). Opens only after the user clicks Open. */
+export interface ExternalAppAsk {
+  id: number
+  tabId: number | null
+  origin: string
+  scheme: string
+  appName: string
+  url: string
+}
+
 /** Where the active page sits inside the window, in CSS pixels. */
 export interface Rect {
   x: number

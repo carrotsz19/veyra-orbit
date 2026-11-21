@@ -3,9 +3,10 @@
  * and no Node, in a session kept apart from the browser's own UI. Permissions are denied unless
  * the person allows them for that site.
  */
-import { app, session, type Session, type WebContents } from 'electron'
-import type { PermissionAsk, SitePermission } from '../shared/types'
+import { app, session, shell, type Session, type WebContents } from 'electron'
+import type { ExternalAppAsk, PermissionAsk, SitePermission } from '../shared/types'
 import { ASKABLE_PERMISSIONS, normalizePermissionOrigin } from '../shared/permissions'
+import { parseExternalAppUrl } from '../shared/external'
 
 /** Where web pages keep cookies and storage. Workspaces will get one each (persist:ws-<id>). */
 export const WEB_PARTITION = 'persist:web'
@@ -119,6 +120,67 @@ export class Permissions {
 
   private emit(): void {
     this.publish(this.pending.map(({ resolve: _r, ...ask }) => ask))
+  }
+}
+
+const MAX_EXTERNAL_ASKS_PER_TAB = 5
+
+/**
+ * Confirmation queue for allowlisted external-app links (mailto:, tel:, zoommtg:, msteams:, ...).
+ * Nothing is handed to shell.openExternal until the person clicks Open.
+ */
+export class ExternalApps {
+  private next = 1
+  private pending: ExternalAppAsk[] = []
+
+  constructor(
+    private publish: (asks: ExternalAppAsk[]) => void,
+    private openExternal: (url: string) => void = (url) => {
+      void shell.openExternal(url)
+    }
+  ) {}
+
+  list(): ExternalAppAsk[] {
+    return this.pending.map((a) => ({ ...a }))
+  }
+
+  request(tabId: number | null, pageUrl: string, targetUrl: string): boolean {
+    const parsed = parseExternalAppUrl(targetUrl)
+    if (!parsed) return false
+    // Deduplicate identical pending requests for the same tab and cap per-tab queue to prevent spam.
+    if (this.pending.some((p) => p.tabId === tabId && p.url === parsed.url)) return true
+    if (this.pending.filter((p) => p.tabId === tabId).length >= MAX_EXTERNAL_ASKS_PER_TAB) return true
+    const origin = normalizePermissionOrigin(pageUrl)
+    this.pending.push({
+      id: this.next++,
+      tabId,
+      origin,
+      scheme: parsed.scheme,
+      appName: parsed.appName,
+      url: parsed.url
+    })
+    this.emit()
+    return true
+  }
+
+  answer(id: number, open: boolean): void {
+    const i = this.pending.findIndex((p) => p.id === id)
+    if (i < 0) return
+    const [ask] = this.pending.splice(i, 1)
+    this.emit()
+    if (!open) return
+    const parsed = parseExternalAppUrl(ask.url)
+    if (parsed) this.openExternal(parsed.url)
+  }
+
+  dropTab(tabId: number): void {
+    const before = this.pending.length
+    this.pending = this.pending.filter((p) => p.tabId !== tabId)
+    if (this.pending.length !== before) this.emit()
+  }
+
+  private emit(): void {
+    this.publish(this.list())
   }
 }
 
