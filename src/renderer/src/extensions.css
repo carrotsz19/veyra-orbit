@@ -1,0 +1,276 @@
+/* Chrome extensions toolbar, install confirmation strip, and Settings -> Extensions */
+
+.ext-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  flex: none;
+  -webkit-app-region: no-drag;
+}
+
+.ext-btn {
+  position: relative;
+}
+
+.ext-btn-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: contain;
+  display: block;
+}
+
+.ext-badge {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 3px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 12px;
+  text-align: center;
+  color: #fff;
+  box-shadow: 0 0 0 1.5px var(--bg-grouped);
+  pointer-events: none;
+}
+
+.ext-puzzle-btn.open {
+  background: var(--fill-hover);
+  color: var(--label-primary);
+}
+
+/* ---- Install confirmation strip ------------------------------------------ */
+.ext-install-bar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.ext-install-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.ext-install-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ext-install-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  flex: none;
+  object-fit: contain;
+}
+
+.ext-install-icon-fallback {
+  display: grid;
+  place-items: center;
+  background: var(--fill-secondary);
+  color: var(--label-secondary);
+}
+
+.ext-install-meta {
+  min-width: 0;
+}
+
+.ext-install-name {
+  font-size: 13px;
+  color: var(--label-primary);
+}
+
+.ext-install-ver {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--label-secondary);
+}
+
+.ext-install-sub {
+  font-size: 12px;
+  color: var(--label-secondary);
+}
+
+.ext-install-perms {
+  margin: 0;
+  padding: 8px 12px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-radius: var(--r-control);
+  background: var(--fill-tertiary);
+}
+
+.ext-install-perm {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--label-primary);
+}
+
+.ext-perm-warn {
+  color: var(--warning);
+  flex: none;
+}
+
+/* ---- Settings -> Extensions ---------------------------------------------- */
+.ext-list-card {
+  margin-top: 10px;
+}
+
+.ext-store-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ext-store-input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 11px;
+  border-radius: var(--r-control);
+  border: 1px solid var(--separator);
+  background: var(--bg-elevated);
+  color: var(--label-primary);
+  font-size: 12.5px;
+}
+
+.ext-store-input:focus {
+  outline: none;
+  border-color: var(--tint);
+}
+
+.ext-item.disabled {
+  opacity: 0.72;
+}
+
+.ext-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+}
+
+.ext-item-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.ext-item-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  flex: none;
+  object-fit: contain;
+}
+
+.ext-item-icon-fallback {
+  display: grid;
+  place-items: center;
+  background: var(--fill-secondary);
+  color: var(--label-secondary);
+}
+
+.ext-item-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ext-tag {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--fill-secondary);
+  color: var(--label-secondary);
+}
+
+.ext-mem {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--fill-tertiary);
+  color: var(--label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ext-pinned-on {
+  color: var(--tint);
+  background: var(--tint-soft);
+}
+
+.ext-details-btn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.ext-details {
+  width: 100%;
+  padding-top: 10px;
+  border-top: 1px solid var(--separator);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ext-details-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+  font-family: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', Consolas, monospace;
+  color: var(--label-secondary);
+  user-select: text;
+  word-break: break-all;
+}
+
+.ext-details-heading {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--label-secondary);
+  margin-bottom: 5px;
+}
+
+.ext-perm-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ext-perm-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--label-primary);
+}
+
+.ext-details-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}

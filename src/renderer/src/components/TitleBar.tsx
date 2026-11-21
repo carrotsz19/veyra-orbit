@@ -3,7 +3,9 @@ import { ArrowLeft, ArrowRight, Copy, EyeOff, Menu as MenuIcon, Minus, RotateCw,
 import type {
   Bookmark,
   BrowserState,
+  ExtensionActionView,
   HistoryEntry,
+  MenuEntry,
   MenuId,
   SettingsView,
   TabInfo,
@@ -21,6 +23,7 @@ import {
 } from '@shared/menu'
 import { isInternalUrl } from '@shared/url'
 import { Omnibox } from './Omnibox'
+import { ExtensionToolbar } from './ExtensionToolbar'
 
 const api = window.veyra
 const INITIAL_QUERY = new URLSearchParams(location.search)
@@ -112,7 +115,7 @@ function WindowWinButtons({ state }: { state: WindowState }): React.JSX.Element 
   )
 }
 
-type OpenTarget = MenuId | 'collapsed' | null
+type OpenTarget = MenuId | 'collapsed' | 'extensions' | null
 
 interface TitleBarProps {
   state: BrowserState
@@ -154,6 +157,7 @@ export function TitleBar({
   const [openViaKeyboard, setOpenViaKeyboard] = useState(false)
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
+  const [extActions, setExtActions] = useState<ExtensionActionView[]>([])
 
   const btnRefs = useRef(new Map<string, HTMLButtonElement | null>())
   const menusNavRef = useRef<HTMLElement>(null)
@@ -172,15 +176,6 @@ export function TitleBar({
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  // Close open menu if layout flips between expanded and collapsed.
-  useEffect(() => {
-    if (openTarget && ((collapsed && openTarget !== 'collapsed') || (!collapsed && openTarget === 'collapsed'))) {
-      setOpenTarget(null)
-      setCollapsedSub(null)
-      api.menu.close()
-    }
-  }, [collapsed, openTarget])
-
   const refreshLibraryData = useCallback((): void => {
     void api.history('', null).then((list) => setHistory(list.slice(0, 32)))
     void api.bookmarks().then(setBookmarks)
@@ -190,6 +185,24 @@ export function TitleBar({
     refreshLibraryData()
     return api.onDataChanged(refreshLibraryData)
   }, [refreshLibraryData])
+
+  useEffect(() => {
+    void api.extensions.getActions().then(setExtActions)
+    return api.extensions.onActions(setExtActions)
+  }, [])
+
+  // Close open menu if layout flips between expanded and collapsed (leave extensions overflow untouched).
+  useEffect(() => {
+    if (
+      openTarget &&
+      openTarget !== 'extensions' &&
+      ((collapsed && openTarget !== 'collapsed') || (!collapsed && openTarget === 'collapsed'))
+    ) {
+      setOpenTarget(null)
+      setCollapsedSub(null)
+      api.menu.close()
+    }
+  }, [collapsed, openTarget])
 
   const sections = useMemo(
     () =>
@@ -262,6 +275,25 @@ export function TitleBar({
       if (id.startsWith('workspaces:switch:')) {
         const wsId = id.slice('workspaces:switch:'.length)
         if (wsId) api.switchWorkspace(wsId)
+        return
+      }
+      if (id.startsWith('ext:open:')) {
+        const extId = id.slice('ext:open:'.length)
+        const puzzleBtn = btnRefs.current.get('extensions')
+        const r = puzzleBtn?.getBoundingClientRect()
+        if (extId && r) {
+          api.extensions.clickAction(extId, { x: r.left, y: r.top, width: r.width, height: r.height })
+        }
+        return
+      }
+      if (id.startsWith('ext:pin:')) {
+        const extId = id.slice('ext:pin:'.length)
+        const cur = extActions.find((a) => a.id === extId)
+        if (cur) void api.extensions.setPinned(extId, !cur.pinned)
+        return
+      }
+      if (id === 'ext:manage') {
+        onOpenSettingsSection('set-extensions')
         return
       }
 
@@ -378,7 +410,7 @@ export function TitleBar({
           return
       }
     },
-    [bookmarks, onNewWorkspace, onOpenSettingsSection, openUrlInTab, recentUrls, refreshLibraryData, state.activeWorkspaceId, state.workspaces, tab]
+    [bookmarks, extActions, onNewWorkspace, onOpenSettingsSection, openUrlInTab, recentUrls, refreshLibraryData, state.activeWorkspaceId, state.workspaces, tab]
   )
 
   const liveRef = useRef({ openTarget, sections, runAction, collapsed })
@@ -396,9 +428,26 @@ export function TitleBar({
     const dark = window.matchMedia('(prefers-color-scheme: dark)').matches
     const accent = getComputedStyle(document.documentElement).getPropertyValue('--tint').trim() || '#b3492b'
 
-    let items
+    let items: MenuEntry[]
     let header
-    if (openTarget === 'collapsed') {
+    if (openTarget === 'extensions') {
+      items = [
+        ...extActions.map((a): MenuEntry => ({
+          kind: 'item',
+          id: `ext:open:${a.id}`,
+          label: a.badgeText ? `${a.name} (${a.badgeText})` : a.name
+        })),
+        ...(extActions.length > 0 ? [{ kind: 'separator' as const }] : []),
+        ...extActions.map((a): MenuEntry => ({
+          kind: 'item',
+          id: `ext:pin:${a.id}`,
+          label: a.pinned ? `Unpin ${a.name}` : `Pin ${a.name}`,
+          checked: a.pinned
+        })),
+        { kind: 'separator' },
+        { kind: 'item', id: 'ext:manage', label: 'Manage extensions' }
+      ]
+    } else if (openTarget === 'collapsed') {
       if (collapsedSub) {
         const sec = sections.find((s) => s.id === collapsedSub)
         items = sec?.items ?? []
@@ -419,7 +468,7 @@ export function TitleBar({
       initialActive: openViaKeyboard ? firstSelectableIndex(items) : -1,
       header
     })
-  }, [openTarget, collapsedSub, openViaKeyboard, sections, settings?.theme])
+  }, [openTarget, collapsedSub, openViaKeyboard, sections, extActions, settings?.theme])
 
   const toggleMenuBarFocus = useCallback((): void => {
     if (liveRef.current.openTarget) {
@@ -472,7 +521,7 @@ export function TitleBar({
       }),
       api.menu.onStep((by) => {
         const cur = liveRef.current.openTarget
-        if (!cur || cur === 'collapsed') return
+        if (!cur || cur === 'collapsed' || cur === 'extensions') return
         const ids = liveRef.current.sections.map((s) => s.id)
         const idx = ids.indexOf(cur)
         if (idx < 0) return
@@ -494,14 +543,14 @@ export function TitleBar({
     }
   }, [refreshLibraryData, toggleMenuBarFocus])
 
-  const openMenu = (target: MenuId | 'collapsed', viaKeyboard: boolean): void => {
+  const openMenu = (target: MenuId | 'collapsed' | 'extensions', viaKeyboard: boolean): void => {
     if (target === 'history' || target === 'bookmarks' || target === 'collapsed') refreshLibraryData()
     setCollapsedSub(null)
     setOpenViaKeyboard(viaKeyboard)
     setOpenTarget(target)
   }
 
-  const handleMenuBtnMouseDown = (e: React.MouseEvent, target: MenuId | 'collapsed'): void => {
+  const handleMenuBtnMouseDown = (e: React.MouseEvent, target: MenuId | 'collapsed' | 'extensions'): void => {
     e.preventDefault()
     // Clicking the open menu's own button closes it (its floating window already hid on blur).
     if (lastClosedRef.current.target === target && Date.now() - lastClosedRef.current.at < 300) {
@@ -684,6 +733,13 @@ export function TitleBar({
             {tab.zoom}%
           </button>
         )}
+        <ExtensionToolbar
+          actions={extActions}
+          compact={collapsed}
+          overflowOpen={openTarget === 'extensions'}
+          puzzleBtnRef={(el) => void btnRefs.current.set('extensions', el)}
+          onToggleOverflow={(e) => handleMenuBtnMouseDown(e, 'extensions')}
+        />
       </div>
 
       <div className="tb-drag" />

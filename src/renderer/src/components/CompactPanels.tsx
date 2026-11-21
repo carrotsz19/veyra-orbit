@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BrowserState, DownloadInfo, SettingsView, TabInfo, UpdateState, WindowState } from '@shared/types'
+import '../extensions.css'
 import { Sidebar } from './Sidebar'
 import { TitleBar } from './TitleBar'
 
