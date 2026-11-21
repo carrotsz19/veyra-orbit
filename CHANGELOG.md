@@ -4,8 +4,11 @@ All notable changes to Veyra Orbit are documented here.
 
 ## Unreleased
 
-- Background auto-updates for Dev and Prod channels, with a calm restart prompt and a Check for updates row in Settings.
-- Fixed Google sign-in ("This browser or app may not be secure") in tabs and sign-in popups, aligned Chrome Client Hints (`Sec-CH-UA*` and `navigator.userAgentData`), and stopped sign-in pages from auto-opening the Windows Security passkey dialog on load.
+- A new icon: a clay moon on its orbit. Veyra Orbit Dev has a dark tile with a clay corner, so you can tell the two apart.
+- Settings has a new look, with sections down the side, and it scrolls properly now.
+- Google sign-in works ("This browser or app may not be secure" is gone), in tabs and sign-in pop-ups.
+- Sign-in pages no longer open the Windows Security passkey window by themselves. Choosing a passkey still works.
+- Orbit now updates itself: a small "Update ready" note appears when a new version has downloaded, and Settings can check for updates.
 
 ## 26.11.1 — 2026-11-21
 
