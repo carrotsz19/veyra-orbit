@@ -1,13 +1,69 @@
-import { useState } from 'react'
-import { Bookmark, Clock, Globe, LoaderCircle, Pin, PinOff, Plus, Settings, Volume2, VolumeX, X } from 'lucide-react'
-import type { BrowserState, DownloadInfo, TabInfo, UpdateState } from '@shared/types'
+import { useEffect, useState } from 'react'
+import {
+  Bookmark,
+  BookOpen,
+  Briefcase,
+  Clock,
+  Code,
+  Compass,
+  FlaskConical,
+  Globe,
+  GraduationCap,
+  Home,
+  LoaderCircle,
+  Lock,
+  Music,
+  Pencil,
+  Pin,
+  PinOff,
+  Plus,
+  Settings,
+  Sparkles,
+  Star,
+  Trash2,
+  Volume2,
+  VolumeX,
+  X
+} from 'lucide-react'
+import type { BrowserState, DownloadInfo, TabInfo, UpdateState, WorkspaceAccentId, WorkspaceIconId, WorkspaceInfo } from '@shared/types'
+import { WORKSPACE_ACCENTS, WORKSPACE_ICONS, isBuiltInWorkspaceIcon } from '@shared/workspaces'
 import { displayUrl } from '@shared/url'
 import { Downloads } from './Downloads'
 
 const api = window.veyra
 
+const ICON_COMPONENTS: Record<WorkspaceIconId, typeof Home> = {
+  home: Home,
+  'book-open': BookOpen,
+  'graduation-cap': GraduationCap,
+  briefcase: Briefcase,
+  code: Code,
+  'flask-conical': FlaskConical,
+  compass: Compass,
+  sparkles: Sparkles,
+  music: Music,
+  star: Star
+}
+
+function WorkspaceGlyph({ icon, size = 14 }: { icon: string; size?: number }): React.JSX.Element {
+  if (isBuiltInWorkspaceIcon(icon)) {
+    const Icon = ICON_COMPONENTS[icon]
+    return <Icon size={size} strokeWidth={1.85} aria-hidden />
+  }
+  return (
+    <span className="ws-emoji" aria-hidden>
+      {icon}
+    </span>
+  )
+}
+
 function label(t: TabInfo): string {
   return t.title || displayUrl(t.url) || 'New tab'
+}
+
+function tabTooltip(t: TabInfo): string {
+  const base = t.url ? `${label(t)}\n${displayUrl(t.url)}` : label(t)
+  return t.sleeping ? `${base}\nSleeping — click to wake` : base
 }
 
 function Favicon({ tab }: { tab: TabInfo }): React.JSX.Element {
@@ -20,6 +76,16 @@ function Favicon({ tab }: { tab: TabInfo }): React.JSX.Element {
   return <Globe className="fav" size={16} strokeWidth={1.75} />
 }
 
+interface EditorState {
+  mode: 'create' | 'edit'
+  id?: string
+  name: string
+  icon: string
+  accent: WorkspaceAccentId
+  isolated: boolean
+  confirmDelete: boolean
+}
+
 interface Props {
   state: BrowserState
   downloads: DownloadInfo[]
@@ -27,12 +93,30 @@ interface Props {
   onCloseDownloads: () => void
   update: UpdateState | null
   onDismissUpdate: () => void
+  onEditorOpenChange?: (open: boolean) => void
+  onPointerEdge?: (inside: boolean) => void
 }
 
-export function Sidebar({ state, downloads, downloadsOpen, onCloseDownloads, update, onDismissUpdate }: Props): React.JSX.Element {
+export function Sidebar({
+  state,
+  downloads,
+  downloadsOpen,
+  onCloseDownloads,
+  update,
+  onDismissUpdate,
+  onEditorOpenChange,
+  onPointerEdge
+}: Props): React.JSX.Element {
   const [dragId, setDragId] = useState<number | null>(null)
+  const [editor, setEditor] = useState<EditorState | null>(null)
+
+  useEffect(() => {
+    onEditorOpenChange?.(editor !== null)
+  }, [editor, onEditorOpenChange])
+
   const pinned = state.tabs.filter((t) => t.pinned)
   const open = state.tabs.filter((t) => !t.pinned)
+  const activeWorkspace = state.workspaces.find((w) => w.id === state.activeWorkspaceId)
 
   const drop = (target: TabInfo): void => {
     if (dragId === null || dragId === target.id) return
@@ -47,8 +131,66 @@ export function Sidebar({ state, downloads, downloadsOpen, onCloseDownloads, upd
     onDrop: () => drop(t)
   })
 
+  const openCreateEditor = (): void => {
+    const nextAccent = WORKSPACE_ACCENTS[state.workspaces.length % WORKSPACE_ACCENTS.length].id
+    setEditor({
+      mode: 'create',
+      name: '',
+      icon: 'book-open',
+      accent: nextAccent,
+      isolated: false,
+      confirmDelete: false
+    })
+  }
+
+  const openEditEditor = (ws: WorkspaceInfo): void => {
+    setEditor({
+      mode: 'edit',
+      id: ws.id,
+      name: ws.name,
+      icon: ws.icon,
+      accent: ws.accent,
+      isolated: ws.isolated,
+      confirmDelete: false
+    })
+  }
+
+  const submitEditor = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault()
+    if (!editor) return
+    if (editor.mode === 'create') {
+      await api.createWorkspace({
+        name: editor.name.trim() || `Space ${state.workspaces.length + 1}`,
+        icon: editor.icon,
+        accent: editor.accent,
+        isolated: editor.isolated
+      })
+    } else if (editor.id) {
+      await api.updateWorkspace(editor.id, {
+        name: editor.name.trim() || 'Workspace',
+        icon: editor.icon,
+        accent: editor.accent,
+        isolated: editor.isolated
+      })
+    }
+    setEditor(null)
+  }
+
+  const confirmDeleteWorkspace = async (): Promise<void> => {
+    if (!editor?.id) return
+    await api.deleteWorkspace(editor.id)
+    setEditor(null)
+  }
+
+  const slideClass =
+    state.workspaceSwitchDir > 0 ? 'ws-slide-next' : state.workspaceSwitchDir < 0 ? 'ws-slide-prev' : 'ws-slide-none'
+
   return (
-    <aside className="side">
+    <aside
+      className="side"
+      onMouseEnter={() => onPointerEdge?.(true)}
+      onMouseLeave={() => onPointerEdge?.(false)}
+    >
       <div className="side-top">
         <span className="brand">
           <span className="brand-dot" />
@@ -57,35 +199,98 @@ export function Sidebar({ state, downloads, downloadsOpen, onCloseDownloads, upd
         </span>
       </div>
 
-      {pinned.length > 0 && (
-        <div className="pins">
-          {pinned.map((t) => (
+      {activeWorkspace && (
+        <div className="ws-head">
+          <span className="ws-head-badge" aria-hidden>
+            <WorkspaceGlyph icon={activeWorkspace.icon} size={13} />
+          </span>
+          <span className="ws-head-name" title={activeWorkspace.name}>
+            {activeWorkspace.name}
+          </span>
+          {activeWorkspace.isolated && (
+            <span className="ws-head-lock" title="Separate sign-ins & cookies">
+              <Lock size={11} aria-hidden />
+            </span>
+          )}
+          <button
+            type="button"
+            className="ws-head-edit"
+            aria-label={`Edit ${activeWorkspace.name} workspace`}
+            title="Edit workspace"
+            onClick={() => openEditEditor(activeWorkspace)}
+          >
+            <Pencil size={12} />
+          </button>
+        </div>
+      )}
+
+      <div key={state.activeWorkspaceId} className={`ws-pane ${slideClass}`}>
+        {pinned.length > 0 && (
+          <div className="pins">
+            {pinned.map((t) => (
+              <div
+                key={t.id}
+                role="tab"
+                tabIndex={0}
+                aria-selected={t.id === state.activeId}
+                className={`pin ${t.id === state.activeId ? 'on' : ''} ${t.sleeping ? 'sleeping' : ''} ${dragId === t.id ? 'dragging' : ''}`}
+                title={tabTooltip(t)}
+                onClick={() => api.activate(t.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    api.activate(t.id)
+                  }
+                }}
+                onAuxClick={(e) => e.button === 1 && api.closeTab(t.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  api.tabMenu(t.id)
+                }}
+                {...dragProps(t)}
+              >
+                <Favicon tab={t} />
+                {(t.audible || t.muted) && (
+                  <button
+                    type="button"
+                    className={`pin-audio ${t.muted ? 'muted' : ''}`}
+                    aria-label={t.muted ? 'Unmute tab' : 'Mute tab'}
+                    title={t.muted ? 'Unmute tab' : 'Mute tab'}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      api.toggleMute(t.id)
+                    }}
+                  >
+                    {t.muted ? <VolumeX size={11} /> : <Volume2 size={11} />}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="tabs" role="tablist" aria-label="Tabs">
+          {open.map((t) => (
             <div
               key={t.id}
               role="tab"
-              tabIndex={0}
               aria-selected={t.id === state.activeId}
-              className={`pin ${t.id === state.activeId ? 'on' : ''} ${dragId === t.id ? 'dragging' : ''}`}
-              title={label(t)}
-              onClick={() => api.activate(t.id)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  api.activate(t.id)
-                }
-              }}
+              className={`tab ${t.id === state.activeId ? 'on' : ''} ${t.sleeping ? 'sleeping' : ''} ${dragId === t.id ? 'dragging' : ''}`}
+              onMouseDown={(e) => e.button === 0 && api.activate(t.id)}
               onAuxClick={(e) => e.button === 1 && api.closeTab(t.id)}
               onContextMenu={(e) => {
                 e.preventDefault()
                 api.tabMenu(t.id)
               }}
+              title={tabTooltip(t)}
               {...dragProps(t)}
             >
               <Favicon tab={t} />
               {(t.audible || t.muted) && (
                 <button
                   type="button"
-                  className={`pin-audio ${t.muted ? 'muted' : ''}`}
+                  className={`tab-btn tab-audio ${t.muted ? 'muted' : ''}`}
                   aria-label={t.muted ? 'Unmute tab' : 'Mute tab'}
                   title={t.muted ? 'Unmute tab' : 'Mute tab'}
                   onMouseDown={(e) => e.stopPropagation()}
@@ -94,61 +299,26 @@ export function Sidebar({ state, downloads, downloadsOpen, onCloseDownloads, upd
                     api.toggleMute(t.id)
                   }}
                 >
-                  {t.muted ? <VolumeX size={11} /> : <Volume2 size={11} />}
+                  {t.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
                 </button>
               )}
+              <span className="tab-title">{label(t)}</span>
+              <button className="tab-btn" aria-label="Pin tab" title="Pin" onMouseDown={(e) => e.stopPropagation()} onClick={() => api.togglePin(t.id)}>
+                {t.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+              </button>
+              <button className="tab-btn tab-close" aria-label="Close tab" title="Close (Ctrl+W)" onMouseDown={(e) => e.stopPropagation()} onClick={() => api.closeTab(t.id)}>
+                <X size={14} />
+              </button>
             </div>
           ))}
+          <button className="tab new" onClick={() => api.newTab()}>
+            <Plus size={16} />
+            <span className="tab-title">New tab</span>
+            <kbd>Ctrl T</kbd>
+          </button>
         </div>
-      )}
-
-      <div className="tabs" role="tablist" aria-label="Tabs">
-        {open.map((t) => (
-          <div
-            key={t.id}
-            role="tab"
-            aria-selected={t.id === state.activeId}
-            className={`tab ${t.id === state.activeId ? 'on' : ''} ${dragId === t.id ? 'dragging' : ''}`}
-            onMouseDown={(e) => e.button === 0 && api.activate(t.id)}
-            onAuxClick={(e) => e.button === 1 && api.closeTab(t.id)}
-            onContextMenu={(e) => {
-              e.preventDefault()
-              api.tabMenu(t.id)
-            }}
-            title={t.url ? `${label(t)}\n${displayUrl(t.url)}` : label(t)}
-            {...dragProps(t)}
-          >
-            <Favicon tab={t} />
-            {(t.audible || t.muted) && (
-              <button
-                type="button"
-                className={`tab-btn tab-audio ${t.muted ? 'muted' : ''}`}
-                aria-label={t.muted ? 'Unmute tab' : 'Mute tab'}
-                title={t.muted ? 'Unmute tab' : 'Mute tab'}
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  api.toggleMute(t.id)
-                }}
-              >
-                {t.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
-              </button>
-            )}
-            <span className="tab-title">{label(t)}</span>
-            <button className="tab-btn" aria-label="Pin tab" title="Pin" onMouseDown={(e) => e.stopPropagation()} onClick={() => api.togglePin(t.id)}>
-              {t.pinned ? <PinOff size={14} /> : <Pin size={14} />}
-            </button>
-            <button className="tab-btn tab-close" aria-label="Close tab" title="Close (Ctrl+W)" onMouseDown={(e) => e.stopPropagation()} onClick={() => api.closeTab(t.id)}>
-              <X size={14} />
-            </button>
-          </div>
-        ))}
-        <button className="tab new" onClick={() => api.newTab()}>
-          <Plus size={16} />
-          <span className="tab-title">New tab</span>
-          <kbd>Ctrl T</kbd>
-        </button>
       </div>
+
       {downloadsOpen && <Downloads items={downloads} onClose={onCloseDownloads} />}
       {update?.status === 'ready' && (
         <div className="update-note" role="status" aria-live="polite">
@@ -167,6 +337,174 @@ export function Sidebar({ state, downloads, downloadsOpen, onCloseDownloads, upd
           </div>
         </div>
       )}
+
+      {editor && (
+        <form
+          className="ws-editor"
+          aria-label={editor.mode === 'create' ? 'Create workspace' : 'Edit workspace'}
+          onSubmit={(e) => void submitEditor(e)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setEditor(null)
+          }}
+        >
+          <div className="ws-editor-head">
+            <span>{editor.mode === 'create' ? 'New workspace' : 'Edit workspace'}</span>
+            <button type="button" className="dl-btn" aria-label="Close workspace editor" onClick={() => setEditor(null)}>
+              <X size={13} />
+            </button>
+          </div>
+
+          <input
+            className="ws-input"
+            type="text"
+            autoFocus
+            maxLength={40}
+            placeholder="Workspace name"
+            aria-label="Workspace name"
+            value={editor.name}
+            onChange={(e) => setEditor({ ...editor, name: e.target.value })}
+          />
+
+          <div className="ws-field">
+            <div className="ws-field-label">Icon or emoji</div>
+            <div className="ws-icons">
+              {WORKSPACE_ICONS.map((iconId) => (
+                <button
+                  key={iconId}
+                  type="button"
+                  className={`ws-icon-pick ${editor.icon === iconId ? 'on' : ''}`}
+                  aria-label={`Icon ${iconId}`}
+                  aria-pressed={editor.icon === iconId}
+                  onClick={() => setEditor({ ...editor, icon: iconId })}
+                >
+                  <WorkspaceGlyph icon={iconId} size={13} />
+                </button>
+              ))}
+              <input
+                className="ws-emoji-input"
+                type="text"
+                maxLength={8}
+                placeholder="😀"
+                aria-label="Custom emoji"
+                title="Or type an emoji"
+                value={isBuiltInWorkspaceIcon(editor.icon) ? '' : editor.icon}
+                onChange={(e) => {
+                  const val = e.target.value.trim()
+                  setEditor({ ...editor, icon: val || 'compass' })
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="ws-field">
+            <div className="ws-field-label">Accent</div>
+            <div className="ws-swatches" role="radiogroup" aria-label="Workspace accent colour">
+              {WORKSPACE_ACCENTS.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={editor.accent === a.id}
+                  aria-label={a.name}
+                  title={a.name}
+                  className={`ws-swatch ${editor.accent === a.id ? 'on' : ''}`}
+                  data-accent={a.id}
+                  onClick={() => setEditor({ ...editor, accent: a.id })}
+                />
+              ))}
+            </div>
+          </div>
+
+          <label className="ws-iso">
+            <input
+              type="checkbox"
+              checked={editor.isolated}
+              onChange={(e) => setEditor({ ...editor, isolated: e.target.checked })}
+            />
+            <span>
+              <strong>Keep sign-ins separate</strong>
+              <small>Separate cookies and logins for this workspace</small>
+            </span>
+          </label>
+
+          {editor.confirmDelete && editor.id ? (
+            <div className="ws-delete-confirm">
+              <span>
+                Delete “{editor.name || 'Workspace'}” and close {state.tabCounts[editor.id] ?? 0}{' '}
+                {(state.tabCounts[editor.id] ?? 0) === 1 ? 'tab' : 'tabs'}?
+              </span>
+              <div className="ws-editor-actions">
+                <button type="button" className="btn ws-btn" onClick={() => setEditor({ ...editor, confirmDelete: false })}>
+                  Cancel
+                </button>
+                <button type="button" className="btn danger ws-btn" onClick={() => void confirmDeleteWorkspace()}>
+                  Delete
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="ws-editor-actions">
+              {editor.mode === 'edit' && state.workspaces.length > 1 && (
+                <button
+                  type="button"
+                  className="dl-btn ws-del-btn"
+                  aria-label="Delete workspace"
+                  title="Delete workspace"
+                  onClick={() => setEditor({ ...editor, confirmDelete: true })}
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
+              <button type="button" className="btn ws-btn" onClick={() => setEditor(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn primary ws-btn">
+                {editor.mode === 'create' ? 'Create' : 'Save'}
+              </button>
+            </div>
+          )}
+        </form>
+      )}
+
+      <div className="ws-bar" role="tablist" aria-label="Workspaces">
+        <div className="ws-dots">
+          {state.workspaces.map((ws, idx) => {
+            const isActive = ws.id === state.activeWorkspaceId
+            const count = state.tabCounts[ws.id] ?? 0
+            const shortcutHint = idx < 9 ? ` · Ctrl+Alt+${idx + 1}` : ''
+            const isoHint = ws.isolated ? ' · Separate sign-ins' : ''
+            return (
+              <button
+                key={ws.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                aria-label={ws.name}
+                data-accent={ws.accent}
+                className={`ws-dot ${isActive ? 'on' : ''}`}
+                title={`${ws.name} (${count} ${count === 1 ? 'tab' : 'tabs'})${shortcutHint}${isoHint}\nRight-click to edit`}
+                onClick={() => api.switchWorkspace(ws.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  openEditEditor(ws)
+                }}
+              >
+                <WorkspaceGlyph icon={ws.icon} size={14} />
+                {ws.isolated && <span className="ws-dot-iso" aria-hidden />}
+              </button>
+            )
+          })}
+        </div>
+        <button
+          type="button"
+          className="ws-add"
+          aria-label="New workspace"
+          title="New workspace"
+          onClick={() => (editor?.mode === 'create' ? setEditor(null) : openCreateEditor())}
+        >
+          <Plus size={14} />
+        </button>
+      </div>
     </aside>
   )
 }

@@ -5,9 +5,23 @@ import { isInternalUrl } from '@shared/url'
 
 const api = window.veyra
 
-export function Toolbar({ tab, onPageShot }: { tab?: TabInfo; onPageShot: (shot: string | null) => void }): React.JSX.Element {
+export function Toolbar({
+  tab,
+  onPageShot,
+  onEditingChange,
+  onPointerEdge
+}: {
+  tab?: TabInfo
+  onPageShot: (shot: string | null) => void
+  onEditingChange?: (editing: boolean) => void
+  onPointerEdge?: (inside: boolean) => void
+}): React.JSX.Element {
   return (
-    <header className="bar">
+    <header
+      className="bar"
+      onMouseEnter={() => onPointerEdge?.(true)}
+      onMouseLeave={() => onPointerEdge?.(false)}
+    >
       <div className="nav">
         <button className="icon-btn" aria-label="Back" title="Back (Alt+Left)" disabled={!tab?.canGoBack} onClick={() => api.back()}>
           <ArrowLeft size={17} />
@@ -26,7 +40,7 @@ export function Toolbar({ tab, onPageShot }: { tab?: TabInfo; onPageShot: (shot:
         )}
       </div>
 
-      <Omnibox tab={tab} onPageShot={onPageShot} />
+      <Omnibox tab={tab} onPageShot={onPageShot} onEditingChange={onEditingChange} />
       {tab && tab.zoom !== 100 && (
         <button className="zoom-pill" aria-label={`Zoom ${tab.zoom}%, click to reset`} title="Reset zoom (Ctrl+0)" onClick={() => api.resetZoom()}>
           {tab.zoom}%
