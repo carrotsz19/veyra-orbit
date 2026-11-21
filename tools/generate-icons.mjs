@@ -1,59 +1,77 @@
-﻿import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+﻿// Draws the Veyra Orbit app icon (a moon travelling its orbit) and writes every file the build uses:
+//   resources/icon.svg, icon.png (1024), icon.ico   (Prod)
+//   resources/icon-dev.svg, icon-dev.png, icon-dev.ico   (Dev: ink tile, clay corner wedge)
+// Sizes up to 48 px use a simplified drawing (no gradients, heavier orbit) so the taskbar icon
+// stays crisp. Run with `npm run icons:generate`.
+import { writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import sharp from 'sharp'
 import pngToIco from 'png-to-ico'
 
-const root = resolve(import.meta.dirname, '..')
-const resources = join(root, 'resources')
-const sizes = [16, 24, 32, 48, 64, 128, 256]
-const smallSizes = [16, 24, 32, 48]
+const resources = join(resolve(import.meta.dirname, '..'), 'resources')
+const ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
+const SMALL = 48
 
-function smallMaster(dev, size) {
-  const inset = size <= 16 ? 0.5 : 1
-  const radius = size <= 16 ? 3.5 : size * 0.23
-  const stroke = size <= 16 ? 1.5 : size <= 24 ? 2 : 3
-  const orbit = size <= 16 ? 'M3 11 C4 7.5 7.5 5.5 10.5 5.3' : 'M3 12 C4.5 8 8 6 11.5 6'
-  const moonX = size <= 16 ? 11 : 12
-  const moonY = size <= 16 ? 6 : 7
-  const moonR = size <= 16 ? 2.5 : 3
-  const bg = dev ? '#1b1a18' : '#f3f1ec'
-  const arc = dev ? '#f3f1ec' : '#b3492b'
-  const marker = dev ? `<path d="M${size-5} ${inset} H${size-inset-radius} Q${size-inset} ${inset} ${size-inset} ${inset+radius} V${inset+radius+1} Z" fill="#b3492b"/>` : ''
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}"><rect x="${inset}" y="${inset}" width="${size-2*inset}" height="${size-2*inset}" rx="${radius}" fill="${bg}"/><path d="${orbit}" fill="none" stroke="${arc}" stroke-width="${stroke}" stroke-linecap="round"/><circle cx="${moonX}" cy="${moonY}" r="${moonR}" fill="#d9633e"/>${marker}</svg>`
+const clay = '#d9633e'
+const clayDeep = '#b3492b'
+
+/** One icon as SVG on a 128-unit grid. `small` drops gradients and thickens the orbit for ≤48 px. */
+function icon({ dev, small, size }) {
+  // Tile: Windows 11 app icons sit inside a ~112/128 rounded square.
+  const tile = { x: 8, y: 8, w: 112, r: 26 }
+  const orbit = 'M30 96 C34 66 55 44 84 39'
+  const moon = small ? { cx: 89, cy: 39, r: 20 } : { cx: 89, cy: 39, r: 17 }
+  const orbitWidth = small ? 13 : 8
+
+  const tileFill = dev ? (small ? '#1d1b18' : 'url(#tileDev)') : small ? '#f3f1ec' : 'url(#tile)'
+  const edge = dev ? 'rgba(243,241,236,0.14)' : 'rgba(27,26,24,0.12)'
+  const orbitFill = small ? (dev ? '#cfc8bb' : '#e3a68f') : 'url(#trail)'
+  const moonFill = small ? clay : 'url(#moon)'
+
+  const defs = small
+    ? ''
+    : `<defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fdfbf7"/><stop offset="1" stop-color="#ebe6dc"/></linearGradient>
+    <linearGradient id="tileDev" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2c2925"/><stop offset="1" stop-color="#161513"/></linearGradient>
+    <linearGradient id="trail" gradientUnits="userSpaceOnUse" x1="30" y1="96" x2="84" y2="39">
+      <stop offset="0" stop-color="${dev ? '#f3f1ec' : clayDeep}" stop-opacity="${dev ? 0.1 : 0.08}"/>
+      <stop offset="1" stop-color="${dev ? '#f3f1ec' : clayDeep}" stop-opacity="${dev ? 0.75 : 0.85}"/>
+    </linearGradient>
+    <radialGradient id="moon" cx="0.36" cy="0.32" r="0.75"><stop offset="0" stop-color="#f08a64"/><stop offset="0.55" stop-color="${clay}"/><stop offset="1" stop-color="${clayDeep}"/></radialGradient>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="2.5" stdDeviation="2.5" flood-color="#1b1a18" flood-opacity="${dev ? 0.45 : 0.2}"/></filter>
+    <clipPath id="clip"><rect x="${tile.x}" y="${tile.y}" width="${tile.w}" height="${tile.w}" rx="${tile.r}"/></clipPath>
+  </defs>`
+  const clipAttr = small ? '' : ' clip-path="url(#clip)"'
+  const wedge = dev
+    ? small
+      ? `<path d="M120 70 V94 A26 26 0 0 1 94 120 H70 Z" fill="${clayDeep}"/>`
+      : `<g${clipAttr}><path d="M120 82 V120 H82 Z" fill="${clayDeep}"/></g>`
+    : ''
+  const highlight = small ? '' : `<circle cx="${moon.cx - 6}" cy="${moon.cy - 6.5}" r="4.5" fill="#fff" fill-opacity="0.22"/>`
+  const moonFilter = small ? '' : ' filter="url(#soft)"'
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 128 128">
+  ${defs}
+  <rect x="${tile.x}" y="${tile.y}" width="${tile.w}" height="${tile.w}" rx="${tile.r}" fill="${tileFill}"/>
+  ${wedge}
+  <path d="${orbit}" fill="none" stroke="${orbitFill}" stroke-width="${orbitWidth}" stroke-linecap="round"/>
+  <circle cx="${moon.cx}" cy="${moon.cy}" r="${moon.r}" fill="${moonFill}"${moonFilter}/>
+  ${highlight}
+  <rect x="${tile.x + 0.5}" y="${tile.y + 0.5}" width="${tile.w - 1}" height="${tile.w - 1}" rx="${tile.r - 0.5}" fill="none" stroke="${edge}" stroke-width="1"/>
+</svg>
+`
 }
 
-async function makeIcon(name, dev) {
-  const svg = await readFile(join(resources, `${name}.svg`))
-  const master = await sharp(svg).resize(1024, 1024).png().toBuffer()
-  await writeFile(join(resources, `${name}.png`), master)
-  const images = await Promise.all(sizes.map(async size => {
-    if (smallSizes.includes(size)) {
-      const file = `${name}-${size}.svg`
-      await writeFile(join(resources, file), smallMaster(dev, size))
-      return sharp(Buffer.from(smallMaster(dev, size))).png().toBuffer()
-    }
-    return sharp(svg).resize(size, size).png().toBuffer()
-  }))
-  await writeFile(join(resources, `${name}.ico`), await pngToIco(images))
-  return master
+const render = (opts) => sharp(Buffer.from(icon(opts))).png().toBuffer()
+
+async function make(name, dev) {
+  await writeFile(join(resources, `${name}.svg`), icon({ dev, small: false, size: 1024 }))
+  await writeFile(join(resources, `${name}-small.svg`), icon({ dev, small: true, size: 48 }))
+  await writeFile(join(resources, `${name}.png`), await render({ dev, small: false, size: 1024 }))
+  const frames = await Promise.all(ICO_SIZES.map((size) => render({ dev, small: size <= SMALL, size })))
+  await writeFile(join(resources, `${name}.ico`), await pngToIco(frames))
 }
 
-await mkdir(resources, { recursive: true })
-const [prod, dev] = await Promise.all([makeIcon('icon', false), makeIcon('icon-dev', true)])
-const cell = 288
-const rowHeight = 350
-const labels = ['16 px', '24 px', '32 px', '48 px', '64 px', '128 px', '256 px']
-const background = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${cell * 7}" height="710"><rect width="100%" height="100%" fill="#e8e5de"/><text x="24" y="30" font-family="Segoe UI,Arial" font-size="20" fill="#1b1a18">Veyra Orbit · Prod</text><text x="24" y="380" font-family="Segoe UI,Arial" font-size="20" fill="#1b1a18">Veyra Orbit · Dev</text></svg>`)
-const overlays = [{ input: background, left: 0, top: 0 }]
-for (let row = 0; row < 2; row++) {
-  const source = row ? dev : prod
-  for (let col = 0; col < sizes.length; col++) {
-    const size = sizes[col]
-    const rendered = await sharp(source).resize(size, size).png().toBuffer()
-    overlays.push({ input: rendered, left: col * cell + Math.round((cell - size) / 2), top: row * rowHeight + 50 })
-  }
-}
-const preview = join(tmpdir(), 'veyra-orbit-icon-preview.png')
-await sharp({ create: { width: cell * 7, height: 710, channels: 4, background: '#e8e5de' } }).composite(overlays).png().toFile(preview)
-console.log(`Generated PNG and ICO assets. Preview: ${preview}`)
+await make('icon', false)
+await make('icon-dev', true)
+console.log('Generated resources/icon(.svg/.png/.ico) and resources/icon-dev(.svg/.png/.ico).')

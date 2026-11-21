@@ -1,8 +1,19 @@
-﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
- <defs><linearGradient id="tile" x2="0.2" y2="1"><stop stop-color="#fffefa"/><stop offset="1" stop-color="#e7e2d9"/></linearGradient><linearGradient id="clay" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#d9633e"/><stop offset="1" stop-color="#b3492b"/></linearGradient><linearGradient id="moon" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fffefa"/><stop offset="1" stop-color="#e7ddd0"/></linearGradient></defs>
- <rect x="4" y="4" width="120" height="120" rx="29" fill="url(#tile)" stroke="#d6d0c7" stroke-width="1.5"/>
- <path d="M28 87C35 55 55 37 79 39c9 1 16 5 21 11" fill="none" stroke="#8f3824" stroke-opacity=".14" stroke-width="13" stroke-linecap="round" transform="translate(0 2)"/>
- <path d="M28 85C35 53 55 35 79 37c9 1 16 5 21 11" fill="none" stroke="url(#clay)" stroke-width="11" stroke-linecap="round"/>
- <circle cx="89" cy="52" r="16" fill="url(#moon)" stroke="#d8d0c5" stroke-width="1"/>
- <path d="M79 48c3-6 8-9 14-9" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity=".9"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fdfbf7"/><stop offset="1" stop-color="#ebe6dc"/></linearGradient>
+    <linearGradient id="tileDev" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2c2925"/><stop offset="1" stop-color="#161513"/></linearGradient>
+    <linearGradient id="trail" gradientUnits="userSpaceOnUse" x1="30" y1="96" x2="84" y2="39">
+      <stop offset="0" stop-color="#b3492b" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#b3492b" stop-opacity="0.85"/>
+    </linearGradient>
+    <radialGradient id="moon" cx="0.36" cy="0.32" r="0.75"><stop offset="0" stop-color="#f08a64"/><stop offset="0.55" stop-color="#d9633e"/><stop offset="1" stop-color="#b3492b"/></radialGradient>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="2.5" stdDeviation="2.5" flood-color="#1b1a18" flood-opacity="0.2"/></filter>
+    <clipPath id="clip"><rect x="8" y="8" width="112" height="112" rx="26"/></clipPath>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#tile)"/>
+  
+  <path d="M30 96 C34 66 55 44 84 39" fill="none" stroke="url(#trail)" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="89" cy="39" r="17" fill="url(#moon)" filter="url(#soft)"/>
+  <circle cx="83" cy="32.5" r="4.5" fill="#fff" fill-opacity="0.22"/>
+  <rect x="8.5" y="8.5" width="111" height="111" rx="25.5" fill="none" stroke="rgba(27,26,24,0.12)" stroke-width="1"/>
 </svg>
