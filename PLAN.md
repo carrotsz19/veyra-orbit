@@ -47,11 +47,11 @@ These are planned for, not surprises:
 - [x] Downloads panel in the sidebar (Ctrl+J): pause, resume, cancel, open, show in folder. Programs and scripts are only ever shown in their folder.
 - [x] Bookmarks (star, Ctrl+D, orbit://bookmarks)
 - [x] Find in page (Ctrl+F, F3) and zoom indicator
-- [ ] Settings page, orbit://settings: search engine, theme, what opens at start, downloads folder, and clearing cookies, cache and site data
-- [ ] Remember permission answers per site, with a way to change them in Settings
-- [ ] Full screen video (the sidebar and toolbar hide), tab sound indicator and mute
-- [ ] Print (Ctrl+P) and the built-in PDF viewer
-- [ ] Ask before a page opens another app (mailto:, zoommtg:, ...)
+- [x] Settings page, orbit://settings: search engine, theme, what opens at start, downloads folder, and clearing cookies, cache and site data
+- [x] Remember permission answers per site, with a way to change them in Settings
+- [x] Full screen video (the sidebar and toolbar hide), tab sound indicator and mute, tab right-click menu
+- [x] Print (Ctrl+P) and the built-in PDF viewer
+- [x] Ask before a page opens another app (mailto:, zoommtg:, ...)
 - [x] Electron fuses: cookie encryption on, RunAsNode, NODE_OPTIONS and `--inspect` off, only-load-from-asar and asar integrity on (`build.electronFuses`). File-protocol privileges stay on until the UI moves to a custom protocol.
 - [ ] Dev/Prod channels and auto-update, like Veyra Study, each with its own token
 - [ ] Check Google sign-in, YouTube, Google Docs and Classroom

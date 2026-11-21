@@ -145,6 +145,23 @@ function createWindow(): void {
   const d = downloads
 
   w.once('ready-to-show', () => w.show())
+  // Windows flickers acrylic on a full-screen window, so full screen is solid; and a page in
+  // full screen leaves it when the window does (Esc, F11).
+  w.on('enter-full-screen', () => {
+    if (acrylic) {
+      w.setBackgroundMaterial('none')
+      w.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#15140f' : '#f3f1ec')
+    }
+    t.relayout()
+  })
+  w.on('leave-full-screen', () => {
+    if (acrylic) {
+      w.setBackgroundColor('#00000000')
+      w.setBackgroundMaterial('acrylic')
+    }
+    t.exitPageFullscreen()
+  })
+  w.on('resize', () => t.relayout())
   w.on('close', () => t.save())
   w.on('closed', () => {
     d.detach()
@@ -183,6 +200,7 @@ on('ready', () => {
   win.webContents.send('downloads', downloads?.list() ?? [])
   win.webContents.send('permissions:saved', perms?.listSaved() ?? [])
   sendSettings()
+  win.webContents.send('page-fullscreen', tabs.isPageFullscreen())
 })
 on('tab:new', (t, input?: unknown) => t.create((str(input) && toUrl(input, settings?.searchUrl())) || ''))
 on('tab:close', (t, id: unknown) => num(id) && t.close(id))
@@ -196,6 +214,8 @@ on('nav:forward', (t) => t.forward())
 on('nav:reload', (t) => t.reload())
 on('nav:stop', (t) => t.stop())
 on('nav:zoom-reset', (t) => t.resetZoom())
+on('tab:mute', (t, id: unknown) => num(id) && t.toggleMute(id))
+on('tab:menu', (t, id: unknown) => num(id) && t.tabMenu(id))
 on('bounds', (t, r: unknown) => {
   const rect = r as Rect | null
   if (rect === null) return t.setBounds(null)

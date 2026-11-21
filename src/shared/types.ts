@@ -11,6 +11,9 @@ export interface TabInfo {
   pinned: boolean
   /** Page zoom percentage, e.g. 100 for normal size. */
   zoom: number
+  /** Playing sound right now, and whether the tab's sound is off. */
+  audible: boolean
+  muted: boolean
   /** Whether this page's address is bookmarked (the star in the address bar). */
   bookmarked: boolean
   /** Set when the last load failed; the UI shows it in place of the page. */
@@ -134,6 +137,11 @@ export interface VeyraApi {
   answerExternalApp(id: number, open: boolean): void
   find(text: string, opts?: { forward?: boolean; findNext?: boolean }): void
   stopFind(): void
+  toggleMute(id: number): void
+  /** Opens the right-click menu for a tab in the sidebar. */
+  tabMenu(id: number): void
+  /** A page went full screen (true) or came back (false): the browser's UI hides meanwhile. */
+  onPageFullscreen(cb: (on: boolean) => void): () => void
   pauseDownload(id: number): void
   resumeDownload(id: number): void
   cancelDownload(id: number): void
