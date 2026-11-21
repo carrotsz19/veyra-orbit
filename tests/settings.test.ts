@@ -20,6 +20,7 @@ test('sanitizeSettings returns safe defaults for non-objects and drops unknown k
     compactMode: true,
     sleepAfterMinutes: 60,
     sleepPinnedTabs: true,
+    windowButtons: 'dots',
     extra: 'drop me',
     __proto__: { polluted: true }
   })
@@ -31,7 +32,8 @@ test('sanitizeSettings returns safe defaults for non-objects and drops unknown k
     askWhereToSave: true,
     compactMode: true,
     sleepAfterMinutes: 60,
-    sleepPinnedTabs: true
+    sleepPinnedTabs: true,
+    windowButtons: 'dots'
   })
   assert.equal('extra' in cleaned, false)
 })
@@ -45,7 +47,8 @@ test('sanitizeSettings rejects invalid field values and falls back to defaults',
     askWhereToSave: 'yes',
     compactMode: 'on',
     sleepAfterMinutes: 45,
-    sleepPinnedTabs: 1
+    sleepPinnedTabs: 1,
+    windowButtons: 'macos'
   })
   assert.deepEqual(cleaned, DEFAULT_SETTINGS)
 })
@@ -61,6 +64,7 @@ test('mergeSettings applies valid fields and ignores invalid or unknown ones', (
     compactMode: true,
     sleepAfterMinutes: 15,
     sleepPinnedTabs: true,
+    windowButtons: 'dots',
     unknown: 123
   })
   assert.deepEqual(next, {
@@ -71,7 +75,8 @@ test('mergeSettings applies valid fields and ignores invalid or unknown ones', (
     askWhereToSave: true,
     compactMode: true,
     sleepAfterMinutes: 15,
-    sleepPinnedTabs: true
+    sleepPinnedTabs: true,
+    windowButtons: 'dots'
   })
   assert.deepEqual(mergeSettings(next, null), next)
   assert.deepEqual(mergeSettings(next, { downloadsDir: 'bad\nline' }), next)
