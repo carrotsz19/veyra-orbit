@@ -5,6 +5,7 @@
 import { isAllowedUrl, isInternalUrl } from './url.ts'
 
 export const DEFAULT_WEB_PARTITION = 'persist:web'
+export const PRIVATE_WORKSPACE_ICON = 'eye-off'
 
 export const WORKSPACE_ACCENTS = [
   { id: 'clay', name: 'Clay', light: '#b3492b', dark: '#d9633e' },
@@ -35,11 +36,13 @@ export type WorkspaceIconId = (typeof WORKSPACE_ICONS)[number]
 export interface WorkspaceInfo {
   id: string
   name: string
-  /** Either a built-in Lucide icon id (WORKSPACE_ICONS) or a short emoji string. */
+  /** Either a built-in Lucide icon id (WORKSPACE_ICONS), 'eye-off' for private workspaces, or a short emoji string. */
   icon: string
   accent: WorkspaceAccentId
   /** When true, tabs in this workspace use persist:ws-<id> instead of the shared web session. */
   isolated: boolean
+  /** When true, this workspace uses a non-persistent in-memory partition and records no history or session restore. */
+  private?: boolean
 }
 
 export interface WorkspaceCreateInput {
@@ -122,10 +125,48 @@ export function createDefaultWorkspace(): WorkspaceInfo {
 }
 
 /** Returns the Electron session partition string for a workspace. */
-export function workspacePartition(ws: Pick<WorkspaceInfo, 'id' | 'isolated'>): string {
+export function workspacePartition(ws: Pick<WorkspaceInfo, 'id' | 'isolated' | 'private'>): string {
+  if (ws.private) {
+    const id = sanitizeWorkspaceId(ws.id) ?? `priv-${Date.now().toString(36)}`
+    return `private-ws-${id}`
+  }
   if (!ws.isolated) return DEFAULT_WEB_PARTITION
   const id = sanitizeWorkspaceId(ws.id)
   return id ? `persist:ws-${id}` : DEFAULT_WEB_PARTITION
+}
+
+export function isPrivatePartition(partition: string): boolean {
+  return partition.startsWith('private-ws-') && !partition.startsWith('persist:')
+}
+
+/** Creates a new ephemeral private workspace with a unique id and non-persistent partition. */
+export function createPrivateWorkspaceEntry(
+  existing: readonly WorkspaceInfo[],
+  uniqueToken?: string
+): { workspaces: WorkspaceInfo[]; created: WorkspaceInfo } {
+  const usedIds = new Set(existing.map((w) => w.id))
+  const existingPrivateCount = existing.filter((w) => w.private).length
+  const name = existingPrivateCount === 0 ? 'Private' : `Private ${existingPrivateCount + 1}`
+
+  const rawToken =
+    (uniqueToken ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`)
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, '')
+      .slice(0, 24) || '1'
+  let id = `private-${rawToken}`
+  for (let n = 2; usedIds.has(id); n++) {
+    id = `private-${rawToken.slice(0, 18)}-${n}`
+  }
+
+  const created: WorkspaceInfo = {
+    id,
+    name,
+    icon: PRIVATE_WORKSPACE_ICON,
+    accent: 'slate',
+    isolated: true,
+    private: true
+  }
+  return { workspaces: [...existing, created], created }
 }
 
 function slugifyId(name: string, existing: Set<string>): string {
@@ -167,6 +208,9 @@ export function updateWorkspaceEntry(
   const idx = existing.findIndex((w) => w.id === id)
   if (idx < 0) return { workspaces: [...existing], updated: null, isolationChanged: false }
   const cur = existing[idx]
+  if (cur.private) {
+    return { workspaces: [...existing], updated: cur, isolationChanged: false }
+  }
   const next: WorkspaceInfo = {
     ...cur,
     name: patch.name !== undefined ? sanitizeWorkspaceName(patch.name, cur.name) : cur.name,
@@ -186,6 +230,11 @@ export function deleteWorkspaceEntry(
   if (existing.length <= 1) return { workspaces: [...existing], deleted: false, nextActiveId: activeId }
   const idx = existing.findIndex((w) => w.id === id)
   if (idx < 0) return { workspaces: [...existing], deleted: false, nextActiveId: activeId }
+  const target = existing[idx]
+  // Never allow deleting the last non-private workspace while only private workspaces remain.
+  if (!target.private && existing.filter((w) => !w.private).length <= 1) {
+    return { workspaces: [...existing], deleted: false, nextActiveId: activeId }
+  }
   const workspaces = existing.filter((w) => w.id !== id)
   let nextActiveId = activeId
   if (activeId === id || !workspaces.some((w) => w.id === activeId)) {
@@ -249,6 +298,7 @@ export function parseSavedSession(raw: unknown): SavedSession {
     const workspaces: SavedWorkspace[] = []
     for (const entry of raw.workspaces) {
       if (!isPlainObject(entry)) continue
+      if (entry.private === true) continue
       const name = sanitizeWorkspaceName(entry.name, `Space ${workspaces.length + 1}`)
       const rawId = sanitizeWorkspaceId(entry.id)
       const id = rawId && !usedIds.has(rawId) ? rawId : slugifyId(name, usedIds)
@@ -284,5 +334,35 @@ export function parseSavedSession(raw: unknown): SavedSession {
         active: clampActive(raw.active, legacyTabs.length)
       }
     ]
+  }
+}
+
+/**
+ * Serializes workspaces and tabs for session.json, excluding every private workspace and its tabs.
+ * If the active workspace is private, activeWorkspaceId falls back to the first saved workspace.
+ */
+export function buildSavedSession(
+  workspaces: readonly WorkspaceInfo[],
+  activeWorkspaceId: string,
+  getTabs: (wsId: string) => { tabs: SavedTab[]; active: number }
+): SavedSession {
+  const persistent = workspaces.filter((ws) => !ws.private)
+  const list = persistent.length > 0 ? persistent : [createDefaultWorkspace()]
+  const savedActiveId = list.some((ws) => ws.id === activeWorkspaceId) ? activeWorkspaceId : list[0].id
+  return {
+    version: 2,
+    activeWorkspaceId: savedActiveId,
+    workspaces: list.map((ws) => {
+      const { tabs, active } = getTabs(ws.id)
+      return {
+        id: ws.id,
+        name: ws.name,
+        icon: ws.icon,
+        accent: ws.accent,
+        isolated: ws.isolated,
+        tabs,
+        active: clampActive(active, tabs.length)
+      }
+    })
   }
 }

@@ -69,6 +69,7 @@ export interface MenuTabContext {
 export interface MenuWorkspaceContext {
   id: string
   name: string
+  private?: boolean
 }
 
 export interface MenuHistoryContext {
@@ -137,6 +138,7 @@ export function buildMenus(ctx: MenuBuildContext): MenuSection[] {
   const fileItems: MenuEntry[] = [
     { kind: 'item', id: 'file:new-tab', label: 'New tab', keys: 'Ctrl+T' },
     { kind: 'item', id: 'file:new-workspace', label: 'New workspace' },
+    { kind: 'item', id: 'file:new-private-workspace', label: 'New private workspace', keys: 'Ctrl+Shift+N' },
     { kind: 'item', id: 'file:reopen-closed', label: 'Reopen closed tab', keys: 'Ctrl+Shift+T', disabled: !ctx.canReopenClosed },
     SEP,
     { kind: 'item', id: 'file:print', label: 'Print…', keys: 'Ctrl+P', disabled: !webPage },
@@ -210,6 +212,7 @@ export function buildMenus(ctx: MenuBuildContext): MenuSection[] {
       : [{ kind: 'item', id: 'bookmarks:empty', label: 'No bookmarks yet', disabled: true } as MenuItemEntry])
   ]
 
+  const activeIsPrivate = !!ctx.workspaces.find((ws) => ws.id === ctx.activeWorkspaceId)?.private
   const workspaceItems: MenuEntry[] = [
     ...ctx.workspaces.map(
       (ws, i): MenuItemEntry => ({
@@ -221,7 +224,9 @@ export function buildMenus(ctx: MenuBuildContext): MenuSection[] {
       })
     ),
     ...(ctx.workspaces.length > 0 ? [SEP] : []),
-    { kind: 'item', id: 'workspaces:new', label: 'New workspace' }
+    { kind: 'item', id: 'workspaces:new', label: 'New workspace' },
+    { kind: 'item', id: 'workspaces:new-private', label: 'New private workspace', keys: 'Ctrl+Shift+N' },
+    ...(activeIsPrivate ? [{ kind: 'item', id: 'workspaces:close-private', label: 'Close private workspace' } as MenuItemEntry] : [])
   ]
 
   const helpItems: MenuEntry[] = [

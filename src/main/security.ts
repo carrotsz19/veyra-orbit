@@ -23,7 +23,7 @@ export interface PermissionStore {
   removePermission(origin: string, permission: string): void
 }
 
-type Pending = PermissionAsk & { resolve: (allow: boolean) => void }
+type Pending = PermissionAsk & { resolve: (allow: boolean) => void; isPrivate: boolean }
 
 export class Permissions {
   private next = 1
@@ -35,7 +35,8 @@ export class Permissions {
     private tabIdOf: (wc: WebContents) => number | null,
     private publish: (asks: PermissionAsk[]) => void,
     private store?: PermissionStore,
-    private onSavedChanged: () => void = () => {}
+    private onSavedChanged: () => void = () => {},
+    private isPrivateTab: (tabId: number | null) => boolean = () => false
   ) {
     if (store) {
       for (const row of store.permissions()) {
@@ -49,21 +50,26 @@ export class Permissions {
       const origin = normalizePermissionOrigin(details.requestingUrl || wc.getURL())
       if (ALWAYS.has(permission)) return callback(true)
       if (!origin || !ASKABLE.has(permission)) return callback(false)
+      const tabId = this.tabIdOf(wc)
+      const isPrivate = this.isPrivateTab(tabId)
       const key = `${origin}|${permission}`
-      const known = this.answers.get(key)
-      if (known !== undefined) return callback(known)
+      if (!isPrivate) {
+        const known = this.answers.get(key)
+        if (known !== undefined) return callback(known)
+      }
       // One question per site and permission; repeat requests wait on the same answer.
-      const same = this.pending.find((p) => p.origin === origin && p.permission === permission)
+      const same = this.pending.find((p) => p.origin === origin && p.permission === permission && p.isPrivate === isPrivate)
       if (same) {
         const prev = same.resolve
         same.resolve = (allow) => (prev(allow), callback(allow))
         return
       }
-      this.pending.push({ id: this.next++, tabId: this.tabIdOf(wc), origin, permission, resolve: callback })
+      this.pending.push({ id: this.next++, tabId, origin, permission, resolve: callback, isPrivate })
       this.emit()
     })
-    sess.setPermissionCheckHandler((_wc, permission, requestingOrigin) => {
+    sess.setPermissionCheckHandler((wc, permission, requestingOrigin) => {
       if (ALWAYS.has(permission)) return true
+      if (wc && this.isPrivateTab(this.tabIdOf(wc))) return false
       return this.answers.get(`${normalizePermissionOrigin(requestingOrigin)}|${permission}`) === true
     })
     // USB, HID and serial devices: never, for now.
@@ -74,7 +80,7 @@ export class Permissions {
     const i = this.pending.findIndex((p) => p.id === id)
     if (i < 0) return
     const [p] = this.pending.splice(i, 1)
-    if (remember) {
+    if (remember && !p.isPrivate) {
       this.answers.set(`${p.origin}|${p.permission}`, allow)
       if (this.store?.setPermission(p.origin, p.permission, allow)) this.onSavedChanged()
     }
@@ -125,7 +131,7 @@ export class Permissions {
   }
 
   private emit(): void {
-    this.publish(this.pending.map(({ resolve: _r, ...ask }) => ask))
+    this.publish(this.pending.map(({ resolve: _r, isPrivate: _p, ...ask }) => ask))
   }
 }
 

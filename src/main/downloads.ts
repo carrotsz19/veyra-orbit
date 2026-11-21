@@ -44,6 +44,11 @@ export class Downloads {
     sess.on('will-download', this.onWillDownload)
   }
 
+  detachSession(sess: Session): void {
+    if (!this.attached.delete(sess)) return
+    sess.off('will-download', this.onWillDownload)
+  }
+
   detach(): void {
     for (const sess of this.attached) {
       sess.off('will-download', this.onWillDownload)
