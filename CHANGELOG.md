@@ -4,6 +4,8 @@ All notable changes to Veyra Orbit are documented here.
 
 ## Unreleased
 
+## 26.11.2 — 2026-11-21
+
 - A new icon: a clay moon on its orbit. Veyra Orbit Dev has a dark tile with a clay corner, so you can tell the two apart.
 - Settings has a new look, with sections down the side, and it scrolls properly now.
 - Google sign-in works ("This browser or app may not be secure" is gone), in tabs and sign-in pop-ups.

@@ -1,7 +1,7 @@
 {
   "name": "veyra-orbit",
   "productName": "Veyra Orbit",
-  "version": "26.11.1",
+  "version": "26.11.2",
   "description": "Veyra Orbit: a calm study browser from Veyra.",
   "main": "out/main/index.js",
   "private": true,
