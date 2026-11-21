@@ -3,6 +3,7 @@
  * Pure, so it can be shared between main, renderer and unit tests.
  */
 import { isAllowedUrl, isInternalUrl } from './url.ts'
+import { DEFAULT_SPLIT_RATIO, MAX_SPLIT_PANES, clampSplitRatio } from './split.ts'
 
 export const DEFAULT_WEB_PARTITION = 'persist:web'
 
@@ -62,9 +63,17 @@ export interface SavedTab {
   pinned: boolean
 }
 
+export interface SavedSplitGroup {
+  /** Indices into the workspace's saved tabs array (2..4 unique non-pinned indices). */
+  tabs: number[]
+  colRatio: number
+  rowRatio: number
+}
+
 export interface SavedWorkspace extends WorkspaceInfo {
   tabs: SavedTab[]
   active: number
+  splits?: SavedSplitGroup[]
 }
 
 export interface SavedSession {
@@ -233,6 +242,34 @@ function clampActive(raw: unknown, count: number): number {
   return Math.max(0, Math.min(n, count - 1))
 }
 
+function sanitizeSavedSplits(raw: unknown, tabs: readonly SavedTab[]): SavedSplitGroup[] {
+  if (!Array.isArray(raw) || tabs.length < 2) return []
+  const used = new Set<number>()
+  const out: SavedSplitGroup[] = []
+  for (const entry of raw) {
+    if (!isPlainObject(entry) || !Array.isArray(entry.tabs)) continue
+    const indices: number[] = []
+    for (const v of entry.tabs) {
+      if (typeof v !== 'number' || !Number.isInteger(v)) continue
+      if (v < 0 || v >= tabs.length) continue
+      if (tabs[v].pinned || used.has(v)) continue
+      used.add(v)
+      indices.push(v)
+      if (indices.length >= MAX_SPLIT_PANES) break
+    }
+    if (indices.length < 2) {
+      for (const idx of indices) used.delete(idx)
+      continue
+    }
+    out.push({
+      tabs: indices,
+      colRatio: typeof entry.colRatio === 'number' ? clampSplitRatio(entry.colRatio) : DEFAULT_SPLIT_RATIO,
+      rowRatio: typeof entry.rowRatio === 'number' ? clampSplitRatio(entry.rowRatio) : DEFAULT_SPLIT_RATIO
+    })
+  }
+  return out
+}
+
 /**
  * Parses session.json (V2 with workspaces, or legacy V1 flat tab list) into a safe SavedSession.
  * Legacy V1 sessions migrate cleanly into a single default "Personal" workspace.
@@ -254,6 +291,7 @@ export function parseSavedSession(raw: unknown): SavedSession {
       const id = rawId && !usedIds.has(rawId) ? rawId : slugifyId(name, usedIds)
       usedIds.add(id)
       const tabs = sanitizeSavedTabs(entry.tabs)
+      const splits = sanitizeSavedSplits(entry.splits, tabs)
       workspaces.push({
         id,
         name,
@@ -261,7 +299,8 @@ export function parseSavedSession(raw: unknown): SavedSession {
         accent: isWorkspaceAccent(entry.accent) ? entry.accent : WORKSPACE_ACCENTS[workspaces.length % WORKSPACE_ACCENTS.length].id,
         isolated: entry.isolated === true,
         tabs,
-        active: clampActive(entry.active, tabs.length)
+        active: clampActive(entry.active, tabs.length),
+        ...(splits.length ? { splits } : {})
       })
     }
     if (!workspaces.length) {

@@ -160,3 +160,35 @@ test('parseSavedSession preserves valid V2 workspaces and recovers safely from c
   assert.equal(corrupt.workspaces.length, 1)
   assert.equal(corrupt.workspaces[0].id, 'personal')
 })
+
+test('parseSavedSession preserves valid per-workspace split groups and drops invalid or pinned ones', () => {
+  const v2 = {
+    version: 2,
+    activeWorkspaceId: 'personal',
+    workspaces: [
+      {
+        id: 'personal',
+        name: 'Personal',
+        icon: 'home',
+        accent: 'clay',
+        isolated: false,
+        tabs: [
+          { url: 'https://pinned.example', title: 'Pinned', pinned: true },
+          { url: 'https://a.example', title: 'A', pinned: false },
+          { url: 'https://b.example', title: 'B', pinned: false },
+          { url: 'https://c.example', title: 'C', pinned: false }
+        ],
+        active: 1,
+        splits: [
+          { tabs: [1, 2], colRatio: 0.62, rowRatio: 0.5 },
+          // Overlaps tab 2 and includes pinned tab 0 and out-of-range 99 -> leaves <2 valid tabs -> dropped
+          { tabs: [0, 2, 99], colRatio: 0.5, rowRatio: 0.5 },
+          // Out-of-bounds ratio clamps
+          { tabs: [3], colRatio: 0.1, rowRatio: 0.9 }
+        ]
+      }
+    ]
+  }
+  const parsed = parseSavedSession(v2)
+  assert.deepEqual(parsed.workspaces[0].splits, [{ tabs: [1, 2], colRatio: 0.62, rowRatio: 0.5 }])
+})
