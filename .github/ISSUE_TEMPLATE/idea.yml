@@ -1,0 +1,14 @@
+name: Suggest an idea
+description: Something you'd like Veyra Orbit to do.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: "**Everything you post here is public.** Leave out personal details."
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: What would you like, and what would it help you do?
+    validations:
+      required: true
