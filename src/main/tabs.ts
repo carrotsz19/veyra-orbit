@@ -302,6 +302,11 @@ export class Tabs {
     return !!this.workspaces.find((w) => w.id === wsId)?.private
   }
 
+  activeWorkspace(): WorkspaceInfo | null {
+    const ws = this.workspaces.find((w) => w.id === this.activeWorkspaceId)
+    return ws ? { ...ws } : null
+  }
+
   isPrivateTab(tabId: number | null): boolean {
     if (tabId === null) return false
     const tab = this.get(tabId)

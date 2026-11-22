@@ -41,6 +41,7 @@ import { FindBar } from './components/FindBar'
 import { BookmarksPage, DownloadsPage, HistoryPage } from './components/Library'
 import { SettingsPage } from './components/SettingsPage'
 import { ToolbarCustomizeSheet } from './components/ToolbarEditor'
+import { WorkspaceEditSheet } from './components/WorkspaceEditSheet'
 
 const api = window.veyra
 
@@ -62,9 +63,9 @@ function renderTabSurface(
   downloads: DownloadInfo[],
   onOpenAppearance: () => void,
   shot?: string,
-  isPrivate = false
+  workspace?: import('@shared/types').WorkspaceInfo
 ): React.JSX.Element | null {
-  if (!tab.url) return <StartPage tabId={tab.id} settings={settings} isPrivate={isPrivate} onOpenAppearance={onOpenAppearance} />
+  if (!tab.url) return <StartPage tabId={tab.id} settings={settings} workspace={workspace} isPrivate={!!workspace?.private} onOpenAppearance={onOpenAppearance} />
   if (tab.url === 'orbit://history') return <HistoryPage key={tab.id} tabId={tab.id} />
   if (tab.url === 'orbit://bookmarks') return <BookmarksPage key={tab.id} tabId={tab.id} />
   if (tab.url === 'orbit://downloads') return <DownloadsPage key={tab.id} items={downloads} />
@@ -105,7 +106,10 @@ export function App(): React.JSX.Element {
   const [resizingSidebar, setResizingSidebar] = useState(false)
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [toolbarSheetOpen, setToolbarSheetOpen] = useState(false)
-  const toolbarSheetOverlayRef = useRef(false)
+  const [workspaceSheet, setWorkspaceSheet] = useState<
+    { mode: 'create' } | { mode: 'edit'; workspace: import('@shared/types').WorkspaceInfo } | null
+  >(null)
+  const modalOverlayRef = useRef(false)
   const pageRef = useRef<HTMLDivElement>(null)
   const pageFullscreenRef = useRef(false)
   const maxDownloadId = useRef(0)
@@ -239,20 +243,21 @@ export function App(): React.JSX.Element {
     }
   }, [dragTabId])
 
-  // While the Customize toolbar sheet is open, swap native page views for screenshots so the sheet renders above web pages.
+  // While an in-window modal sheet (Customize toolbar or Edit workspace) is open, swap native page views for screenshots.
+  const anyModalSheetOpen = toolbarSheetOpen || workspaceSheet !== null
   useEffect(() => {
-    if (toolbarSheetOpen && !toolbarSheetOverlayRef.current) {
-      toolbarSheetOverlayRef.current = true
+    if (anyModalSheetOpen && !modalOverlayRef.current) {
+      modalOverlayRef.current = true
       void api.overlay(true).then((captured) => {
-        if (!toolbarSheetOverlayRef.current) return
+        if (!modalOverlayRef.current) return
         setShots(captured)
-        requestAnimationFrame(() => requestAnimationFrame(() => toolbarSheetOverlayRef.current && api.hidePageForOverlay()))
+        requestAnimationFrame(() => requestAnimationFrame(() => modalOverlayRef.current && api.hidePageForOverlay()))
       })
-    } else if (!toolbarSheetOpen && toolbarSheetOverlayRef.current) {
-      toolbarSheetOverlayRef.current = false
+    } else if (!anyModalSheetOpen && modalOverlayRef.current) {
+      modalOverlayRef.current = false
       void api.overlay(false).then(() => setShots(null))
     }
-  }, [toolbarSheetOpen])
+  }, [anyModalSheetOpen])
 
   const sendBounds = useCallback((): void => {
     if (pageFullscreenRef.current) return
@@ -333,7 +338,7 @@ export function App(): React.JSX.Element {
   const tabExternalAsks = externalAsks.filter((a) => a.tabId === null || a.tabId === -1 || visibleTabIds.has(a.tabId))
 
   const handleNewWorkspace = useCallback((): void => {
-    setNewWorkspaceTick((n) => n + 1)
+    setWorkspaceSheet({ mode: 'create' })
   }, [])
 
   const handleOpenSettingsSection = useCallback((sectionId: string): void => {
@@ -537,6 +542,7 @@ export function App(): React.JSX.Element {
           }}
           onDragTabChange={setDragTabId}
           onNewWorkspace={handleNewWorkspace}
+          onEditWorkspace={(ws) => setWorkspaceSheet({ mode: 'edit', workspace: ws })}
         />
       )}
       {!sideCollapsed && (
@@ -557,6 +563,7 @@ export function App(): React.JSX.Element {
           onPointerEdge={compact.enabled ? (inside) => api.setCompactHover('sidebar', inside) : undefined}
           onDragTabChange={setDragTabId}
           openNewWorkspaceTick={newWorkspaceTick}
+          onOpenWorkspaceSheet={setWorkspaceSheet}
         />
       )}
       {!compact.enabled && !pageFullscreen && !sideCollapsed && (
@@ -651,7 +658,7 @@ export function App(): React.JSX.Element {
                     }}
                   >
                     <div className="split-pane-inner">
-                      {renderTabSurface(pane, settings, update, downloads, () => handleOpenSettingsSection('set-appearance'), shots?.[pane.id], !!activeWorkspace?.private)}
+                      {renderTabSurface(pane, settings, update, downloads, () => handleOpenSettingsSection('set-appearance'), shots?.[pane.id], activeWorkspace)}
                     </div>
                   </div>
                 )
@@ -678,7 +685,7 @@ export function App(): React.JSX.Element {
               ))}
             </>
           ) : (
-            active && renderTabSurface(active, settings, update, downloads, () => handleOpenSettingsSection('set-appearance'), shots?.[active.id], !!activeWorkspace?.private)
+            active && renderTabSurface(active, settings, update, downloads, () => handleOpenSettingsSection('set-appearance'), shots?.[active.id], activeWorkspace)
           )}
 
           {activeDropSide && (
@@ -700,6 +707,19 @@ export function App(): React.JSX.Element {
           items={appearance.toolbarItems}
           onChange={(next) => void api.updateSettings({ appearance: { toolbarItems: next } })}
           onClose={() => setToolbarSheetOpen(false)}
+        />
+      )}
+      {workspaceSheet && (
+        <WorkspaceEditSheet
+          mode={workspaceSheet.mode}
+          workspace={workspaceSheet.mode === 'edit' ? workspaceSheet.workspace : undefined}
+          workspaceCount={state.workspaces.length}
+          tabCount={workspaceSheet.mode === 'edit' ? (state.tabCounts[workspaceSheet.workspace.id] ?? 0) : 0}
+          canDelete={
+            workspaceSheet.mode === 'edit' &&
+            (workspaceSheet.workspace.private || state.workspaces.filter((w) => !w.private).length > 1)
+          }
+          onClose={() => setWorkspaceSheet(null)}
         />
       )}
       {dlFly && (

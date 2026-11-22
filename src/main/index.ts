@@ -26,7 +26,7 @@ import {
 } from '../shared/compact'
 import { resolveSleepTimeoutMs } from '../shared/sleep'
 import { computeMemorySnapshot } from '../shared/memory'
-import { WORKSPACE_ACCENTS } from '../shared/workspaces'
+import { WORKSPACE_ACCENTS, applyWorkspaceAppearance } from '../shared/workspaces'
 import {
   buildPaletteResults,
   resolveTypedPaletteText,
@@ -83,8 +83,18 @@ const COMPACT_HIDE_DELAY_MS = 240
 const PALETTE_PREWARM_DELAY_MS = 4_000
 
 function resolveCurrentAppearance(): ResolvedAppearance {
-  const appCfg = settings?.get().appearance ?? DEFAULT_APPEARANCE
-  return resolveAppearanceTokens(appCfg, nativeTheme.shouldUseDarkColors, acrylic, false)
+  const baseCfg = settings?.get().appearance ?? DEFAULT_APPEARANCE
+  const effectiveCfg = applyWorkspaceAppearance(baseCfg, tabs?.activeWorkspace())
+  return resolveAppearanceTokens(effectiveCfg, nativeTheme.shouldUseDarkColors, acrylic, false)
+}
+
+let lastWorkspaceLookKey = ''
+function syncWorkspaceAppearanceIfChanged(): void {
+  const ws = tabs?.activeWorkspace()
+  const key = `${ws?.id ?? ''}|${ws?.themePreset ?? ''}|${ws?.accentColor ?? ''}`
+  if (key === lastWorkspaceLookKey) return
+  lastWorkspaceLookKey = key
+  applyWindowAppearance()
 }
 
 function overlay(tokens = resolveCurrentAppearance(), useAcrylic = false): Electron.TitleBarOverlayOptions {
@@ -1054,6 +1064,7 @@ function createWindow(): void {
       w.webContents.send('menu:focus-bar')
     },
     onState: (st) => {
+      syncWorkspaceAppearanceIfChanged()
       compactSidebar?.send('state', st)
       compactTitlebar?.send('state', st)
       if (settings?.get().compactMode && compactTitlebar?.isRevealed()) {
@@ -1327,6 +1338,7 @@ function createWindow(): void {
   void em.whenSessionReady(WEB_PARTITION).finally(() => {
     if (!w.isDestroyed() && tabs === t) {
       t.restore(s.get().startup !== 'new-tab')
+      syncWorkspaceAppearanceIfChanged()
       syncCompactMode()
     }
   })
@@ -1779,7 +1791,11 @@ on('split:ratio', (t, groupId: unknown, kind: unknown, ratio: unknown) => {
 onSurface('split:swap', (t, groupId: unknown) => {
   if (str(groupId)) t.swapSplit(groupId)
 })
-onSurface('workspace:switch', (t, id: unknown) => str(id) && t.switchWorkspace(id))
+onSurface('workspace:switch', (t, id: unknown) => {
+  if (!str(id)) return
+  t.switchWorkspace(id)
+  syncWorkspaceAppearanceIfChanged()
+})
 onSurface('compact:toggle', () => toggleCompactMode())
 onSurface('compact:pin', (_t, kind: unknown, pinned: unknown) => {
   if (kind !== 'omnibox' && kind !== 'sidebar') return
@@ -1825,13 +1841,20 @@ handleSurface('workspace:create', (input) => {
     name: str(raw.name) ? raw.name : '',
     icon: str(raw.icon) ? raw.icon : undefined,
     accent: str(raw.accent) ? (raw.accent as WorkspaceCreateInput['accent']) : undefined,
-    isolated: typeof raw.isolated === 'boolean' ? raw.isolated : undefined
+    isolated: typeof raw.isolated === 'boolean' ? raw.isolated : undefined,
+    themePreset: typeof raw.themePreset === 'string' ? (raw.themePreset as WorkspaceCreateInput['themePreset']) : undefined,
+    accentColor: typeof raw.accentColor === 'string' ? raw.accentColor : undefined,
+    startBackground: typeof raw.startBackground === 'string' ? (raw.startBackground as WorkspaceCreateInput['startBackground']) : undefined
   }
-  return tabs.createWorkspace(req)
+  const created = tabs.createWorkspace(req)
+  syncWorkspaceAppearanceIfChanged()
+  return created
 })
 
 handle('workspace:create-private', () => {
-  return tabs?.createPrivateWorkspace() ?? null
+  const created = tabs?.createPrivateWorkspace() ?? null
+  syncWorkspaceAppearanceIfChanged()
+  return created
 })
 
 handleSurface('workspace:update', (id, patch) => {
@@ -1842,12 +1865,19 @@ handleSurface('workspace:update', (id, patch) => {
   if (str(raw.icon)) req.icon = raw.icon
   if (str(raw.accent)) req.accent = raw.accent as WorkspaceUpdateInput['accent']
   if (typeof raw.isolated === 'boolean') req.isolated = raw.isolated
-  return tabs.updateWorkspace(id, req)
+  if (typeof raw.themePreset === 'string') req.themePreset = raw.themePreset as WorkspaceUpdateInput['themePreset']
+  if (typeof raw.accentColor === 'string') req.accentColor = raw.accentColor
+  if (typeof raw.startBackground === 'string') req.startBackground = raw.startBackground as WorkspaceUpdateInput['startBackground']
+  const updated = tabs.updateWorkspace(id, req)
+  syncWorkspaceAppearanceIfChanged()
+  return updated
 })
 
 handleSurface('workspace:delete', (id) => {
   if (!tabs || !str(id)) return false
-  return tabs.deleteWorkspace(id)
+  const ok = tabs.deleteWorkspace(id)
+  if (ok) syncWorkspaceAppearanceIfChanged()
+  return ok
 })
 
 handleSurface('suggest', (input) => {

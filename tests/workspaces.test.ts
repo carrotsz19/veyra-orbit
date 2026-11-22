@@ -4,6 +4,7 @@ import {
   DEFAULT_WEB_PARTITION,
   PRIVATE_WORKSPACE_ICON,
   WORKSPACE_ACCENTS,
+  applyWorkspaceAppearance,
   buildSavedSession,
   createDefaultWorkspace,
   createPrivateWorkspaceEntry,
@@ -16,6 +17,7 @@ import {
   workspaceAtShortcut,
   workspacePartition
 } from '../src/shared/workspaces.ts'
+import { DEFAULT_APPEARANCE, sanitizeAppearance } from '../src/shared/appearance.ts'
 
 test('workspacePartition shares persist:web by default and isolates persist:ws-<id> when requested', () => {
   const shared = createDefaultWorkspace()
@@ -273,4 +275,62 @@ test('saving keeps split groups for normal workspaces and still drops private on
   assert.deepEqual(saved.workspaces[0].splits, [{ tabs: [0, 1], colRatio: 0.6, rowRatio: 0.5 }])
   // Round trip through the loader keeps the split.
   assert.deepEqual(parseSavedSession(saved).workspaces[0].splits, [{ tabs: [0, 1], colRatio: 0.6, rowRatio: 0.5 }])
+})
+
+test('per-workspace look overrides sanitize, persist through session save/load, and apply over global appearance', () => {
+  const { workspaces, created } = createWorkspaceEntry([createDefaultWorkspace()], {
+    name: 'Focus Lab',
+    themePreset: 'ocean',
+    accentColor: '#1B6D85',
+    startBackground: 'tinted'
+  })
+  assert.equal(created.themePreset, 'ocean')
+  assert.equal(created.accentColor, '#1b6d85')
+  assert.equal(created.startBackground, 'tinted')
+
+  const base = sanitizeAppearance(DEFAULT_APPEARANCE)
+  const effective = applyWorkspaceAppearance(base, created)
+  assert.equal(effective.preset, 'ocean')
+  assert.equal(effective.accent, '#1b6d85')
+  assert.equal(base.preset, 'veyra-clay')
+  assert.equal(base.accent, '')
+
+  const { workspaces: clearedWs, updated } = updateWorkspaceEntry(workspaces, created.id, {
+    themePreset: '',
+    accentColor: '',
+    startBackground: ''
+  })
+  assert.equal(updated?.themePreset, undefined)
+  assert.equal(updated?.accentColor, undefined)
+  assert.equal(updated?.startBackground, undefined)
+  assert.equal(applyWorkspaceAppearance(base, updated), base)
+
+  const saved = buildSavedSession(workspaces, created.id, () => ({ tabs: [], active: 0 }))
+  const restored = parseSavedSession({
+    ...saved,
+    workspaces: [
+      ...saved.workspaces,
+      {
+        id: 'badlook',
+        name: 'Bad Look',
+        icon: 'star',
+        accent: 'clay',
+        isolated: false,
+        themePreset: 'not-a-preset',
+        accentColor: 'javascript:alert(1)',
+        startBackground: 'video',
+        tabs: [],
+        active: 0
+      }
+    ]
+  })
+  const restoredFocus = restored.workspaces.find((w) => w.id === created.id)!
+  assert.equal(restoredFocus.themePreset, 'ocean')
+  assert.equal(restoredFocus.accentColor, '#1b6d85')
+  assert.equal(restoredFocus.startBackground, 'tinted')
+  const restoredBad = restored.workspaces.find((w) => w.id === 'badlook')!
+  assert.equal(restoredBad.themePreset, undefined)
+  assert.equal(restoredBad.accentColor, undefined)
+  assert.equal(restoredBad.startBackground, undefined)
+  assert.equal(clearedWs.length, 2)
 })

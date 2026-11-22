@@ -1370,6 +1370,101 @@ html[data-platform='darwin'] .titlebar {
   font-size: 11.5px;
   color: var(--label-tertiary);
 }
+
+/* ---- Edit workspace sheet (WorkspaceEditSheet.tsx) ---------------------- */
+.ws-sheet-card {
+  max-width: 520px;
+}
+.ws-sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ws-sheet-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ws-sheet-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--label-secondary);
+}
+.ws-theme-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ws-theme-pill {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--fill-tertiary);
+  border: 1px solid var(--hairline);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--label-secondary);
+  transition: background-color var(--t-fast) var(--ease-state), border-color var(--t-fast) var(--ease-state), color var(--t-fast) var(--ease-state);
+}
+.ws-theme-pill:hover {
+  background: var(--fill-hover);
+  color: var(--label-primary);
+}
+.ws-theme-pill.on {
+  background: var(--tint-soft);
+  border-color: var(--tint);
+  color: var(--label-primary);
+}
+.ws-theme-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--r-pill);
+  border: 1.5px solid;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.ws-theme-dot i {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-pill);
+  display: block;
+}
+.ws-accent-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ws-sheet-foot {
+  justify-content: space-between;
+}
+.ws-sheet-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.ws-sheet-del {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--warning);
+}
+.ws-sheet-del-confirm {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--label-secondary);
+}
+.ws-sheet-del-confirm > span {
+  margin-right: auto;
+}
 .omni {
   flex: 1;
   max-width: 720px;

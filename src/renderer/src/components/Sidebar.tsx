@@ -28,7 +28,7 @@ import {
   VolumeX,
   X
 } from 'lucide-react'
-import type { BrowserState, DownloadInfo, SplitGroup, TabInfo, WorkspaceAccentId, WorkspaceIconId, WorkspaceInfo } from '@shared/types'
+import type { BrowserState, DownloadInfo, MenuEntry, SplitGroup, TabInfo, WorkspaceAccentId, WorkspaceIconId, WorkspaceInfo } from '@shared/types'
 import { WORKSPACE_ACCENTS, WORKSPACE_ICONS, isBuiltInWorkspaceIcon } from '@shared/workspaces'
 import { displayUrl } from '@shared/url'
 import { DownloadTriggerButton, Downloads } from './Downloads'
@@ -105,6 +105,8 @@ interface Props {
   onPointerEdge?: (inside: boolean) => void
   onDragTabChange?: (tabId: number | null) => void
   openNewWorkspaceTick?: number
+  /** When provided (main window), opens the full "Edit workspace…" sheet instead of inline compact form. */
+  onOpenWorkspaceSheet?: (req: { mode: 'create' } | { mode: 'edit'; workspace: WorkspaceInfo }) => void
 }
 
 export function Sidebar({
@@ -118,7 +120,8 @@ export function Sidebar({
   onEditorOpenChange,
   onPointerEdge,
   onDragTabChange,
-  openNewWorkspaceTick = 0
+  openNewWorkspaceTick = 0,
+  onOpenWorkspaceSheet
 }: Props): React.JSX.Element {
   const [dragId, setDragId] = useState<number | null>(null)
   const [editor, setEditor] = useState<EditorState | null>(null)
@@ -129,6 +132,10 @@ export function Sidebar({
 
   useEffect(() => {
     if (openNewWorkspaceTick <= 0) return
+    if (onOpenWorkspaceSheet) {
+      onOpenWorkspaceSheet({ mode: 'create' })
+      return
+    }
     const nextAccent = WORKSPACE_ACCENTS[state.workspaces.length % WORKSPACE_ACCENTS.length].id
     setEditor({
       mode: 'create',
@@ -139,6 +146,31 @@ export function Sidebar({
       confirmDelete: false
     })
   }, [openNewWorkspaceTick]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handle floating context menu actions for workspace dots (ws-ctx:*).
+  useEffect(() => {
+    return api.menu.onPicked((id) => {
+      if (!id.startsWith('ws-ctx:')) return
+      if (id === 'ws-ctx:new') {
+        openCreateEditor()
+        return
+      }
+      if (id.startsWith('ws-ctx:switch:')) {
+        api.switchWorkspace(id.slice('ws-ctx:switch:'.length))
+        return
+      }
+      if (id.startsWith('ws-ctx:edit:')) {
+        const wsId = id.slice('ws-ctx:edit:'.length)
+        const ws = state.workspaces.find((w) => w.id === wsId)
+        if (ws && !ws.private) openEditEditor(ws)
+        return
+      }
+      if (id.startsWith('ws-ctx:delete:')) {
+        const wsId = id.slice('ws-ctx:delete:'.length)
+        void api.deleteWorkspace(wsId)
+      }
+    })
+  })
 
   const pinned = state.tabs.filter((t) => t.pinned)
   const open = state.tabs.filter((t) => !t.pinned)
@@ -190,6 +222,10 @@ export function Sidebar({
   })
 
   const openCreateEditor = (): void => {
+    if (onOpenWorkspaceSheet) {
+      onOpenWorkspaceSheet({ mode: 'create' })
+      return
+    }
     const nextAccent = WORKSPACE_ACCENTS[state.workspaces.length % WORKSPACE_ACCENTS.length].id
     setEditor({
       mode: 'create',
@@ -202,6 +238,10 @@ export function Sidebar({
   }
 
   const openEditEditor = (ws: WorkspaceInfo): void => {
+    if (onOpenWorkspaceSheet) {
+      onOpenWorkspaceSheet({ mode: 'edit', workspace: ws })
+      return
+    }
     setEditor({
       mode: 'edit',
       id: ws.id,
@@ -210,6 +250,34 @@ export function Sidebar({
       accent: ws.accent,
       isolated: ws.isolated,
       confirmDelete: false
+    })
+  }
+
+  const openWorkspaceContextMenu = (e: React.MouseEvent, ws: WorkspaceInfo): void => {
+    e.preventDefault()
+    const nonPrivateCount = state.workspaces.filter((w) => !w.private).length
+    const canDelete = ws.private || nonPrivateCount > 1
+    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches
+    const accent = getComputedStyle(document.documentElement).getPropertyValue('--tint').trim() || '#b3492b'
+    const items: MenuEntry[] = [
+      ...(ws.id !== state.activeWorkspaceId
+        ? [{ kind: 'item' as const, id: `ws-ctx:switch:${ws.id}`, label: `Switch to ${ws.name}` }]
+        : []),
+      ...(!ws.private ? [{ kind: 'item' as const, id: `ws-ctx:edit:${ws.id}`, label: 'Edit workspace…' }] : []),
+      { kind: 'item', id: 'ws-ctx:new', label: 'New workspace…' },
+      ...(canDelete
+        ? [
+            { kind: 'separator' as const },
+            { kind: 'item' as const, id: `ws-ctx:delete:${ws.id}`, label: ws.private ? 'Close private workspace' : 'Delete workspace' }
+          ]
+        : [])
+    ]
+    api.menu.open({
+      x: e.clientX,
+      y: e.clientY,
+      dark,
+      accent,
+      items
     })
   }
 
@@ -631,10 +699,7 @@ export function Sidebar({
                 className={`ws-dot ${isActive ? 'on' : ''} ${ws.private ? 'private' : ''}`}
                 title={`${ws.name} (${count} ${count === 1 ? 'tab' : 'tabs'})${shortcutHint}${isoHint}${ws.private ? '' : '\nRight-click to edit'}`}
                 onClick={() => api.switchWorkspace(ws.id)}
-                onContextMenu={(e) => {
-                  e.preventDefault()
-                  if (!ws.private) openEditEditor(ws)
-                }}
+                onContextMenu={(e) => openWorkspaceContextMenu(e, ws)}
               >
                 <WorkspaceGlyph icon={ws.private ? 'eye-off' : ws.icon} size={14} />
                 {ws.isolated && !ws.private && <span className="ws-dot-iso" aria-hidden />}
