@@ -1,66 +1,123 @@
 /* =====================================================================
-   VEYRA BROWSE
-   The Veyra design system's semantic colours, radii, springs and elevation
-   (carrotsz19/veyra, live/ui-standard.md), as used in Veyra Study desktop.
+   VEYRA ORBIT
+   Veyra design system tokens: warm ink/paper neutrals, clay accent,
+   unified radius, elevation, hairline, spacing, motion, and base controls.
 ===================================================================== */
 :root {
-  --bg-grouped: #f3f1ec;
-  --bg-elevated: #fff;
-  --fill-secondary: #eceae5;
-  --fill-tertiary: rgba(27, 26, 24, 0.05);
-  --fill-hover: rgba(27, 26, 24, 0.06);
-  --separator: #dcd8cf;
+  /* Surfaces */
+  --bg-shell: #ebe8e1;
+  --bg-grouped: #f4f2ed;
+  --bg-elevated: #ffffff;
+  --bg-surface-raised: #ffffff;
+  --bg-float: #fbfaf7;
+  --fill-secondary: #e5e1d8;
+  --fill-tertiary: rgba(27, 26, 24, 0.045);
+  --fill-hover: rgba(27, 26, 24, 0.068);
+  --fill-active: rgba(27, 26, 24, 0.105);
+
+  /* Hairlines & dividers */
+  --hairline: rgba(27, 26, 24, 0.085);
+  --hairline-strong: rgba(27, 26, 24, 0.14);
+  --hairline-inset: rgba(255, 255, 255, 0.72);
+  --separator: var(--hairline);
+
+  /* Text & semantic colours */
   --label-primary: #1b1a18;
-  --label-secondary: #6d6961;
-  --label-tertiary: rgba(27, 26, 24, 0.42);
+  --label-secondary: #615d55;
+  --label-tertiary: rgba(27, 26, 24, 0.46);
   --tint: #b3492b;
-  --tint-soft: #f1ddd4;
+  --tint-soft: rgba(179, 73, 43, 0.12);
+  --tint-ring: rgba(179, 73, 43, 0.24);
   --ws-accent: var(--tint);
   --ws-accent-soft: var(--tint-soft);
-  --positive: #3f6b4a;
-  --warning: #9a6a12;
-  --on-tint: #fff;
-  /* The window's tint over acrylic. */
-  --glass: rgba(243, 241, 236, 0.7);
+  --positive: #356341;
+  --warning: #94620d;
+  --on-tint: #ffffff;
+  --glass: var(--bg-shell);
 
+  /* Scrollbars */
+  --scrollbar-thumb: rgba(27, 26, 24, 0.14);
+  --scrollbar-thumb-hover: rgba(27, 26, 24, 0.30);
+
+  /* Motion (<= 200ms, transform/opacity only) */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-fast: 110ms;
+  --t-base: 150ms;
+  --t-pop: 140ms;
   --spring-snappy: linear(0, 0.036, 0.123, 0.237, 0.36, 0.481, 0.593, 0.692, 0.775, 0.843, 0.897, 0.938, 0.968, 0.99, 1.004, 1.013, 1.018, 1.02, 1.02, 1.018, 1.016, 1.014, 1.011, 1.009, 1.007, 1.005, 1.004, 1.002, 1);
-  --spring-snappy-ms: 360ms;
+  --spring-snappy-ms: 180ms;
   --spring-bouncy: linear(0, 0.054, 0.184, 0.349, 0.521, 0.68, 0.815, 0.92, 0.996, 1.046, 1.073, 1.083, 1.081, 1.072, 1.059, 1.044, 1.031, 1.019, 1.009, 1.002, 0.997, 0.994, 0.993, 0.993, 0.994, 0.995, 0.996, 0.997, 1);
-  --spring-bouncy-ms: 710ms;
+  --spring-bouncy-ms: 200ms;
 
-  --elev-1: 0 1px 2px rgba(27, 26, 24, 0.04), 0 4px 12px rgba(27, 26, 24, 0.05);
-  --elev-2: 0 2px 8px rgba(27, 26, 24, 0.05), 0 12px 28px rgba(27, 26, 24, 0.09);
+  /* Elevation / shadow scale */
+  --shadow-1: 0 1px 2px rgba(27, 26, 24, 0.05), 0 2px 6px rgba(27, 26, 24, 0.04);
+  --shadow-2: 0 1px 2px rgba(27, 26, 24, 0.04), 0 6px 20px rgba(27, 26, 24, 0.075), 0 1px 0 rgba(27, 26, 24, 0.025);
+  --shadow-3: 0 4px 12px rgba(27, 26, 24, 0.08), 0 16px 36px rgba(27, 26, 24, 0.13);
+  --elev-1: var(--shadow-1);
+  --elev-2: var(--shadow-2);
 
-  --r-control: 10px;
-  --r-card: 14px;
+  /* Radius scale */
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+  --r-control: var(--r-md);
+  --r-card: var(--r-lg);
+
+  /* Spacing scale */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* Layout metrics (shared with main-process bounds) */
   --side: 248px;
   --bar: 40px;
-  /* The gap around the page card; the page view is placed inside it by the main process. */
   --gap: 8px;
+
+  /* Typography */
+  --font-sans: 'Segoe UI Variable Text', 'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI Variable Text', 'Segoe UI', -apple-system, system-ui, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', Consolas, monospace;
   --serif: 'Iowan Old Style', 'Charter', 'Georgia', serif;
+
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --bg-grouped: #15140f;
-    --bg-elevated: #1e1c17;
-    --fill-secondary: #272420;
-    --fill-tertiary: rgba(236, 239, 231, 0.06);
-    --fill-hover: rgba(236, 239, 231, 0.07);
-    --separator: #37342c;
+    --bg-shell: #12110d;
+    --bg-grouped: #181612;
+    --bg-elevated: #1c1a15;
+    --bg-surface-raised: #24211b;
+    --bg-float: #1f1d18;
+    --fill-secondary: #28251f;
+    --fill-tertiary: rgba(242, 239, 232, 0.055);
+    --fill-hover: rgba(242, 239, 232, 0.085);
+    --fill-active: rgba(242, 239, 232, 0.125);
+    --hairline: rgba(242, 239, 232, 0.08);
+    --hairline-strong: rgba(242, 239, 232, 0.14);
+    --hairline-inset: rgba(255, 250, 240, 0.06);
+    --separator: var(--hairline);
     --label-primary: #f2efe8;
-    --label-secondary: #a29c8f;
-    --label-tertiary: rgba(236, 239, 231, 0.42);
+    --label-secondary: #a8a296;
+    --label-tertiary: rgba(242, 239, 232, 0.48);
     --tint: #d9633e;
-    --tint-soft: #3a2a22;
+    --tint-soft: rgba(217, 99, 62, 0.16);
+    --tint-ring: rgba(217, 99, 62, 0.28);
     --positive: #7fae87;
     --warning: #d8a54a;
     --on-tint: #161310;
-    --glass: rgba(21, 20, 15, 0.66);
-    --elev-1: 0 1px 2px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.18);
-    --elev-2: 0 2px 8px rgba(0, 0, 0, 0.22), 0 12px 28px rgba(0, 0, 0, 0.3);
+    --glass: var(--bg-shell);
+    --scrollbar-thumb: rgba(242, 239, 232, 0.14);
+    --scrollbar-thumb-hover: rgba(242, 239, 232, 0.30);
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.22);
+    --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.40), 0 10px 26px rgba(0, 0, 0, 0.36);
+    --shadow-3: 0 8px 20px rgba(0, 0, 0, 0.50), 0 20px 44px rgba(0, 0, 0, 0.46);
   }
 }
 
@@ -75,15 +132,38 @@ body,
   overflow: hidden;
 }
 body {
-  font: 13px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  font: 13px/1.4 var(--font-sans);
   color: var(--label-primary);
-  background: var(--bg-grouped);
+  background: var(--bg-shell);
   -webkit-font-smoothing: antialiased;
   user-select: none;
 }
 html[data-material='acrylic'] body {
-  background: var(--glass);
+  background: var(--bg-shell);
 }
+
+/* ---- slim app-wide scrollbars ------------------------------------------ */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: var(--r-pill);
+  border: 1px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 button {
   font: inherit;
   color: inherit;
@@ -91,21 +171,74 @@ button {
   background: none;
   cursor: default;
 }
-input {
+input,
+select {
   font: inherit;
   color: inherit;
 }
 kbd {
-  font: 11px/1 inherit;
-  font-family: inherit;
-  color: var(--label-tertiary);
+  font: 10.5px/1.1 var(--font-sans);
+  font-weight: 500;
+  color: var(--label-secondary);
   padding: 2px 5px;
-  border-radius: 5px;
+  border-radius: var(--r-xs);
   background: var(--fill-tertiary);
+  box-shadow: inset 0 0 0 1px var(--hairline);
 }
 :focus-visible {
   outline: 2px solid var(--tint);
-  outline-offset: 1px;
+  outline-offset: 2px;
+}
+
+/* ---- shared floating surface entrance ---------------------------------- */
+@keyframes surface-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ---- custom styled form controls (real native elements) ---------------- */
+input[type='checkbox'] {
+  -webkit-appearance: none;
+  appearance: none;
+  position: relative;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  margin: 0;
+  border-radius: 4.5px;
+  border: 1.5px solid var(--hairline-strong);
+  background: var(--bg-surface-raised);
+  transition: background-color var(--t-fast) ease, border-color var(--t-fast) ease, transform var(--t-fast) var(--ease-out);
+}
+input[type='checkbox']:hover:not(:disabled) {
+  border-color: var(--label-secondary);
+}
+input[type='checkbox']:active:not(:disabled) {
+  transform: scale(0.94);
+}
+input[type='checkbox']:checked {
+  background: var(--tint);
+  border-color: var(--tint);
+}
+input[type='checkbox']:checked::after {
+  content: '';
+  position: absolute;
+  left: 4.2px;
+  top: 1.4px;
+  width: 4px;
+  height: 7.5px;
+  border: solid var(--on-tint);
+  border-width: 0 1.75px 1.75px 0;
+  transform: rotate(42deg);
+}
+input[type='checkbox']:disabled {
+  opacity: 0.42;
 }
 
 /* ---- layout ------------------------------------------------------------ */
@@ -1290,21 +1423,45 @@ html[data-material='solid'] .peek-shell {
 
 .btn {
   height: 30px;
-  padding: 0 14px;
-  border-radius: 8px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-sm);
   background: var(--fill-secondary);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  font-size: 12.5px;
   font-weight: 500;
-  transition: filter 0.15s, transform var(--spring-snappy-ms) var(--spring-snappy);
+  color: var(--label-primary);
+  transition: background-color var(--t-fast) ease, color var(--t-fast) ease, box-shadow var(--t-fast) ease, transform var(--t-fast) var(--ease-out);
 }
-.btn:hover {
-  filter: brightness(0.97);
+.btn:hover:not(:disabled) {
+  background: var(--fill-active);
+  box-shadow: inset 0 0 0 1px var(--hairline-strong);
 }
-.btn:active {
-  transform: scale(0.96);
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
 }
 .btn.primary {
   background: var(--tint);
   color: var(--on-tint);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), var(--shadow-1);
+}
+.btn.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--tint) 92%, #fff);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), var(--shadow-1);
+}
+.btn.ghost {
+  background: transparent;
+  box-shadow: none;
+  color: var(--label-secondary);
+}
+.btn.ghost:hover:not(:disabled) {
+  background: var(--fill-hover);
+  box-shadow: none;
+  color: var(--label-primary);
+}
+.btn.sm {
+  height: 27px;
+  padding: 0 11px;
+  font-size: 12px;
 }
 
 /* ---- the page card ------------------------------------------------------- */
