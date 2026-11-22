@@ -144,6 +144,9 @@ kbd {
   margin: 5px;
   border-radius: 8px;
 }
+.shell.compact .perm {
+  margin: 5px 5px 0 5px;
+}
 /* Always-visible 5px edge strips outside .page bounds so compact hover works over live pages. */
 .compact-edge {
   position: fixed;

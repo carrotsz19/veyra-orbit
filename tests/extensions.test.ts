@@ -16,7 +16,8 @@ import {
   sanitizeExtensionsRegistry,
   shouldAttachExtensionsNow,
   shouldLoadExtensionsForPartition,
-  validateExtensionId
+  validateExtensionId,
+  validateZipEntryNames
 } from '../src/shared/extensions.ts'
 import {
   buildCrx3Buffer,
@@ -218,7 +219,7 @@ test('CRX3 signature verification accepts valid RSA & ECDSA packages and rejects
   assert.equal(parseAndVerifyCrx3(validEcCrx, expectedEcId).extensionId, expectedEcId)
 })
 
-test('Zip-Slip path guard and registry sanitization', () => {
+test('Zip-Slip path guard, duplicate-entry rejection, and registry sanitization', () => {
   assert.equal(isSafeZipEntryPath('manifest.json'), true)
   assert.equal(isSafeZipEntryPath('js/background.js'), true)
   assert.equal(isSafeZipEntryPath('../evil.exe'), false)
@@ -226,6 +227,39 @@ test('Zip-Slip path guard and registry sanitization', () => {
   assert.equal(isSafeZipEntryPath('/etc/passwd'), false)
   assert.equal(isSafeZipEntryPath('C:\\Windows\\system.ini'), false)
   assert.equal(isSafeZipEntryPath('a\0b.js'), false)
+
+  assert.deepEqual(validateZipEntryNames([]), { ok: false, reason: 'empty' })
+  assert.deepEqual(validateZipEntryNames(['js/', 'js/bg.js', 'manifest.json']), { ok: true })
+  assert.deepEqual(validateZipEntryNames(['manifest.json', '../evil.js']), {
+    ok: false,
+    reason: 'unsafe',
+    entry: '../evil.js'
+  })
+  assert.deepEqual(validateZipEntryNames(['manifest.json', 'manifest.json']), {
+    ok: false,
+    reason: 'duplicate',
+    entry: 'manifest.json'
+  })
+  assert.deepEqual(validateZipEntryNames(['manifest.json', 'Manifest.JSON']), {
+    ok: false,
+    reason: 'duplicate',
+    entry: 'Manifest.JSON'
+  })
+  assert.deepEqual(validateZipEntryNames(['js/bg.js', 'js\\bg.js']), {
+    ok: false,
+    reason: 'duplicate',
+    entry: 'js\\bg.js'
+  })
+  assert.deepEqual(validateZipEntryNames(['js/bg.js', './js/./bg.js']), {
+    ok: false,
+    reason: 'duplicate',
+    entry: './js/./bg.js'
+  })
+  assert.deepEqual(validateZipEntryNames(['assets/', 'assets']), {
+    ok: false,
+    reason: 'duplicate',
+    entry: 'assets'
+  })
 
   const reg = sanitizeExtensionsRegistry({
     developerMode: true,

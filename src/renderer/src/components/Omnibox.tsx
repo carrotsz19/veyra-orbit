@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AppWindow, Bookmark, Clock, Globe, Lock, Search, Star, TriangleAlert } from 'lucide-react'
 import type { Suggestion, TabInfo } from '@shared/types'
-import { displayUrl, isInternalUrl } from '@shared/url'
+import { displayUrl, isInternalUrl, resolveOmniboxSync } from '@shared/url'
 
 const api = window.veyra
 
@@ -31,11 +31,30 @@ export function Omnibox({
   const wantOverlay = useRef(false)
   const overlayOn = useRef(false)
   const query = useRef(0)
+  const prevTabId = useRef<number | undefined>(tab?.id)
 
   const url = tab?.error?.url || tab?.url || ''
-  // While you type, the page changing underneath doesn't overwrite what you typed.
+  // While you type on the same tab, the page changing underneath doesn't overwrite what you typed.
+  // Switching to another tab always exits editing and displays the new tab's own URL.
   useEffect(() => {
-    if (!editing) setText(displayUrl(url))
+    const sync = resolveOmniboxSync({
+      prevTabId: prevTabId.current,
+      nextTabId: tab?.id,
+      url,
+      editing
+    })
+    prevTabId.current = tab?.id
+    if (sync.resetEditing) {
+      setEditing(false)
+      query.current++
+      setList([])
+      if (document.activeElement === input.current) {
+        input.current?.blur()
+      }
+    }
+    if (sync.nextText !== null) {
+      setText(sync.nextText)
+    }
   }, [url, editing, tab?.id])
 
   useEffect(() => {
@@ -141,7 +160,9 @@ export function Omnibox({
             setEditing(true)
             setText(url)
             const el = e.currentTarget
-            requestAnimationFrame(() => el.select())
+            requestAnimationFrame(() => {
+              if (document.activeElement === el) el.select()
+            })
           }}
           onBlur={() => {
             setEditing(false)

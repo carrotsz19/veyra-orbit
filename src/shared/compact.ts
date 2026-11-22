@@ -58,6 +58,21 @@ export function computeCompactZones(input: CompactZoneInput): CompactZoneResult 
   return { insideWindow: true, wantSidebar, wantToolbar }
 }
 
+/**
+ * Whether hiding a floating compact panel should first return focus to its parent browser window.
+ * On Windows, hiding the currently focused child BrowserWindow drops foreground focus from the
+ * app instead of returning it to the parent, which would stop compact edge hover from revealing
+ * panels until the user clicks the window again. If another app already took focus, the panel is
+ * no longer focused and we must not steal focus back.
+ */
+export function shouldRestoreParentFocusOnCompactHide(opts: {
+  panelFocused: boolean
+  parentVisible: boolean
+  parentMinimized: boolean
+}): boolean {
+  return opts.panelFocused && opts.parentVisible && !opts.parentMinimized
+}
+
 export interface WindowBounds {
   x: number
   y: number

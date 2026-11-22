@@ -6,6 +6,39 @@
  *  - Tiny WebAuthn conditional-mediation shim so sign-in pages don't auto-trigger Windows Hello.
  */
 
+export const ORBIT_COMPAT_READY_PREFIX = 'orbit-compat:ready:'
+
+const DNR_RESOURCE_TYPES = [
+  'main_frame',
+  'sub_frame',
+  'stylesheet',
+  'script',
+  'image',
+  'font',
+  'object',
+  'xmlhttprequest',
+  'ping',
+  'csp_report',
+  'media',
+  'websocket',
+  'other'
+] as const
+
+export interface OrbitCompatDnrRule {
+  id: number
+  priority: number
+  action: {
+    type: 'modifyHeaders'
+    requestHeaders: { header: string; operation: 'set' | 'remove'; value?: string }[]
+  }
+  condition: {
+    urlFilter?: string
+    requestDomains?: string[]
+    excludedRequestDomains?: string[]
+    resourceTypes: readonly string[]
+  }
+}
+
 export interface BrandVersion {
   brand: string
   version: string
@@ -159,6 +192,93 @@ export function applyCompatRequestHeaders(
     else if (lower === 'sec-ch-ua-full-version-list') headers[key] = identity.secChUaFullVersionList
   }
   return headers
+}
+
+/**
+ * Builds the declarativeNetRequest rules installed by Orbit's hidden internal
+ * `orbit-compat` extension in persistent sessions (where session.webRequest cannot stay
+ * attached because it disables extension DNR).
+ *
+ * Rule 1 sets consistent Chrome Client Hints everywhere except accounts.google.com.
+ * Rule 2 switches accounts.google.com to a desktop Firefox UA and removes all Sec-CH-UA* headers.
+ */
+export function buildOrbitCompatDnrRules(id: ChromeIdentity): OrbitCompatDnrRule[] {
+  return [
+    {
+      id: 1,
+      priority: 1,
+      action: {
+        type: 'modifyHeaders',
+        requestHeaders: [
+          { header: 'Sec-CH-UA', operation: 'set', value: id.secChUa },
+          { header: 'Sec-CH-UA-Full-Version-List', operation: 'set', value: id.secChUaFullVersionList }
+        ]
+      },
+      condition: {
+        urlFilter: '*',
+        excludedRequestDomains: ['accounts.google.com'],
+        resourceTypes: [...DNR_RESOURCE_TYPES]
+      }
+    },
+    {
+      id: 2,
+      priority: 2,
+      action: {
+        type: 'modifyHeaders',
+        requestHeaders: [
+          { header: 'User-Agent', operation: 'set', value: id.firefoxUserAgent },
+          { header: 'Sec-CH-UA', operation: 'remove' },
+          { header: 'Sec-CH-UA-Mobile', operation: 'remove' },
+          { header: 'Sec-CH-UA-Platform', operation: 'remove' },
+          { header: 'Sec-CH-UA-Platform-Version', operation: 'remove' },
+          { header: 'Sec-CH-UA-Full-Version', operation: 'remove' },
+          { header: 'Sec-CH-UA-Full-Version-List', operation: 'remove' },
+          { header: 'Sec-CH-UA-Arch', operation: 'remove' },
+          { header: 'Sec-CH-UA-Bitness', operation: 'remove' },
+          { header: 'Sec-CH-UA-Model', operation: 'remove' },
+          { header: 'Sec-CH-UA-WoW64', operation: 'remove' },
+          { header: 'Sec-CH-UA-Form-Factors', operation: 'remove' }
+        ]
+      },
+      condition: {
+        requestDomains: ['accounts.google.com'],
+        resourceTypes: [...DNR_RESOURCE_TYPES]
+      }
+    }
+  ]
+}
+
+/**
+ * Generates the MV3 service worker script for `orbit-compat`.
+ *
+ * Electron's `session.extensions.loadExtension` does not index static `declarative_net_request`
+ * `rule_resources`, so `orbit-compat` installs its rules via `updateSessionRules` on startup
+ * and logs an extension-ID-scoped ready marker once Chromium has committed them.
+ */
+export function buildOrbitCompatWorkerScript(rules: readonly OrbitCompatDnrRule[]): string {
+  const ids = rules.map((r) => r.id)
+  return `const RULES = ${JSON.stringify(rules)};
+const RULE_IDS = ${JSON.stringify(ids)};
+let installing = null;
+function installRules() {
+  if (installing) return installing;
+  installing = chrome.declarativeNetRequest
+    .updateSessionRules({ removeRuleIds: RULE_IDS, addRules: RULES })
+    .then(() => {
+      console.log(${JSON.stringify(ORBIT_COMPAT_READY_PREFIX)} + chrome.runtime.id);
+    })
+    .catch((err) => {
+      console.error('[orbit-compat] updateSessionRules failed:', String(err));
+    })
+    .finally(() => {
+      installing = null;
+    });
+  return installing;
+}
+chrome.runtime.onInstalled.addListener(() => { void installRules(); });
+chrome.runtime.onStartup.addListener(() => { void installRules(); });
+void installRules();
+`
 }
 
 /**
