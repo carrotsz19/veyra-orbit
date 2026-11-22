@@ -51,6 +51,7 @@ const api: VeyraApi = {
   forward: () => ipcRenderer.send('nav:forward'),
   reload: () => ipcRenderer.send('nav:reload'),
   stop: () => ipcRenderer.send('nav:stop'),
+  goHome: () => ipcRenderer.send('nav:home'),
   resetZoom: () => ipcRenderer.send('nav:zoom-reset'),
   togglePin: (id) => ipcRenderer.send('tab:pin', id),
   move: (id, to) => ipcRenderer.send('tab:move', id, to),

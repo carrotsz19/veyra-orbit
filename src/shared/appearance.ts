@@ -5,6 +5,13 @@
  *
  * Pure module (no Electron or Node imports) so it runs in main, renderers, and unit tests.
  */
+import {
+  DEFAULT_TOOLBAR_ITEMS,
+  deriveLegacyToolbarFlags,
+  migrateLegacyToolbarButtons,
+  sanitizeToolbarItems,
+  type ToolbarItemId
+} from './toolbar.ts'
 
 export const THEME_PRESET_IDS = [
   'veyra-clay',
@@ -46,12 +53,14 @@ export interface AppearanceSettings {
   tabCloseButtons: TabCloseButtonsMode
   /** Address bar horizontal alignment in the title bar. */
   addressBarAlign: AddressBarAlign
-  /** Show back / forward / reload navigation buttons. */
+  /** Show back / forward / reload navigation buttons (migrated into toolbarItems). */
   showNavButtons: boolean
-  /** Show bookmark star inside the address bar. */
+  /** Show bookmark star button (migrated into toolbarItems). */
   showBookmarkStar: boolean
-  /** Show extensions toolbar buttons & puzzle overflow. */
+  /** Show extensions toolbar buttons & puzzle overflow (migrated into toolbarItems). */
   showExtensions: boolean
+  /** Ordered toolbar layout including 'address-bar' and active toolbar buttons. */
+  toolbarItems: ToolbarItemId[]
   /** Full title-bar menus (File/Edit/...) or single hamburger menu. */
   menuBarStyle: MenuBarStyle
   /** Bookmark bar visibility: always, only on start page (default), or never. */
@@ -90,6 +99,7 @@ export const DEFAULT_APPEARANCE: Readonly<AppearanceSettings> = Object.freeze({
   showNavButtons: true,
   showBookmarkStar: true,
   showExtensions: true,
+  toolbarItems: DEFAULT_TOOLBAR_ITEMS as unknown as ToolbarItemId[],
   menuBarStyle: 'full',
   bookmarkBar: 'start-page',
   pageGap: 8,
@@ -614,8 +624,18 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 
 /** Validates arbitrary parsed JSON into a safe AppearanceSettings object, dropping unknown keys. */
 export function sanitizeAppearance(raw: unknown): AppearanceSettings {
-  if (!isPlainObject(raw)) return { ...DEFAULT_APPEARANCE }
+  if (!isPlainObject(raw)) {
+    return { ...DEFAULT_APPEARANCE, toolbarItems: [...DEFAULT_TOOLBAR_ITEMS] }
+  }
   const accent = sanitizeAccentHex(raw.accent)
+  const toolbarItems = Array.isArray(raw.toolbarItems)
+    ? sanitizeToolbarItems(raw.toolbarItems)
+    : migrateLegacyToolbarButtons({
+        showNavButtons: raw.showNavButtons,
+        showBookmarkStar: raw.showBookmarkStar,
+        showExtensions: raw.showExtensions
+      })
+  const legacyFlags = deriveLegacyToolbarFlags(toolbarItems)
   return {
     preset: isThemePresetId(raw.preset) ? raw.preset : DEFAULT_APPEARANCE.preset,
     accent: accent !== null ? accent : DEFAULT_APPEARANCE.accent,
@@ -627,9 +647,10 @@ export function sanitizeAppearance(raw: unknown): AppearanceSettings {
     translucentSidebar: typeof raw.translucentSidebar === 'boolean' ? raw.translucentSidebar : DEFAULT_APPEARANCE.translucentSidebar,
     tabCloseButtons: isTabCloseButtonsMode(raw.tabCloseButtons) ? raw.tabCloseButtons : DEFAULT_APPEARANCE.tabCloseButtons,
     addressBarAlign: isAddressBarAlign(raw.addressBarAlign) ? raw.addressBarAlign : DEFAULT_APPEARANCE.addressBarAlign,
-    showNavButtons: typeof raw.showNavButtons === 'boolean' ? raw.showNavButtons : DEFAULT_APPEARANCE.showNavButtons,
-    showBookmarkStar: typeof raw.showBookmarkStar === 'boolean' ? raw.showBookmarkStar : DEFAULT_APPEARANCE.showBookmarkStar,
-    showExtensions: typeof raw.showExtensions === 'boolean' ? raw.showExtensions : DEFAULT_APPEARANCE.showExtensions,
+    showNavButtons: legacyFlags.showNavButtons,
+    showBookmarkStar: legacyFlags.showBookmarkStar,
+    showExtensions: legacyFlags.showExtensions,
+    toolbarItems,
     menuBarStyle: isMenuBarStyle(raw.menuBarStyle) ? raw.menuBarStyle : DEFAULT_APPEARANCE.menuBarStyle,
     bookmarkBar: isBookmarkBarMode(raw.bookmarkBar) ? raw.bookmarkBar : DEFAULT_APPEARANCE.bookmarkBar,
     pageGap: clampInt(raw.pageGap, APPEARANCE_LIMITS.pageGap.min, APPEARANCE_LIMITS.pageGap.max, DEFAULT_APPEARANCE.pageGap),
@@ -641,7 +662,10 @@ export function sanitizeAppearance(raw: unknown): AppearanceSettings {
 
 /** Applies a partial appearance update to current appearance settings, ignoring invalid/unknown fields. */
 export function mergeAppearance(current: AppearanceSettings, patch: unknown): AppearanceSettings {
-  const next: AppearanceSettings = { ...current }
+  const next: AppearanceSettings = {
+    ...current,
+    toolbarItems: sanitizeToolbarItems(current.toolbarItems)
+  }
   if (!isPlainObject(patch)) return next
   const own = (k: string): boolean => Object.prototype.hasOwnProperty.call(patch, k)
   if (own('preset') && isThemePresetId(patch.preset)) next.preset = patch.preset
@@ -663,9 +687,34 @@ export function mergeAppearance(current: AppearanceSettings, patch: unknown): Ap
   if (own('translucentSidebar') && typeof patch.translucentSidebar === 'boolean') next.translucentSidebar = patch.translucentSidebar
   if (own('tabCloseButtons') && isTabCloseButtonsMode(patch.tabCloseButtons)) next.tabCloseButtons = patch.tabCloseButtons
   if (own('addressBarAlign') && isAddressBarAlign(patch.addressBarAlign)) next.addressBarAlign = patch.addressBarAlign
-  if (own('showNavButtons') && typeof patch.showNavButtons === 'boolean') next.showNavButtons = patch.showNavButtons
-  if (own('showBookmarkStar') && typeof patch.showBookmarkStar === 'boolean') next.showBookmarkStar = patch.showBookmarkStar
-  if (own('showExtensions') && typeof patch.showExtensions === 'boolean') next.showExtensions = patch.showExtensions
+  if (own('toolbarItems') && Array.isArray(patch.toolbarItems)) {
+    next.toolbarItems = sanitizeToolbarItems(patch.toolbarItems)
+  } else {
+    let items = [...next.toolbarItems]
+    if (own('showNavButtons') && typeof patch.showNavButtons === 'boolean') {
+      items = items.filter((id) => id !== 'back' && id !== 'forward' && id !== 'reload')
+      if (patch.showNavButtons) {
+        const addrIdx = Math.max(0, items.indexOf('address-bar'))
+        items.splice(addrIdx, 0, 'back', 'forward', 'reload')
+      }
+    }
+    if (own('showBookmarkStar') && typeof patch.showBookmarkStar === 'boolean') {
+      items = items.filter((id) => id !== 'bookmark-star')
+      if (patch.showBookmarkStar) {
+        const addrIdx = items.indexOf('address-bar')
+        items.splice(addrIdx >= 0 ? addrIdx + 1 : items.length, 0, 'bookmark-star')
+      }
+    }
+    if (own('showExtensions') && typeof patch.showExtensions === 'boolean') {
+      items = items.filter((id) => id !== 'extensions')
+      if (patch.showExtensions) items.push('extensions')
+    }
+    next.toolbarItems = sanitizeToolbarItems(items)
+  }
+  const flags = deriveLegacyToolbarFlags(next.toolbarItems)
+  next.showNavButtons = flags.showNavButtons
+  next.showBookmarkStar = flags.showBookmarkStar
+  next.showExtensions = flags.showExtensions
   if (own('menuBarStyle') && isMenuBarStyle(patch.menuBarStyle)) next.menuBarStyle = patch.menuBarStyle
   if (own('bookmarkBar') && isBookmarkBarMode(patch.bookmarkBar)) next.bookmarkBar = patch.bookmarkBar
   if (own('pageGap') && typeof patch.pageGap === 'number' && Number.isFinite(patch.pageGap)) {

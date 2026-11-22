@@ -133,6 +133,7 @@ export type {
   WindowButtonsStyle
 } from './settings'
 export type { ResolvedShortcuts, ShortcutCategory, ShortcutDef, ShortcutId } from './shortcuts'
+export type { ToolbarButtonId, ToolbarButtonMeta, ToolbarItemId } from './toolbar'
 export type {
   ClockFormat,
   DailyQuote,
@@ -302,6 +303,7 @@ export interface VeyraApi {
   forward(): void
   reload(): void
   stop(): void
+  goHome(): void
   resetZoom(): void
   togglePin(id: number): void
   move(id: number, toIndex: number): void

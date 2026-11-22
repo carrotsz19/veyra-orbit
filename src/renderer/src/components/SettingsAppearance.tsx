@@ -23,6 +23,7 @@ import {
   normalizeHexColor
 } from '@shared/appearance'
 import { SegmentedControl, type SegmentedOption } from './SegmentedControl'
+import { ToolbarEditor } from './ToolbarEditor'
 
 const api = window.veyra
 
@@ -509,37 +510,17 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
           />
         </div>
 
-        <div className="set-row stack">
+        <div className="set-row stack" id="set-toolbar">
           <div className="set-row-info">
             <div className="set-label">Toolbar buttons</div>
-            <div className="set-desc">Choose which controls appear around the address bar.</div>
+            <div className="set-desc">
+              Drag buttons between the toolbar and available list, or right-click the toolbar and choose “Customize toolbar…”.
+            </div>
           </div>
-          <div className="set-checks">
-            <label className="set-check">
-              <input
-                type="checkbox"
-                checked={app.showNavButtons}
-                onChange={(e) => patchApp({ showNavButtons: e.target.checked })}
-              />
-              <span>Back, forward &amp; reload</span>
-            </label>
-            <label className="set-check">
-              <input
-                type="checkbox"
-                checked={app.showBookmarkStar}
-                onChange={(e) => patchApp({ showBookmarkStar: e.target.checked })}
-              />
-              <span>Bookmark star</span>
-            </label>
-            <label className="set-check">
-              <input
-                type="checkbox"
-                checked={app.showExtensions}
-                onChange={(e) => patchApp({ showExtensions: e.target.checked })}
-              />
-              <span>Extensions buttons</span>
-            </label>
-          </div>
+          <ToolbarEditor
+            items={app.toolbarItems}
+            onChange={(next) => patchApp({ toolbarItems: next })}
+          />
         </div>
 
         <div className="set-row">

@@ -1301,6 +1301,27 @@ export class Tabs {
     if (wc && !wc.isDestroyed()) wc.stop()
   }
 
+  /** Navigates the active tab back to Orbit's calm start page. */
+  goHome(): void {
+    const tab = this.active
+    if (!tab) return
+    if (this.fullscreenTab === tab) this.exitPageFullscreen(true)
+    this.stopFind(true)
+    if (tab.view && !tab.view.webContents.isDestroyed()) tab.view.webContents.stop()
+    tab.pendingUrl = undefined
+    tab.info.url = ''
+    tab.info.title = ''
+    tab.info.favicon = undefined
+    tab.info.loading = false
+    tab.info.error = undefined
+    tab.info.canGoBack = !!(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.getURL())
+    tab.info.canGoForward = false
+    this.layout()
+    this.notifyActiveTab()
+    this.changed()
+    if (!this.win.isDestroyed()) this.win.webContents.focus()
+  }
+
   private zoom(delta: number | null, tab = this.active): void {
     if (!tab || !this.showsPage(tab) || !tab.view || tab.view.webContents.isDestroyed()) return
     const wc = tab.view.webContents

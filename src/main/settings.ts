@@ -59,7 +59,7 @@ export class SettingsStore {
   get(): Settings {
     return {
       ...this.data,
-      appearance: { ...this.data.appearance },
+      appearance: { ...this.data.appearance, toolbarItems: [...this.data.appearance.toolbarItems] },
       startPage: {
         ...this.data.startPage,
         quickLinks: this.data.startPage.quickLinks.map((l) => ({ ...l })),

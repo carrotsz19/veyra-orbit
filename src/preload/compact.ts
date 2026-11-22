@@ -48,6 +48,7 @@ const uiSubset = {
   forward: () => ipcRenderer.send('nav:forward'),
   reload: () => ipcRenderer.send('nav:reload'),
   stop: () => ipcRenderer.send('nav:stop'),
+  goHome: () => ipcRenderer.send('nav:home'),
   resetZoom: () => ipcRenderer.send('nav:zoom-reset'),
   togglePin: (id: number) => ipcRenderer.send('tab:pin', id),
   move: (id: number, to: number) => ipcRenderer.send('tab:move', id, to),
