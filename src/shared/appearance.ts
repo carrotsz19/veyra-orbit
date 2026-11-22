@@ -12,6 +12,12 @@ import {
   sanitizeToolbarItems,
   type ToolbarItemId
 } from './toolbar.ts'
+import {
+  buildEffectiveCustomCss,
+  sanitizeCustomCss,
+  sanitizeEnabledMods,
+  type BuiltinModId
+} from './customCss.ts'
 
 export const THEME_PRESET_IDS = [
   'veyra-clay',
@@ -82,6 +88,12 @@ export interface AppearanceSettings {
   pageShadow: boolean
   /** Motion level; 'full' still honours OS prefers-reduced-motion. */
   motion: MotionMode
+  /** Whether user custom CSS is active on Orbit's UI chrome (never applied to web pages). */
+  customCssEnabled: boolean
+  /** Sanitized custom CSS snippet applied only to Orbit's own UI windows (max 64 KB). */
+  customCss: string
+  /** Enabled built-in UI CSS mods. */
+  enabledMods: BuiltinModId[]
 }
 
 export type AppearancePatch = Partial<AppearanceSettings>
@@ -115,7 +127,10 @@ export const DEFAULT_APPEARANCE: Readonly<AppearanceSettings> = Object.freeze({
   pageGap: 8,
   pageRadius: 10,
   pageShadow: true,
-  motion: 'full'
+  motion: 'full',
+  customCssEnabled: false,
+  customCss: '',
+  enabledMods: Object.freeze([]) as unknown as BuiltinModId[]
 })
 
 export interface PresetPalette {
@@ -640,7 +655,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 /** Validates arbitrary parsed JSON into a safe AppearanceSettings object, dropping unknown keys. */
 export function sanitizeAppearance(raw: unknown): AppearanceSettings {
   if (!isPlainObject(raw)) {
-    return { ...DEFAULT_APPEARANCE, toolbarItems: [...DEFAULT_TOOLBAR_ITEMS] }
+    return { ...DEFAULT_APPEARANCE, toolbarItems: [...DEFAULT_TOOLBAR_ITEMS], enabledMods: [] }
   }
   const accent = sanitizeAccentHex(raw.accent)
   const toolbarItems = Array.isArray(raw.toolbarItems)
@@ -672,7 +687,10 @@ export function sanitizeAppearance(raw: unknown): AppearanceSettings {
     pageGap: clampInt(raw.pageGap, APPEARANCE_LIMITS.pageGap.min, APPEARANCE_LIMITS.pageGap.max, DEFAULT_APPEARANCE.pageGap),
     pageRadius: clampInt(raw.pageRadius, APPEARANCE_LIMITS.pageRadius.min, APPEARANCE_LIMITS.pageRadius.max, DEFAULT_APPEARANCE.pageRadius),
     pageShadow: typeof raw.pageShadow === 'boolean' ? raw.pageShadow : DEFAULT_APPEARANCE.pageShadow,
-    motion: isMotionMode(raw.motion) ? raw.motion : DEFAULT_APPEARANCE.motion
+    motion: isMotionMode(raw.motion) ? raw.motion : DEFAULT_APPEARANCE.motion,
+    customCssEnabled: typeof raw.customCssEnabled === 'boolean' ? raw.customCssEnabled : DEFAULT_APPEARANCE.customCssEnabled,
+    customCss: sanitizeCustomCss(raw.customCss),
+    enabledMods: sanitizeEnabledMods(raw.enabledMods)
   }
 }
 
@@ -680,7 +698,8 @@ export function sanitizeAppearance(raw: unknown): AppearanceSettings {
 export function mergeAppearance(current: AppearanceSettings, patch: unknown): AppearanceSettings {
   const next: AppearanceSettings = {
     ...current,
-    toolbarItems: sanitizeToolbarItems(current.toolbarItems)
+    toolbarItems: sanitizeToolbarItems(current.toolbarItems),
+    enabledMods: sanitizeEnabledMods(current.enabledMods)
   }
   if (!isPlainObject(patch)) return next
   const own = (k: string): boolean => Object.prototype.hasOwnProperty.call(patch, k)
@@ -742,6 +761,9 @@ export function mergeAppearance(current: AppearanceSettings, patch: unknown): Ap
   }
   if (own('pageShadow') && typeof patch.pageShadow === 'boolean') next.pageShadow = patch.pageShadow
   if (own('motion') && isMotionMode(patch.motion)) next.motion = patch.motion
+  if (own('customCssEnabled') && typeof patch.customCssEnabled === 'boolean') next.customCssEnabled = patch.customCssEnabled
+  if (own('customCss') && typeof patch.customCss === 'string') next.customCss = sanitizeCustomCss(patch.customCss)
+  if (own('enabledMods') && Array.isArray(patch.enabledMods)) next.enabledMods = sanitizeEnabledMods(patch.enabledMods)
   return next
 }
 
@@ -942,6 +964,10 @@ export interface ResolvedAppearance {
   sidebarWidth: number
   vars: Record<string, string>
   attrs: Record<string, string>
+  /** Sanitized CSS (enabled mods + user custom CSS) for Orbit UI windows only, or '' in safe mode. */
+  customCss: string
+  /** True when safe mode (--safe-mode or Shift on launch) has disabled custom CSS for this session. */
+  safeMode: boolean
 }
 
 export function getThemePreset(id: ThemePresetId): ThemePresetDefinition {
@@ -952,7 +978,8 @@ export function resolveAppearanceTokens(
   appearance: AppearanceSettings,
   isDark: boolean,
   supportsAcrylic: boolean,
-  systemReducedMotion = false
+  systemReducedMotion = false,
+  safeMode = false
 ): ResolvedAppearance {
   const presetDef = getThemePreset(appearance.preset)
   const pal = isDark ? presetDef.dark : presetDef.light
@@ -1085,7 +1112,14 @@ export function resolveAppearanceTokens(
     sidebarSide: appearance.sidebarSide,
     sidebarWidth: appearance.sidebarWidth,
     vars,
-    attrs
+    attrs,
+    customCss: buildEffectiveCustomCss({
+      customCssEnabled: appearance.customCssEnabled,
+      customCss: appearance.customCss,
+      enabledMods: appearance.enabledMods,
+      safeMode
+    }),
+    safeMode
   }
 }
 
@@ -1093,7 +1127,7 @@ export function resolveAppearanceTokens(
 
 export const THEME_EXPORT_FORMAT = 'veyra-orbit-theme'
 export const THEME_EXPORT_VERSION = 1
-const MAX_THEME_JSON_BYTES = 32_768
+const MAX_THEME_JSON_BYTES = 131_072
 
 export interface ThemeExportEnvelope {
   format: typeof THEME_EXPORT_FORMAT
@@ -1130,7 +1164,7 @@ export function parseImportedAppearanceJson(rawJson: unknown): ThemeImportResult
     return { ok: false, error: 'Theme file is empty.' }
   }
   if (rawJson.length > MAX_THEME_JSON_BYTES) {
-    return { ok: false, error: 'Theme file is too large (max 32 KB).' }
+    return { ok: false, error: 'Theme file is too large (max 128 KB).' }
   }
   let parsed: unknown
   try {

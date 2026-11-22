@@ -86,6 +86,8 @@ export interface SettingsView extends Settings {
   supportsWindowButtons: boolean
   /** True on OS builds that support translucent acrylic sidebar backdrop (Windows 11 22H2+). */
   supportsAcrylic: boolean
+  /** True when safe mode (--safe-mode or holding Shift on launch) disabled custom CSS for this session. */
+  safeMode: boolean
 }
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({

@@ -45,6 +45,7 @@ import {
   resolveAppearanceTokens,
   type ResolvedAppearance
 } from '../shared/appearance'
+import { isSafeModeLaunch } from '../shared/customCss'
 import { Tabs } from './tabs'
 import { Store } from './store'
 import { SettingsStore } from './settings'
@@ -82,10 +83,13 @@ const COMPACT_POLL_MS = 100
 const COMPACT_HIDE_DELAY_MS = 240
 const PALETTE_PREWARM_DELAY_MS = 4_000
 
+let safeModeActive = isSafeModeLaunch(process.argv, process.env)
+const launchedAt = Date.now()
+
 function resolveCurrentAppearance(): ResolvedAppearance {
   const baseCfg = settings?.get().appearance ?? DEFAULT_APPEARANCE
   const effectiveCfg = applyWorkspaceAppearance(baseCfg, tabs?.activeWorkspace())
-  return resolveAppearanceTokens(effectiveCfg, nativeTheme.shouldUseDarkColors, acrylic, false)
+  return resolveAppearanceTokens(effectiveCfg, nativeTheme.shouldUseDarkColors, acrylic, false, safeModeActive)
 }
 
 let lastWorkspaceLookKey = ''
@@ -799,7 +803,7 @@ function executePaletteAction(action: PaletteAction, openInNewTab: boolean): voi
 }
 
 function createWindow(): void {
-  settings ??= new SettingsStore(join(app.getPath('userData'), 'settings.json'), app.getPath('downloads'), process.env.VEYRA_DOWNLOADS || '', isWin, acrylic)
+  settings ??= new SettingsStore(join(app.getPath('userData'), 'settings.json'), app.getPath('downloads'), process.env.VEYRA_DOWNLOADS || '', isWin, acrylic, safeModeActive)
   const s = settings
   nativeTheme.themeSource = s.get().theme
   const activeButtons = s.activeWindowButtonsStyle()
@@ -1206,6 +1210,13 @@ function createWindow(): void {
   setupWebSession(WEB_PARTITION)
 
   w.webContents.on('before-input-event', (e, input) => {
+    // Recovery: holding Shift while Orbit is launching activates safe mode (disables custom CSS for this session).
+    if (!safeModeActive && Date.now() - launchedAt < 3000 && (input.shift || input.key === 'Shift')) {
+      safeModeActive = true
+      settings?.setSafeMode(true)
+      sendSettings()
+      applyWindowAppearance()
+    }
     if (t.shortcut(input)) e.preventDefault()
   })
 

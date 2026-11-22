@@ -40,7 +40,10 @@ test('sanitizeAppearance clamps numeric ranges, validates hex colours and enums,
     pageRadius: 42.6,
     pageShadow: false,
     motion: 'reduced',
-    customCss: 'body { display: none }',
+    customCssEnabled: true,
+    customCss: '@import "https://evil.example/a.css"; .ok { color: red; }',
+    enabledMods: ['larger-tab-rows', 'not-a-mod'],
+    unknownExtra: 'drop me',
     __proto__: { evil: true }
   })
 
@@ -65,9 +68,12 @@ test('sanitizeAppearance clamps numeric ranges, validates hex colours and enums,
     pageGap: APPEARANCE_LIMITS.pageGap.min,
     pageRadius: APPEARANCE_LIMITS.pageRadius.max,
     pageShadow: false,
-    motion: 'reduced'
+    motion: 'reduced',
+    customCssEnabled: true,
+    customCss: ' .ok { color: red; }',
+    enabledMods: ['larger-tab-rows']
   })
-  assert.equal('customCss' in cleaned, false)
+  assert.equal('unknownExtra' in cleaned, false)
 })
 
 test('sanitizeAppearance falls back to defaults on invalid enum, NaN, Infinity, and bad hex strings', () => {
@@ -202,9 +208,9 @@ test('exportAppearanceJson and parseImportedAppearanceJson round-trip safely and
   assert.equal(parseImportedAppearanceJson('[]').ok, false)
   assert.equal(parseImportedAppearanceJson(JSON.stringify({ format: 'evil-theme', appearance: { preset: 'ocean' } })).ok, false)
   assert.equal(parseImportedAppearanceJson(JSON.stringify({ unrelated: 123 })).ok, false)
-  assert.equal(parseImportedAppearanceJson('{"preset":"ocean","pad":"' + 'a'.repeat(40_000) + '"}').ok, false)
+  assert.equal(parseImportedAppearanceJson('{"preset":"ocean","pad":"' + 'a'.repeat(140_000) + '"}').ok, false)
 
-  // Strips unknown / injected fields even inside valid JSON
+  // Strips unknown / injected fields and sanitizes customCss even inside valid JSON
   const injected = parseImportedAppearanceJson(
     JSON.stringify({
       format: 'veyra-orbit-theme',
@@ -213,7 +219,7 @@ test('exportAppearanceJson and parseImportedAppearanceJson round-trip safely and
       appearance: {
         preset: 'rose',
         accent: '#a63e5c',
-        customCss: '*{background:red}',
+        customCss: '@import "https://evil.example/x.css"; *{background:url(https://evil.example/a.png)}',
         customJs: 'alert(1)',
         cornerRadius: 500
       }
@@ -223,7 +229,7 @@ test('exportAppearanceJson and parseImportedAppearanceJson round-trip safely and
   if (injected.ok) {
     assert.equal(injected.appearance.preset, 'rose')
     assert.equal(injected.appearance.cornerRadius, APPEARANCE_LIMITS.cornerRadius.max)
-    assert.equal('customCss' in injected.appearance, false)
+    assert.equal(injected.appearance.customCss.includes('evil.example'), false)
     assert.equal('customJs' in injected.appearance, false)
   }
 })

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Check } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Check, ShieldAlert } from 'lucide-react'
 import type {
   AddressBarAlign,
   AppearancePatch,
   BookmarkBarMode,
+  BuiltinModId,
   MenuBarStyle,
   MotionMode,
   SettingsPatch,
@@ -24,6 +25,7 @@ import {
   getThemePreset,
   normalizeHexColor
 } from '@shared/appearance'
+import { BUILTIN_MODS, MAX_CUSTOM_CSS_BYTES, utf8ByteLength } from '@shared/customCss'
 import { SegmentedControl, type SegmentedOption } from './SegmentedControl'
 import { ToolbarEditor } from './ToolbarEditor'
 
@@ -92,6 +94,8 @@ interface Props {
 export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Props): React.JSX.Element {
   const app = settings.appearance
   const [hexDraft, setHexDraft] = useState(app.accent)
+  const [cssDraft, setCssDraft] = useState(app.customCss)
+  const cssGutterRef = useRef<HTMLDivElement>(null)
   const [ioStatus, setIoStatus] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [systemDark, setSystemDark] = useState(() =>
     typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -103,6 +107,10 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
   useEffect(() => {
     setHexDraft(app.accent)
   }, [app.accent])
+
+  useEffect(() => {
+    setCssDraft(app.customCss)
+  }, [app.customCss])
 
   useEffect(() => {
     const mqDark = window.matchMedia('(prefers-color-scheme: dark)')
@@ -689,6 +697,127 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
             onChange={(m) => patchApp({ motion: m })}
             ariaLabel="Motion"
           />
+        </div>
+      </div>
+
+      {/* Advanced: Mods & Custom CSS */}
+      <h3 className="set-subhead" id="set-appearance-advanced">Advanced — Mods &amp; Custom CSS</h3>
+      {settings.safeMode && (
+        <div className="app-io-banner err css-safe-banner" role="status" aria-live="polite">
+          <ShieldAlert size={14} aria-hidden />
+          <span>
+            Safe mode is active — Custom CSS and mods are disabled for this session. Restart Orbit without holding Shift or{' '}
+            <code>--safe-mode</code> to re-enable them.
+          </span>
+        </div>
+      )}
+      <div className="set-card">
+        {BUILTIN_MODS.map((mod) => {
+          const enabled = app.enabledMods.includes(mod.id)
+          const toggleMod = (): void => {
+            const next: BuiltinModId[] = enabled
+              ? app.enabledMods.filter((id) => id !== mod.id)
+              : [...app.enabledMods, mod.id]
+            patchApp({ enabledMods: next })
+          }
+          return (
+            <div key={mod.id} className="set-row">
+              <div className="set-row-info">
+                <div className="set-label">{mod.name}</div>
+                <div className="set-desc">{mod.description}</div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={enabled}
+                aria-label={mod.name}
+                className={`set-switch ${enabled ? 'on' : ''}`}
+                onClick={toggleMod}
+              >
+                <span className="set-switch-thumb" />
+              </button>
+            </div>
+          )
+        })}
+
+        <div className="set-row">
+          <div className="set-row-info">
+            <div className="set-label">Custom CSS</div>
+            <div className="set-desc">
+              Style Orbit&apos;s own interface windows only — never applied to web pages. Hold <kbd>Shift</kbd> while launching or pass{' '}
+              <code>--safe-mode</code> to recover if a style breaks the UI.
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={app.customCssEnabled}
+            aria-label="Enable custom CSS"
+            className={`set-switch ${app.customCssEnabled ? 'on' : ''}`}
+            onClick={() => patchApp({ customCssEnabled: !app.customCssEnabled })}
+          >
+            <span className="set-switch-thumb" />
+          </button>
+        </div>
+
+        <div className="set-row stack">
+          <div className="css-editor-head">
+            <span className="set-desc">
+              <code>@import</code> and non-<code>data:</code> <code>url()</code> loads are stripped automatically.
+            </span>
+            <span className="css-byte-count">
+              {(utf8ByteLength(cssDraft) / 1024).toFixed(1)} / {Math.round(MAX_CUSTOM_CSS_BYTES / 1024)} KB
+            </span>
+          </div>
+          <div className="css-editor-wrap">
+            <div ref={cssGutterRef} className="css-editor-gutter" aria-hidden>
+              {Array.from({ length: Math.max(6, cssDraft.split('\n').length) }, (_, i) => (
+                <div key={i}>{i + 1}</div>
+              ))}
+            </div>
+            <textarea
+              className="css-editor-input"
+              spellCheck={false}
+              aria-label="Custom CSS editor"
+              placeholder={'/* Example: soften sidebar tabs */\n.tab.on {\n  border-radius: 12px;\n}'}
+              value={cssDraft}
+              onChange={(e) => setCssDraft(e.target.value)}
+              onScroll={(e) => {
+                if (cssGutterRef.current) cssGutterRef.current.scrollTop = e.currentTarget.scrollTop
+              }}
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                  e.preventDefault()
+                  patchApp({ customCss: cssDraft, customCssEnabled: true })
+                }
+              }}
+            />
+          </div>
+          <div className="css-editor-actions">
+            <button
+              type="button"
+              className="btn sm primary"
+              disabled={cssDraft === app.customCss}
+              onClick={() => {
+                patchApp({ customCss: cssDraft })
+                setIoStatus({ kind: 'ok', text: 'Custom CSS saved and applied.' })
+              }}
+            >
+              Apply CSS
+            </button>
+            {cssDraft && (
+              <button
+                type="button"
+                className="btn sm ghost"
+                onClick={() => {
+                  setCssDraft('')
+                  patchApp({ customCss: '' })
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </section>
