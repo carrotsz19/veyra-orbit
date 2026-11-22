@@ -25,6 +25,14 @@ import { attachPageCompat } from './compat'
 
 const FLOAT_DARK = '#1f1d18'
 const FLOAT_LIGHT = '#fbfaf7'
+const DEFAULT_IDLE_DESTROY_MS = 60_000
+const FALLBACK_READY_MS = 2_000
+
+interface PendingShow {
+  bounds: BoundsRect
+  focus: boolean
+  onShown?: () => void
+}
 
 export interface FloatingWindowOptions {
   parent: BrowserWindow
@@ -38,24 +46,39 @@ export interface FloatingWindowOptions {
   hasShadow?: boolean
   hideOnBlur?: boolean
   hideOnParentMove?: boolean
+  /** Destroy the underlying BrowserWindow after sitting hidden this many ms. Default 60 s. */
+  idleDestroyMs?: number
   onHidden?: (reason: 'blur' | 'parent' | 'asked') => void
   onFocusChange?: (focused: boolean) => void
   onBeforeInput?: (e: Electron.Event, input: Input) => void
+  onWindowDestroyed?: () => void
 }
 
 /**
- * A reusable frameless, sandboxed child window that floats above native page views.
- * Created once per parent window and shown/repositioned on demand so popups open instantly.
+ * A lazy frameless, sandboxed child window that floats above native page views.
+ * Its BrowserWindow is created on first show (or explicit warm) and destroyed after sitting
+ * hidden for ~60 s so idle floating UI holds zero renderer processes or RAM.
  */
 export class FloatingWindow {
-  private win: BrowserWindow
+  private win: BrowserWindow | null = null
   private ready = false
+  private disposed = false
   private queued: { channel: string; payload: unknown }[] = []
+  private pendingShow: PendingShow | null = null
+  private idleTimer: NodeJS.Timeout | null = null
+  private readyFallbackTimer: NodeJS.Timeout | null = null
+  private lastSurfaceTheme: { dark: boolean; bgHex?: string } | null = null
+  private lastZoom: number | null = null
+  private parentMoveAttached = false
+
+  private readonly opts: FloatingWindowOptions
   private readonly hideOnBlur: boolean
   private readonly hideOnParentMove: boolean
+  private readonly idleDestroyMs: number
   private readonly onHidden?: (reason: 'blur' | 'parent' | 'asked') => void
   private readonly onFocusChange?: (focused: boolean) => void
   private readonly parent: BrowserWindow
+
   private readonly handleParentMove = (): void => {
     if (this.hideOnParentMove) this.hide('parent')
   }
@@ -64,15 +87,74 @@ export class FloatingWindow {
   }
 
   constructor(opts: FloatingWindowOptions) {
+    this.opts = opts
     this.parent = opts.parent
     this.hideOnBlur = opts.hideOnBlur ?? true
     this.hideOnParentMove = opts.hideOnParentMove ?? true
+    this.idleDestroyMs = opts.idleDestroyMs ?? DEFAULT_IDLE_DESTROY_MS
     this.onHidden = opts.onHidden
     this.onFocusChange = opts.onFocusChange
 
+    if (!this.parent.isDestroyed()) {
+      this.parent.on('closed', this.handleParentClosed)
+    }
+  }
+
+  private attachParentMoveListeners(): void {
+    if (this.parentMoveAttached || !this.hideOnParentMove || this.parent.isDestroyed()) return
+    this.parent.on('move', this.handleParentMove)
+    this.parent.on('resize', this.handleParentMove)
+    this.parentMoveAttached = true
+  }
+
+  private detachParentMoveListeners(): void {
+    if (!this.parentMoveAttached) return
+    this.parentMoveAttached = false
+    if (!this.parent.isDestroyed()) {
+      this.parent.off('move', this.handleParentMove)
+      this.parent.off('resize', this.handleParentMove)
+    }
+  }
+
+  private clearReadyFallback(): void {
+    if (this.readyFallbackTimer) {
+      clearTimeout(this.readyFallbackTimer)
+      this.readyFallbackTimer = null
+    }
+  }
+
+  cancelIdleDestroy(): void {
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer)
+      this.idleTimer = null
+    }
+  }
+
+  private scheduleIdleDestroy(): void {
+    this.cancelIdleDestroy()
+    if (this.disposed || this.idleDestroyMs <= 0 || !this.win || this.win.isDestroyed()) return
+    if (this.win.isVisible() || this.pendingShow) return
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null
+      if (!this.win || this.win.isDestroyed() || this.win.isVisible() || this.pendingShow) return
+      this.disposeWindow()
+    }, this.idleDestroyMs)
+  }
+
+  /** Creates the underlying BrowserWindow if not currently alive, cancelling any idle-destroy timer. */
+  ensureWindow(): BrowserWindow | null {
+    if (this.disposed || this.parent.isDestroyed()) return null
+    this.cancelIdleDestroy()
+    if (this.win && !this.win.isDestroyed()) return this.win
+
+    const opts = this.opts
     const useTransparent = opts.transparent ?? !opts.acrylic
-    this.win = new BrowserWindow({
-      parent: opts.parent,
+    const initialBg = this.lastSurfaceTheme
+      ? (this.lastSurfaceTheme.bgHex ?? (this.lastSurfaceTheme.dark ? FLOAT_DARK : FLOAT_LIGHT))
+      : FLOAT_DARK
+
+    const w = new BrowserWindow({
+      parent: this.parent,
       show: false,
       frame: false,
       resizable: false,
@@ -81,9 +163,7 @@ export class FloatingWindow {
       maximizable: false,
       skipTaskbar: true,
       hasShadow: opts.hasShadow ?? true,
-      ...(useTransparent
-        ? { transparent: true, backgroundColor: '#00000000' }
-        : { backgroundColor: FLOAT_DARK }),
+      ...(useTransparent ? { transparent: true, backgroundColor: '#00000000' } : { backgroundColor: initialBg }),
       width: opts.width ?? 240,
       height: opts.height ?? 200,
       webPreferences: {
@@ -91,32 +171,60 @@ export class FloatingWindow {
         contextIsolation: true,
         sandbox: true,
         nodeIntegration: false,
-        webSecurity: true
+        webSecurity: true,
+        backgroundThrottling: true
       }
     })
 
-    this.win.setMenu(null)
+    this.win = w
+    this.ready = false
+    this.queued = []
+    this.pendingShow = null
+
+    w.setMenu(null)
     // Never allow navigation or popups inside a floating UI window.
-    this.win.webContents.on('will-navigate', (e) => e.preventDefault())
-    this.win.webContents.on('will-redirect', (e) => e.preventDefault())
-    this.win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    w.webContents.on('will-navigate', (e) => e.preventDefault())
+    w.webContents.on('will-redirect', (e) => e.preventDefault())
+    w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     if (opts.onBeforeInput) {
-      this.win.webContents.on('before-input-event', opts.onBeforeInput)
+      w.webContents.on('before-input-event', opts.onBeforeInput)
     }
 
-    this.win.webContents.once('did-finish-load', () => {
-      if (!this.ready) this.markReady()
+    if (this.lastZoom !== null) {
+      w.webContents.setZoomFactor(this.lastZoom)
+    }
+
+    // Wait for the renderer's explicit *:ready IPC so listeners are attached first; fall back only if it stalls.
+    w.webContents.once('did-finish-load', () => {
+      if (this.win !== w || this.ready || w.isDestroyed()) return
+      this.clearReadyFallback()
+      this.readyFallbackTimer = setTimeout(() => {
+        this.readyFallbackTimer = null
+        if (this.win === w && !this.ready && !w.isDestroyed()) this.markReady()
+      }, FALLBACK_READY_MS)
     })
 
-    this.win.on('focus', () => this.onFocusChange?.(true))
-    this.win.on('blur', () => {
+    w.on('focus', () => {
+      if (this.win === w) this.onFocusChange?.(true)
+    })
+    w.on('blur', () => {
+      if (this.win !== w) return
       this.onFocusChange?.(false)
       if (this.hideOnBlur) this.hide('blur')
     })
+    w.on('closed', () => {
+      if (this.win !== w) return
+      this.win = null
+      this.ready = false
+      this.queued = []
+      this.pendingShow = null
+      this.clearReadyFallback()
+      this.cancelIdleDestroy()
+      this.detachParentMoveListeners()
+      this.opts.onWindowDestroyed?.()
+    })
 
-    this.parent.on('move', this.handleParentMove)
-    this.parent.on('resize', this.handleParentMove)
-    this.parent.on('closed', this.handleParentClosed)
+    this.attachParentMoveListeners()
 
     const query: Record<string, string> = {
       view: opts.view,
@@ -125,53 +233,103 @@ export class FloatingWindow {
       ...(opts.extraQuery ?? {})
     }
     if (process.env.ELECTRON_RENDERER_URL) {
-      void this.win.loadURL(`${process.env.ELECTRON_RENDERER_URL}?${new URLSearchParams(query)}`)
+      void w.loadURL(`${process.env.ELECTRON_RENDERER_URL}?${new URLSearchParams(query)}`)
     } else {
-      void this.win.loadFile(join(__dirname, '../renderer/index.html'), { query })
+      void w.loadFile(join(__dirname, '../renderer/index.html'), { query })
+    }
+    return w
+  }
+
+  /** Pre-creates the window hidden and starts its idle timer so it still cleans up if unused. */
+  warm(): void {
+    const w = this.ensureWindow()
+    if (w && !w.isVisible() && !this.pendingShow) {
+      this.scheduleIdleDestroy()
     }
   }
 
-  markReady(): void {
-    if (this.ready || this.win.isDestroyed()) return
+  private applyShow(req: PendingShow): void {
+    const w = this.win
+    if (!w || w.isDestroyed() || this.parent.isDestroyed()) return
+    this.cancelIdleDestroy()
+    w.setBounds(req.bounds)
+    if (!w.isVisible()) {
+      if (req.focus) w.show()
+      else w.showInactive()
+    }
+    if (req.focus) w.focus()
+    req.onShown?.()
+  }
+
+  /**
+   * Marks the current live window ready, optionally running a hydration callback FIRST
+   * (so appearance tokens and state arrive before any queued open/render payload), then
+   * flushes queued messages and executes any deferred show.
+   */
+  markReady(beforeFlush?: () => void): void {
+    const w = this.win
+    if (this.ready || !w || w.isDestroyed()) return
     this.ready = true
+    this.clearReadyFallback()
+    beforeFlush?.()
     const pending = this.queued
     this.queued = []
     for (const msg of pending) {
-      if (!this.win.isDestroyed()) this.win.webContents.send(msg.channel, msg.payload)
+      if (this.win === w && !w.isDestroyed()) w.webContents.send(msg.channel, msg.payload)
+    }
+    const showReq = this.pendingShow
+    this.pendingShow = null
+    if (showReq && this.win === w && !w.isDestroyed()) {
+      this.applyShow(showReq)
+    } else if (this.win === w && !w.isDestroyed() && !w.isVisible()) {
+      this.scheduleIdleDestroy()
     }
   }
 
+  hasLiveWindow(): boolean {
+    return !!this.win && !this.win.isDestroyed()
+  }
+
+  hasPendingShow(): boolean {
+    return this.pendingShow !== null
+  }
+
   isSender(wc: WebContents): boolean {
-    return !this.win.isDestroyed() && this.win.webContents === wc
+    return !!this.win && !this.win.isDestroyed() && this.win.webContents === wc
   }
 
   isVisible(): boolean {
-    return !this.win.isDestroyed() && this.win.isVisible()
+    return !!this.win && !this.win.isDestroyed() && this.win.isVisible()
   }
 
   isFocused(): boolean {
-    return !this.win.isDestroyed() && this.win.isFocused()
+    return !!this.win && !this.win.isDestroyed() && this.win.isFocused()
   }
 
-  getBrowserWindow(): BrowserWindow {
-    return this.win
+  getBrowserWindow(): BrowserWindow | null {
+    return this.win && !this.win.isDestroyed() ? this.win : null
   }
 
   focus(): void {
-    if (!this.win.isDestroyed()) this.win.focus()
+    if (this.win && !this.win.isDestroyed()) this.win.focus()
   }
 
   setZoomFactor(zoom: number): void {
-    if (!this.win.isDestroyed()) this.win.webContents.setZoomFactor(zoom)
+    this.lastZoom = zoom
+    if (this.win && !this.win.isDestroyed()) this.win.webContents.setZoomFactor(zoom)
   }
 
   setSurfaceTheme(dark: boolean, bgHex?: string): void {
-    if (!this.win.isDestroyed()) this.win.setBackgroundColor(bgHex ?? (dark ? FLOAT_DARK : FLOAT_LIGHT))
+    this.lastSurfaceTheme = { dark, bgHex }
+    if (this.win && !this.win.isDestroyed() && !(this.opts.transparent ?? !this.opts.acrylic)) {
+      this.win.setBackgroundColor(bgHex ?? (dark ? FLOAT_DARK : FLOAT_LIGHT))
+    }
   }
 
   /** Places the floating window at explicit screen bounds, clamped inside the display workArea. */
-  showAtBounds(bounds: BoundsRect, focus = true, clampMargin = 0): void {
-    if (this.win.isDestroyed() || this.parent.isDestroyed()) return
+  showAtBounds(bounds: BoundsRect, focus = true, clampMargin = 0, onShown?: () => void): BoundsRect | null {
+    const w = this.ensureWindow()
+    if (!w || w.isDestroyed() || this.parent.isDestroyed()) return null
     const workArea = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y }).workArea
     const placed =
       clampMargin >= 0
@@ -182,27 +340,39 @@ export class FloatingWindow {
             width: Math.max(80, Math.round(bounds.width)),
             height: Math.max(32, Math.round(bounds.height))
           }
-    this.win.setBounds(placed)
-    if (!this.win.isVisible()) {
-      if (focus) this.win.show()
-      else this.win.showInactive()
+    const req: PendingShow = { bounds: placed, focus, onShown }
+    if (!this.ready) {
+      this.pendingShow = req
+      w.setBounds(placed)
+      return placed
     }
-    if (focus) this.win.focus()
+    this.pendingShow = null
+    this.applyShow(req)
+    return placed
   }
 
-  /** Moves/resizes an already-created window without changing visibility. */
+  /** Moves/resizes an already-created window (or pending show) without changing visibility. */
   setBounds(bounds: BoundsRect): void {
-    if (this.win.isDestroyed()) return
-    this.win.setBounds({
+    const normalized: BoundsRect = {
       x: Math.round(bounds.x),
       y: Math.round(bounds.y),
       width: Math.max(80, Math.round(bounds.width)),
       height: Math.max(32, Math.round(bounds.height))
-    })
+    }
+    if (this.pendingShow) {
+      this.pendingShow = { ...this.pendingShow, bounds: normalized }
+    }
+    if (this.win && !this.win.isDestroyed()) {
+      this.win.setBounds(normalized)
+    }
   }
 
+  /**
+   * Sends a message to the live window, or queues it if the window is currently warming up.
+   * Safe no-op when no window exists (never spawns a window on background broadcasts).
+   */
   send(channel: string, payload: unknown): void {
-    if (this.win.isDestroyed()) return
+    if (!this.win || this.win.isDestroyed()) return
     if (!this.ready) {
       // Keep only the newest message per channel while warming up.
       this.queued = this.queued.filter((m) => m.channel !== channel)
@@ -217,7 +387,8 @@ export class FloatingWindow {
    * clamped inside the active display's workArea.
    */
   showAt(anchorCss: { x: number; y: number }, sizeCss: { width: number; height: number }, focus = true): void {
-    if (this.win.isDestroyed() || this.parent.isDestroyed()) return
+    const w = this.ensureWindow()
+    if (!w || w.isDestroyed() || this.parent.isDestroyed()) return
     const cb = this.parent.getContentBounds()
     const z = this.parent.webContents.getZoomFactor()
     const anchorScreen = {
@@ -226,28 +397,48 @@ export class FloatingWindow {
     }
     const workArea = screen.getDisplayNearestPoint(anchorScreen).workArea
     const bounds = clampPopupBounds(anchorScreen, { width: sizeCss.width * z, height: sizeCss.height * z }, workArea)
-    this.win.setBounds(bounds)
-    if (!this.win.isVisible()) {
-      if (focus) this.win.show()
-      else this.win.showInactive()
+    const req: PendingShow = { bounds, focus }
+    if (!this.ready) {
+      this.pendingShow = req
+      w.setBounds(bounds)
+      return
     }
-    if (focus) this.win.focus()
+    this.pendingShow = null
+    this.applyShow(req)
   }
 
   hide(reason: 'blur' | 'parent' | 'asked' = 'asked'): void {
-    if (this.win.isDestroyed() || !this.win.isVisible()) return
-    this.win.hide()
-    this.onHidden?.(reason)
+    this.pendingShow = null
+    if (!this.ready) this.queued = []
+    if (!this.win || this.win.isDestroyed()) return
+    const wasVisible = this.win.isVisible()
+    if (wasVisible) this.win.hide()
+    this.scheduleIdleDestroy()
+    if (wasVisible) this.onHidden?.(reason)
   }
 
+  /** Destroys the current BrowserWindow while keeping the lazy wrapper reusable for future shows. */
+  disposeWindow(): void {
+    this.cancelIdleDestroy()
+    this.clearReadyFallback()
+    this.detachParentMoveListeners()
+    this.queued = []
+    this.pendingShow = null
+    this.ready = false
+    const w = this.win
+    this.win = null
+    if (!w) return
+    this.opts.onWindowDestroyed?.()
+    if (!w.isDestroyed()) w.destroy()
+  }
+
+  /** Permanently tears down the wrapper and its parent listeners (called on parent close). */
   destroy(): void {
+    this.disposed = true
     if (!this.parent.isDestroyed()) {
-      this.parent.off('move', this.handleParentMove)
-      this.parent.off('resize', this.handleParentMove)
       this.parent.off('closed', this.handleParentClosed)
     }
-    this.queued = []
-    if (!this.win.isDestroyed()) this.win.destroy()
+    this.disposeWindow()
   }
 }
 
@@ -325,6 +516,7 @@ export class MenuPopup {
   private owner: WebContents | null = null
   private pendingAnchor: { x: number; y: number } | null = null
   private openState = false
+  private lastAppearance: ResolvedAppearance | null = null
 
   constructor(
     parent: BrowserWindow,
@@ -355,6 +547,11 @@ export class MenuPopup {
           this.sendToOwner('menu:closed')
         }
         this.owner = null
+      },
+      onWindowDestroyed: () => {
+        this.pendingAnchor = null
+        this.owner = null
+        this.setOpen(false)
       }
     })
   }
@@ -372,23 +569,31 @@ export class MenuPopup {
     this.onOpenChange?.(open)
   }
 
+  hasLiveWindow(): boolean {
+    return this.floating.hasLiveWindow()
+  }
+
   isSender(wc: WebContents): boolean {
     return this.floating.isSender(wc)
   }
 
   isOpen(): boolean {
-    return this.openState || this.floating.isVisible()
+    return this.openState || this.floating.isVisible() || this.floating.hasPendingShow()
   }
 
   isFocused(): boolean {
     return this.floating.isFocused()
   }
 
-  markReady(): void {
-    this.floating.markReady()
+  markReady(tokens?: ResolvedAppearance): void {
+    this.floating.markReady(() => {
+      const t = tokens ?? this.lastAppearance
+      if (t) this.sendAppearance(t)
+    })
   }
 
   sendAppearance(tokens: ResolvedAppearance): void {
+    this.lastAppearance = tokens
     this.floating.setSurfaceTheme(tokens.isDark, tokens.floatBg)
     this.floating.send('appearance:tokens', tokens)
   }
@@ -396,10 +601,11 @@ export class MenuPopup {
   open(rawSpec: unknown, sender?: WebContents, offsetCss: { x: number; y: number } = { x: 0, y: 0 }): void {
     const spec = sanitizeMenuSpec(rawSpec)
     if (!spec || this.parent.isDestroyed()) return
+    if (!this.floating.ensureWindow()) return
     this.owner = sender ?? this.parent.webContents
     this.pendingAnchor = { x: spec.x + offsetCss.x, y: spec.y + offsetCss.y }
     this.setOpen(true)
-    this.floating.setSurfaceTheme(spec.dark)
+    this.floating.setSurfaceTheme(spec.dark, this.lastAppearance?.floatBg)
     this.floating.setZoomFactor(this.parent.webContents.getZoomFactor())
     this.floating.send('menu:render', spec)
   }
@@ -435,6 +641,7 @@ export class MenuPopup {
     if (this.floating.isVisible()) {
       this.floating.hide('blur')
     } else if (this.openState) {
+      this.floating.hide('asked')
       this.setOpen(false)
       this.sendToOwner('menu:closed')
       this.owner = null
@@ -493,8 +700,15 @@ export class CompactPanel {
       hideOnBlur: false,
       hideOnParentMove: false,
       onFocusChange: opts.onFocusChange,
-      onBeforeInput: opts.onBeforeInput
+      onBeforeInput: opts.onBeforeInput,
+      onWindowDestroyed: () => {
+        this.revealed = false
+      }
     })
+  }
+
+  hasLiveWindow(): boolean {
+    return this.floating.hasLiveWindow()
   }
 
   isSender(wc: WebContents): boolean {
@@ -517,8 +731,8 @@ export class CompactPanel {
     return this.lastOffset
   }
 
-  markReady(): void {
-    this.floating.markReady()
+  markReady(beforeFlush?: () => void): void {
+    this.floating.markReady(beforeFlush)
   }
 
   sendAppearance(tokens: ResolvedAppearance): void {
@@ -535,6 +749,7 @@ export class CompactPanel {
       clearTimeout(this.hideTimer)
       this.hideTimer = null
     }
+    if (!this.floating.ensureWindow()) return
     this.lastOffset = offsetCss
     const cb = this.parent.getContentBounds()
     const z = this.parent.webContents.getZoomFactor()
@@ -551,7 +766,7 @@ export class CompactPanel {
   }
 
   reposition(offsetCss: { x: number; y: number }, sizeCss: { width: number; height: number }): void {
-    if (this.parent.isDestroyed() || !this.floating.isVisible()) return
+    if (this.parent.isDestroyed() || (!this.floating.isVisible() && !this.floating.hasPendingShow())) return
     this.lastOffset = offsetCss
     const cb = this.parent.getContentBounds()
     const z = this.parent.webContents.getZoomFactor()
@@ -573,7 +788,11 @@ export class CompactPanel {
       this.hideTimer = null
     }
     this.revealed = false
-    if (!this.floating.isVisible()) return
+    if (!this.floating.isVisible()) {
+      this.floating.send('compact-panel:visible', false)
+      this.floating.hide('asked')
+      return
+    }
     this.floating.send('compact-panel:visible', false)
     const finishHide = (): void => {
       const parentAlive = !this.parent.isDestroyed()
@@ -616,6 +835,7 @@ export class PalettePopup {
   private actions = new Map<string, PaletteAction>()
   private mode: PaletteMode = 'command'
   private lastHeight = 360
+  private lastAppearance: ResolvedAppearance | null = null
 
   constructor(
     parent: BrowserWindow,
@@ -641,8 +861,19 @@ export class PalettePopup {
       onHidden: () => {
         this.actions.clear()
         opts.onHidden?.()
+      },
+      onWindowDestroyed: () => {
+        this.actions.clear()
       }
     })
+  }
+
+  hasLiveWindow(): boolean {
+    return this.floating.hasLiveWindow()
+  }
+
+  warm(): void {
+    this.floating.warm()
   }
 
   isSender(wc: WebContents): boolean {
@@ -650,7 +881,7 @@ export class PalettePopup {
   }
 
   isOpen(): boolean {
-    return this.floating.isVisible()
+    return this.floating.isVisible() || this.floating.hasPendingShow()
   }
 
   isFocused(): boolean {
@@ -661,11 +892,15 @@ export class PalettePopup {
     return this.mode
   }
 
-  markReady(): void {
-    this.floating.markReady()
+  markReady(tokens?: ResolvedAppearance): void {
+    this.floating.markReady(() => {
+      const t = tokens ?? this.lastAppearance
+      if (t) this.sendAppearance(t)
+    })
   }
 
   sendAppearance(tokens: ResolvedAppearance): void {
+    this.lastAppearance = tokens
     this.floating.setSurfaceTheme(tokens.isDark, tokens.floatBg)
     this.floating.send('appearance:tokens', tokens)
   }
@@ -674,9 +909,10 @@ export class PalettePopup {
     init: { mode: PaletteMode; dark: boolean; accent: string; items: PaletteItem[]; actions: Map<string, PaletteAction> }
   ): void {
     if (this.parent.isDestroyed()) return
+    if (!this.floating.ensureWindow()) return
     this.mode = init.mode
     this.actions = init.actions
-    this.floating.setSurfaceTheme(init.dark)
+    this.floating.setSurfaceTheme(init.dark, this.lastAppearance?.floatBg)
     const z = this.parent.webContents.getZoomFactor()
     this.floating.setZoomFactor(z)
     const cb = this.parent.getContentBounds()
@@ -700,7 +936,7 @@ export class PalettePopup {
   }
 
   applyHeight(height: number): void {
-    if (this.parent.isDestroyed() || !this.floating.isVisible()) return
+    if (this.parent.isDestroyed() || !this.isOpen()) return
     if (!Number.isFinite(height) || height <= 0) return
     const clamped = Math.min(520, Math.max(58, Math.ceil(height)))
     if (Math.abs(clamped - this.lastHeight) < 2) return
@@ -762,6 +998,7 @@ export class PeekPopup {
   private view: WebContentsView | null = null
   private target: PeekTarget | null = null
   private state: PeekState | null = null
+  private lastAppearance: ResolvedAppearance | null = null
 
   constructor(
     parent: BrowserWindow,
@@ -793,8 +1030,15 @@ export class PeekPopup {
       onHidden: () => {
         this.teardownView()
         this.onClosed?.()
+      },
+      onWindowDestroyed: () => {
+        this.teardownView()
       }
     })
+  }
+
+  hasLiveWindow(): boolean {
+    return this.floating.hasLiveWindow()
   }
 
   isSender(wc: WebContents): boolean {
@@ -806,19 +1050,23 @@ export class PeekPopup {
   }
 
   isOpen(): boolean {
-    return this.floating.isVisible() && this.target !== null
+    return (this.floating.isVisible() || this.floating.hasPendingShow()) && this.target !== null
   }
 
   isFocused(): boolean {
     return this.floating.isFocused()
   }
 
-  markReady(): void {
-    this.floating.markReady()
-    if (this.state) this.floating.send('peek:state', this.state)
+  markReady(tokens?: ResolvedAppearance): void {
+    this.floating.markReady(() => {
+      const t = tokens ?? this.lastAppearance
+      if (t) this.sendAppearance(t)
+      if (this.state) this.floating.send('peek:state', this.state)
+    })
   }
 
   sendAppearance(tokens: ResolvedAppearance): void {
+    this.lastAppearance = tokens
     this.floating.setSurfaceTheme(tokens.isDark, tokens.floatBg)
     this.floating.send('appearance:tokens', tokens)
   }
@@ -838,7 +1086,7 @@ export class PeekPopup {
     this.view = null
     if (!view) return
     const hostWin = this.floating.getBrowserWindow()
-    if (!hostWin.isDestroyed()) {
+    if (hostWin && !hostWin.isDestroyed()) {
       try {
         hostWin.contentView.removeChildView(view)
       } catch {
@@ -853,8 +1101,11 @@ export class PeekPopup {
     this.teardownView()
     this.ensureSession(req.partition)
 
+    const hostWin = this.floating.ensureWindow()
+    if (!hostWin || hostWin.isDestroyed()) return
+
     const z = this.parent.webContents.getZoomFactor()
-    this.floating.setSurfaceTheme(req.dark)
+    this.floating.setSurfaceTheme(req.dark, this.lastAppearance?.floatBg)
     this.floating.setZoomFactor(z)
     const cb = this.parent.getContentBounds()
     const workArea = screen.getDisplayNearestPoint({ x: cb.x + Math.round(cb.width / 2), y: cb.y + Math.round(cb.height / 2) }).workArea
@@ -880,7 +1131,8 @@ export class PeekPopup {
         webSecurity: true,
         spellcheck: true,
         safeDialogs: true,
-        plugins: true
+        plugins: true,
+        backgroundThrottling: true
       }
     })
     view.setBackgroundColor('#ffffffff')
@@ -893,17 +1145,26 @@ export class PeekPopup {
     this.wireView(view, req.partition)
     this.view = view
 
-    const hostWin = this.floating.getBrowserWindow()
-    this.floating.showAtBounds(bounds, true, 10)
+    const placed = this.floating.showAtBounds(bounds, true, 10, () => {
+      if (this.view === view && !hostWin.isDestroyed() && !view.webContents.isDestroyed()) {
+        const [cw, ch] = hostWin.getContentSize()
+        view.setBounds(computePeekViewRect(cw, ch, z))
+        view.webContents.focus()
+      }
+    })
     if (!hostWin.isDestroyed()) {
       hostWin.contentView.addChildView(view)
       const [cw, ch] = hostWin.getContentSize()
-      view.setBounds(computePeekViewRect(cw, ch, z))
+      const viewW = cw > 0 ? cw : placed?.width ?? bounds.width
+      const viewH = ch > 0 ? ch : placed?.height ?? bounds.height
+      view.setBounds(computePeekViewRect(viewW, viewH, z))
     }
 
     this.emitState()
     void view.webContents.loadURL(req.url).catch(() => {})
-    view.webContents.focus()
+    if (hostWin.isVisible() && !view.webContents.isDestroyed()) {
+      view.webContents.focus()
+    }
   }
 
   private wireView(view: WebContentsView, partition: string): void {

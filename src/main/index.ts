@@ -77,6 +77,7 @@ const HOUR_MS = 3_600_000
 const CLEAR_RANGES = new Set<ClearDataRange>(['hour', 'day', 'all'])
 const COMPACT_POLL_MS = 100
 const COMPACT_HIDE_DELAY_MS = 240
+const PALETTE_PREWARM_DELAY_MS = 4_000
 
 function resolveCurrentAppearance(): ResolvedAppearance {
   const appCfg = settings?.get().appearance ?? DEFAULT_APPEARANCE
@@ -155,6 +156,7 @@ let lastPolledCursor: { x: number; y: number } | null = null
 let compactPoller: NodeJS.Timeout | null = null
 let sideHideTimer: NodeJS.Timeout | null = null
 let barHideTimer: NodeJS.Timeout | null = null
+let paletteWarmTimer: NodeJS.Timeout | null = null
 
 const COMPACT_SIDEBAR_W = 264
 const COMPACT_TITLEBAR_H = 52
@@ -1085,7 +1087,18 @@ function createWindow(): void {
     if (t.shortcut(input)) e.preventDefault()
   })
 
-  w.once('ready-to-show', () => w.show())
+  w.once('ready-to-show', () => {
+    w.show()
+    // Cold-opening the command palette takes >150 ms; pre-warm only the palette after startup settles.
+    // Its idle-destroy timer still tears it down after ~60 s if unused.
+    if (paletteWarmTimer) clearTimeout(paletteWarmTimer)
+    paletteWarmTimer = setTimeout(() => {
+      paletteWarmTimer = null
+      if (win === w && !w.isDestroyed() && !w.isMinimized() && palettePopup && !palettePopup.hasLiveWindow()) {
+        palettePopup.warm()
+      }
+    }, PALETTE_PREWARM_DELAY_MS)
+  })
   // Windows flickers acrylic on a full-screen window, so full screen is solid; and a page in
   // full screen leaves it when the window does (Esc, F11).
   w.on('focus', sendWinState)
@@ -1139,6 +1152,10 @@ function createWindow(): void {
   })
   w.on('close', () => t.save())
   w.on('closed', () => {
+    if (paletteWarmTimer) {
+      clearTimeout(paletteWarmTimer)
+      paletteWarmTimer = null
+    }
     stopCompactPoller()
     compactDrag = null
     compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false, dragging: false, extPopup: false }
@@ -1198,7 +1215,7 @@ function createWindow(): void {
 
 /** Only the browser's own main UI may call privileged IPC (settings, privacy, bounds, overlay); pages have no preload. */
 function fromUi(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
-  return !!win && e.sender === win.webContents
+  return !!win && !win.isDestroyed() && e.sender === win.webContents
 }
 
 /** Only the floating compact-mode sidebar or titlebar panels may call compact-panel channels. */
@@ -1280,21 +1297,23 @@ ipcMain.on('compact-panel:ready', (e) => {
   if (!fromCompactPanel(e) || !tabs) return
   const panel = compactSidebar?.isSender(e.sender) ? compactSidebar : compactTitlebar
   if (!panel) return
-  panel.markReady()
-  panel.send('state', tabs.state())
-  panel.send('downloads', downloads?.list() ?? [])
-  if (settings) panel.send('settings', settings.view())
-  panel.sendAppearance(resolveCurrentAppearance())
-  panel.send('compact:state', compactState)
-  panel.send('win:state', {
-    focused: isAnyOrbitFocused(),
-    maximized: !!win && !win.isDestroyed() && win.isMaximized(),
-    fullscreen: !!win && !win.isDestroyed() && win.isFullScreen()
+  const currentTabs = tabs
+  panel.markReady(() => {
+    panel.sendAppearance(resolveCurrentAppearance())
+    if (settings) panel.send('settings', settings.view())
+    panel.send('state', currentTabs.state())
+    panel.send('downloads', downloads?.list() ?? [])
+    panel.send('compact:state', compactState)
+    panel.send('win:state', {
+      focused: isAnyOrbitFocused(),
+      maximized: !!win && !win.isDestroyed() && win.isMaximized(),
+      fullscreen: !!win && !win.isDestroyed() && win.isFullScreen()
+    })
+    if (updater) panel.send('update:state', updater.state())
+    if (extManager && panel === compactTitlebar) {
+      panel.send('extensions:actions', extManager.getToolbarActions())
+    }
   })
-  if (updater) panel.send('update:state', updater.state())
-  if (extManager && panel === compactTitlebar) {
-    panel.send('extensions:actions', extManager.getToolbarActions())
-  }
 })
 ipcMain.on('compact-panel:omnibox-open', (e, open: unknown) => {
   if (!compactTitlebar?.isSender(e.sender)) return
@@ -1470,8 +1489,7 @@ ipcMain.on('menu:close', (e) => {
 })
 ipcMain.on('menu:ready', (e) => {
   if (fromMenu(e)) {
-    menuPopup?.markReady()
-    menuPopup?.sendAppearance(resolveCurrentAppearance())
+    menuPopup?.markReady(resolveCurrentAppearance())
   }
 })
 ipcMain.on('menu:size', (e, width: unknown, height: unknown) => {
@@ -1490,8 +1508,7 @@ ipcMain.on('menu:dismiss', (e) => {
 // Floating Ctrl+K command palette IPC: strict sender check + main-side ID/URL validation.
 ipcMain.on('palette:ready', (e) => {
   if (fromPalette(e)) {
-    palettePopup?.markReady()
-    palettePopup?.sendAppearance(resolveCurrentAppearance())
+    palettePopup?.markReady(resolveCurrentAppearance())
   }
 })
 ipcMain.on('palette:query', (e, text: unknown) => {
@@ -1523,8 +1540,7 @@ ipcMain.on('palette:dismiss', (e) => {
 // Floating Link Preview ("Peek") toolbar IPC: strict sender check + fixed action allowlist (never accepts URLs).
 ipcMain.on('peek:ready', (e) => {
   if (fromPeek(e)) {
-    peekPopup?.markReady()
-    peekPopup?.sendAppearance(resolveCurrentAppearance())
+    peekPopup?.markReady(resolveCurrentAppearance())
   }
 })
 ipcMain.on('peek:action', (e, act: unknown) => {
