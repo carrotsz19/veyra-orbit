@@ -507,6 +507,8 @@ function finishCompactTabDrag(commitDrop: boolean): void {
   const drag = compactTabDrag
   if (!drag) return
   compactTabDrag = null
+  // The panel may be hidden before its dragend fires; make sure it drops its drag pin.
+  compactSidebar?.send('compact-panel:reset-transient')
   if (drag.timer) {
     clearInterval(drag.timer)
     drag.timer = null
@@ -1054,7 +1056,16 @@ function createWindow(): void {
     toggleBookmarkBar: () => toggleBookmarkBar(),
     onMenuOpen: (open) => {
       compactPins.menu = open
-      if (settings?.get().compactMode) sendCompactState()
+      if (!settings?.get().compactMode) return
+      if (!open) {
+        // A native menu swallows the panel's mouseleave and can cut a tab drag short, so the
+        // panel's hover and drag flags are stale now. Trust the real cursor instead.
+        compactHover.sidebar = false
+        compactSidebar?.send('compact-panel:reset-transient')
+        lastPolledCursor = null
+      }
+      sendCompactState()
+      if (!open) pollCompactCursor()
     },
     onFocusOmnibox: () => {
       if (!settings?.get().compactMode) return false

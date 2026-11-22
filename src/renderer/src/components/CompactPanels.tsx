@@ -63,7 +63,8 @@ export function CompactSidebarWindow(): React.JSX.Element {
         })
       }),
       panel.onVisible(setVisible),
-      panel.onNewWorkspace(() => setNewWorkspaceTick((n) => n + 1))
+      panel.onNewWorkspace(() => setNewWorkspaceTick((n) => n + 1)),
+      panel.onResetTransient(() => setDraggingTab(false))
     ]
     panel.ready()
     return () => {
