@@ -40,6 +40,21 @@ import {
 } from '../shared/split'
 import { FORM_DIRTY_CHECK_SCRIPT, canSleepTab, isTypingKeyInput, type SleepPolicy } from '../shared/sleep'
 import { shouldPeekWindowOpen } from '../shared/peek'
+import {
+  matchShortcut,
+  resolveShortcuts,
+  toElectronAccelerator,
+  type ShortcutOverrides
+} from '../shared/shortcuts'
+import {
+  filterTabsForStartup,
+  pickNextTabAfterClose,
+  resolveNewTabInsertIndex,
+  type CloseTabSelection,
+  type ExternalLinkBehavior,
+  type NewTabPosition
+} from '../shared/behavior'
+import type { StartupBehavior } from '../shared/settings'
 import { attachPageCompat } from './compat'
 
 interface Tab {
@@ -51,6 +66,8 @@ interface Tab {
   typed?: boolean
   /** Timestamp when this tab was last active in the window (for sleeping tabs). */
   lastActiveAt: number
+  /** Monotonic activation sequence number for deterministic 'last-used' tab close selection. */
+  lastActiveSeq: number
   /** True once a typing/editing keydown occurred in the current document (gates cheap on-demand form probe). */
   hasTypedInput: boolean
   /** Cached result of the cheap on-demand unsaved-form-text check for the current document. */
@@ -66,8 +83,10 @@ export interface TabHooks {
   title(url: string, title: string): void
   isBookmarked(url: string): boolean
   toggleBookmark(url: string, title: string): void
-  /** Current search engine URL prefix. */
+  /** Current search engine URL template/prefix. */
   searchUrl(): string
+  /** Configured search engines for keyword and !bang shortcuts. */
+  searchEngines?(): readonly import('../shared/search').SearchEngine[]
   /** A page tried to open an allowlisted external app scheme (mailto:, zoommtg:, ...). */
   externalApp(tabId: number, pageUrl: string, targetUrl: string): void
   /** Ensures a session partition has the full security, compat and downloads setup. */
@@ -108,6 +127,14 @@ export interface TabHooks {
   onActiveTabChanged?(wc: WebContents | null, partition: string): void
   extensionContextMenuItems?(wc: WebContents, params: Electron.ContextMenuParams): Electron.MenuItem[]
   isLoadedExtension?(partition: string, extensionId: string): boolean
+  /** Current user keyboard shortcut overrides. */
+  shortcuts?(): ShortcutOverrides
+  /** Where newly created tabs are inserted ('end' or 'after-current'). */
+  newTabPosition?(): NewTabPosition
+  /** Which tab becomes active after closing a tab ('right', 'left', or 'last-used'). */
+  closeTabSelection?(): CloseTabSelection
+  /** Opens the screenshot chooser (wired in Part 8). */
+  onScreenshot?(): void
   /** Quits the application (Ctrl+Q). */
   quit?(): void
 }
@@ -125,6 +152,7 @@ export class Tabs {
   private nextSplitId = 1
   private activeId: number | null = null
   private nextId = 1
+  private activeSeq = 0
   private bounds: Rect | null = null
   private pageRadius = 10
   /** The tab whose page asked for full screen (a video, a slideshow); its page fills the window. */
@@ -153,6 +181,8 @@ export class Tabs {
   private shiftHeld = false
   private altHeld = false
   private lastAltAt = 0
+  /** Pauses global shortcut dispatch while the user is recording a new shortcut in Settings. */
+  private shortcutRecording = false
 
   constructor(
     private win: BrowserWindow,
@@ -167,7 +197,12 @@ export class Tabs {
       this.altStandalone = false
       this.shiftHeld = false
       this.altHeld = false
+      this.shortcutRecording = false
     })
+  }
+
+  setShortcutRecording(active: boolean): void {
+    this.shortcutRecording = active
   }
 
   // ---- reading ------------------------------------------------------------
@@ -285,6 +320,11 @@ export class Tabs {
     return !!this.workspaces.find((w) => w.id === wsId)?.private
   }
 
+  activeWorkspace(): WorkspaceInfo | null {
+    const ws = this.workspaces.find((w) => w.id === this.activeWorkspaceId)
+    return ws ? { ...ws } : null
+  }
+
   isPrivateTab(tabId: number | null): boolean {
     if (tabId === null) return false
     const tab = this.get(tabId)
@@ -310,6 +350,53 @@ export class Tabs {
     const tab = this.active
     if (!tab || !this.showsPage(tab) || !tab.view || tab.view.webContents.isDestroyed()) return null
     return tab.view.webContents
+  }
+
+  /** Returns active tab metadata, live WebContents (if web page), and page/pane CSS bounds for screenshots. */
+  activeScreenshotTarget(): {
+    url: string
+    title: string
+    wc: WebContents | null
+    isPrivate: boolean
+    isInternal: boolean
+    pageBounds: Rect | null
+    paneBounds: Rect | null
+  } | null {
+    const tab = this.active
+    if (!tab) return null
+    const wc = this.showsPage(tab) && tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null
+    const pageBounds = this.bounds ? { ...this.bounds } : null
+    let paneBounds: Rect | null = pageBounds
+    if (this.bounds && !this.fullscreenTab) {
+      const group = this.splitGroupOf(tab.info.id)
+      if (group) {
+        const slotIdx = group.tabIds.indexOf(tab.info.id)
+        const layout = computeSplitLayout(this.bounds, group.tabIds.length, {
+          colRatio: group.colRatio,
+          rowRatio: group.rowRatio,
+          orientation: group.orientation
+        })
+        const slot = slotIdx >= 0 ? layout.panes[slotIdx] : undefined
+        if (slot) {
+          paneBounds = { ...slot.view }
+        }
+      }
+    }
+    return {
+      url: tab.info.error?.url || tab.info.url || '',
+      title: tab.info.title || '',
+      wc,
+      isPrivate: this.isPrivateWorkspace(tab.info.workspaceId),
+      isInternal: !wc,
+      pageBounds,
+      paneBounds
+    }
+  }
+
+  /** Hides or restores native page views for the in-window screenshot area selector. */
+  setScreenshotOverlay(hidden: boolean): void {
+    this.overlayOpen = hidden
+    this.layout()
   }
 
   tabDetailsForWebContents(wc: WebContents): { pinned: boolean; index: number; discarded: boolean; active: boolean } | null {
@@ -577,10 +664,33 @@ export class Tabs {
 
   // ---- making and closing tabs -------------------------------------------
 
+  /** Total number of open tabs across all workspaces (used for close-window confirmation). */
+  tabCount(): number {
+    return this.tabs.length
+  }
+
+  /** Opens a validated http(s) URL received from another app according to the user's preference. */
+  openExternalUrl(url: string, behavior: ExternalLinkBehavior): void {
+    if (!isAllowedUrl(url)) return
+    if (behavior === 'current-tab' && this.active) {
+      this.navigate(this.active.info.id, url, true)
+      return
+    }
+    this.create(url, { activate: true })
+  }
+
   /** A new tab. With no URL it shows the start page. */
   create(
     url = '',
-    opts: { activate?: boolean; after?: number; pinned?: boolean; lazy?: boolean; title?: string; workspaceId?: string } = {}
+    opts: {
+      activate?: boolean
+      after?: number
+      atEnd?: boolean
+      pinned?: boolean
+      lazy?: boolean
+      title?: string
+      workspaceId?: string
+    } = {}
   ): number {
     const workspaceId =
       opts.workspaceId && this.workspaces.some((w) => w.id === opts.workspaceId) ? opts.workspaceId : this.activeWorkspaceId
@@ -589,6 +699,7 @@ export class Tabs {
     const tab: Tab = {
       view: null,
       lastActiveAt: now,
+      lastActiveSeq: 0,
       hasTypedInput: false,
       hasUnsavedFormText: false,
       info: {
@@ -608,8 +719,17 @@ export class Tabs {
       }
     }
 
-    const at = opts.after !== undefined ? this.tabs.findIndex((t) => t.info.id === opts.after) + 1 : this.tabs.length
-    this.tabs.splice(at > 0 ? at : this.tabs.length, 0, tab)
+    const pos = this.hooks.newTabPosition?.() ?? 'end'
+    const at = opts.atEnd
+      ? this.tabs.length
+      : resolveNewTabInsertIndex(
+          this.tabs.map((t) => ({ id: t.info.id, workspaceId: t.info.workspaceId })),
+          workspaceId,
+          this.activeId,
+          pos,
+          opts.after
+        )
+    this.tabs.splice(at, 0, tab)
     this.sortPinned(workspaceId)
 
     if (url && isAllowedUrl(url)) {
@@ -664,10 +784,14 @@ export class Tabs {
     this.destroyView(tab)
 
     const wsAfter = this.workspaceTabs(wsId)
-    const preferredNext =
-      (siblingInGroup !== undefined ? wsAfter.find((t) => t.info.id === siblingInGroup) : undefined) ??
-      wsAfter[wsIndex] ??
-      wsAfter[wsIndex - 1]
+    const selection = this.hooks.closeTabSelection?.() ?? 'right'
+    const picked = pickNextTabAfterClose(
+      wsAfter.map((t) => ({ id: t.info.id, lastActiveSeq: t.lastActiveSeq, tab: t })),
+      wsIndex,
+      selection,
+      siblingInGroup
+    )
+    const preferredNext = picked?.tab
     if (this.workspaceActiveTab.get(wsId) === id) {
       if (preferredNext) this.workspaceActiveTab.set(wsId, preferredNext.info.id)
       else this.workspaceActiveTab.delete(wsId)
@@ -743,6 +867,7 @@ export class Tabs {
     }
 
     this.activeId = id
+    tab.lastActiveSeq = ++this.activeSeq
     this.workspaceActiveTab.set(tab.info.workspaceId, id)
 
     for (const vt of this.visibleTabs()) {
@@ -773,6 +898,7 @@ export class Tabs {
     if (this.active) this.active.lastActiveAt = now
     this.stopFind(true)
     this.activeId = id
+    tab.lastActiveSeq = ++this.activeSeq
     this.workspaceActiveTab.set(tab.info.workspaceId, id)
     tab.lastActiveAt = now
     this.lastFocusTarget = 'page'
@@ -783,7 +909,7 @@ export class Tabs {
 
   navigate(id: number, input: string, typed = false): void {
     const tab = this.get(id)
-    const url = toUrl(input, this.hooks.searchUrl())
+    const url = toUrl(input, this.hooks.searchUrl(), this.hooks.searchEngines?.())
     if (!tab || !url) return
     tab.pendingUrl = undefined
     tab.info.sleeping = false
@@ -1284,6 +1410,27 @@ export class Tabs {
     if (wc && !wc.isDestroyed()) wc.stop()
   }
 
+  /** Navigates the active tab back to Orbit's calm start page. */
+  goHome(): void {
+    const tab = this.active
+    if (!tab) return
+    if (this.fullscreenTab === tab) this.exitPageFullscreen(true)
+    this.stopFind(true)
+    if (tab.view && !tab.view.webContents.isDestroyed()) tab.view.webContents.stop()
+    tab.pendingUrl = undefined
+    tab.info.url = ''
+    tab.info.title = ''
+    tab.info.favicon = undefined
+    tab.info.loading = false
+    tab.info.error = undefined
+    tab.info.canGoBack = !!(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.getURL())
+    tab.info.canGoForward = false
+    this.layout()
+    this.notifyActiveTab()
+    this.changed()
+    if (!this.win.isDestroyed()) this.win.webContents.focus()
+  }
+
   private zoom(delta: number | null, tab = this.active): void {
     if (!tab || !this.showsPage(tab) || !tab.view || tab.view.webContents.isDestroyed()) return
     const wc = tab.view.webContents
@@ -1493,6 +1640,7 @@ export class Tabs {
       activeTab!.info.id !== id &&
       (!activeGroup || (!activeGroup.tabIds.includes(id) && activeGroup.tabIds.length < MAX_SPLIT_PANES))
 
+    const resolvedKeys = resolveShortcuts(this.hooks.shortcuts?.())
     const splitItems: Electron.MenuItemConstructorOptions[] = []
     if (canSplitWithActive) {
       splitItems.push({
@@ -1502,7 +1650,7 @@ export class Tabs {
     } else if (!tabGroup && activeTab?.info.id === id) {
       splitItems.push({
         label: 'Split with next tab',
-        accelerator: 'CmdOrCtrl+Shift+\\',
+        accelerator: toElectronAccelerator(resolvedKeys['split-view']),
         click: () => this.splitWithNext()
       })
     }
@@ -1540,13 +1688,13 @@ export class Tabs {
       { label: muted ? 'Unmute tab' : 'Mute tab', click: () => this.toggleMute(id) },
       { label: 'Sleep tab', enabled: this.canSleep(tab, true), click: () => this.sleepTab(id, true) },
       { type: 'separator' },
-      { label: 'Close tab', accelerator: 'CmdOrCtrl+W', click: () => this.close(id) },
+      { label: 'Close tab', accelerator: toElectronAccelerator(resolvedKeys['close-tab']), click: () => this.close(id) },
       {
         label: 'Close other tabs',
         enabled: wsTabs.some((t) => t.info.id !== id && !t.info.pinned),
         click: () => this.closeOthers(id)
       },
-      { label: 'Reopen closed tab', accelerator: 'CmdOrCtrl+Shift+T', enabled: this.closed.length > 0, click: () => this.reopenClosed() }
+      { label: 'Reopen closed tab', accelerator: toElectronAccelerator(resolvedKeys['reopen-closed-tab']), enabled: this.closed.length > 0, click: () => this.reopenClosed() }
     ]).popup({
       window: targetWin,
       callback: () => this.hooks.onMenuOpen?.(false)
@@ -1661,20 +1809,14 @@ export class Tabs {
     this.altHeld = input.alt
     this.altStandalone = false
 
+    if (this.shortcutRecording) return false
+
     const mod = process.platform === 'darwin' ? input.meta : input.control
     const key = input.key.toLowerCase()
     const run = (f: () => void): true => (f(), true)
 
-    // Workspace shortcuts: Ctrl+Alt+1..9 and Ctrl+Alt+Left/Right
+    // Reserved numbered workspace & tab switching (Ctrl+Alt+1..9 and Ctrl+1..9)
     if (mod && input.alt && !input.shift) {
-      if (key === 'arrowleft') {
-        const next = nextWorkspaceId(this.workspaces, this.activeWorkspaceId, -1)
-        return run(() => next && this.switchWorkspace(next, -1))
-      }
-      if (key === 'arrowright') {
-        const next = nextWorkspaceId(this.workspaces, this.activeWorkspaceId, 1)
-        return run(() => next && this.switchWorkspace(next, 1))
-      }
       const digitMatch = /^[1-9]$/.exec(key) ?? /^Digit([1-9])$/.exec(input.code)
       if (digitMatch) {
         const n = Number(digitMatch[1] ?? digitMatch[0])
@@ -1682,47 +1824,102 @@ export class Tabs {
         return run(() => ws && this.switchWorkspace(ws.id))
       }
     }
-
-    if (mod && !input.alt) {
-      if (key === 'q' && !input.shift) return run(() => this.hooks.quit?.())
-      if (key === 'k' && !input.shift) return run(() => this.hooks.onTogglePalette?.('command'))
-      if (key === 'n' && input.shift) return run(() => this.createPrivateWorkspace())
-      if (key === 's' && input.shift) return run(() => this.hooks.toggleCompactMode())
-      if (key === 'b' && input.shift) return run(() => this.hooks.toggleBookmarkBar?.())
-      if (input.shift && (key === '\\' || key === '|' || input.code === 'Backslash')) return run(() => this.splitWithNext())
-      if (key === 't' && input.shift) return run(() => this.reopenClosed())
-      if (key === 't') return run(() => { if (!this.hooks.onNewTabShortcut?.()) this.create() })
-      if (key === 'w') return run(() => this.activeId !== null && this.close(this.activeId))
-      if (key === 'l') return run(() => this.focusOmnibox())
-      if (key === 'f') return run(() => this.openFind())
-      if (key === 'j') return run(() => this.toggleDownloads())
-      if (key === 'h') return run(() => this.openInternal('orbit://history'))
-      if (key === 'o' && input.shift) return run(() => this.openInternal('orbit://bookmarks'))
-      if (key === ',') return run(() => this.openInternal('orbit://settings'))
-      if (key === 'd') return run(() => this.toggleBookmark())
-      if (key === 'r') return run(() => this.reload(input.shift))
-      if (key === 'tab') return run(() => this.cycle(input.shift ? -1 : 1))
-      if (key === 'pagedown') return run(() => this.cycle(1))
-      if (key === 'pageup') return run(() => this.cycle(-1))
-      if (key === '=' || key === '+') return run(() => this.zoom(ZOOM_STEP))
-      if (key === '-') return run(() => this.zoom(-ZOOM_STEP))
-      if (key === '0') return run(() => this.zoom(null))
-      if (/^[1-9]$/.test(key)) {
+    if (mod && !input.alt && !input.shift) {
+      const digitMatch = /^[1-9]$/.exec(key) ?? /^Digit([1-9])$/.exec(input.code)
+      if (digitMatch) {
         const wsTabs = this.workspaceTabs(this.activeWorkspaceId)
-        const n = Number(key)
+        const n = Number(digitMatch[1] ?? digitMatch[0])
         const tab = n === 9 ? wsTabs[wsTabs.length - 1] : wsTabs[n - 1]
         return run(() => tab && this.activate(tab.info.id))
       }
     }
-    if (input.alt && !mod) {
-      if (key === 'arrowleft') return run(() => this.back())
-      if (key === 'arrowright') return run(() => this.forward())
+
+    // Customizable registry shortcuts
+    const resolved = resolveShortcuts(this.hooks.shortcuts?.())
+    const matched = matchShortcut(input, resolved, process.platform)
+    if (matched) {
+      switch (matched) {
+        case 'new-tab':
+          return run(() => {
+            if (!this.hooks.onNewTabShortcut?.()) this.create()
+          })
+        case 'close-tab':
+          return run(() => this.activeId !== null && this.close(this.activeId))
+        case 'reopen-closed-tab':
+          return run(() => this.reopenClosed())
+        case 'next-tab':
+          return run(() => this.cycle(1))
+        case 'prev-tab':
+          return run(() => this.cycle(-1))
+        case 'focus-omnibox':
+          return run(() => this.focusOmnibox())
+        case 'back':
+          return run(() => this.back())
+        case 'forward':
+          return run(() => this.forward())
+        case 'reload':
+          return run(() => this.reload(false))
+        case 'hard-reload':
+          return run(() => this.reload(true))
+        case 'compact-mode':
+          return run(() => this.hooks.toggleCompactMode())
+        case 'bookmark-bar':
+          return run(() => this.hooks.toggleBookmarkBar?.())
+        case 'split-view':
+          return run(() => this.splitWithNext())
+        case 'zoom-in':
+          return run(() => this.zoom(ZOOM_STEP))
+        case 'zoom-out':
+          return run(() => this.zoom(-ZOOM_STEP))
+        case 'zoom-reset':
+          return run(() => this.zoom(null))
+        case 'fullscreen':
+          return run(() => this.win.setFullScreen(!this.win.isFullScreen()))
+        case 'new-private-workspace':
+          return run(() => this.createPrivateWorkspace())
+        case 'prev-workspace': {
+          const next = nextWorkspaceId(this.workspaces, this.activeWorkspaceId, -1)
+          return run(() => next && this.switchWorkspace(next, -1))
+        }
+        case 'next-workspace': {
+          const next = nextWorkspaceId(this.workspaces, this.activeWorkspaceId, 1)
+          return run(() => next && this.switchWorkspace(next, 1))
+        }
+        case 'command-palette':
+          return run(() => this.hooks.onTogglePalette?.('command'))
+        case 'find':
+          return run(() => this.openFind())
+        case 'find-next':
+          return run(() => this.findStep(true))
+        case 'find-prev':
+          return run(() => this.findStep(false))
+        case 'bookmark-toggle':
+          return run(() => this.toggleBookmark())
+        case 'bookmarks':
+          return run(() => this.openInternal('orbit://bookmarks'))
+        case 'history':
+          return run(() => this.openInternal('orbit://history'))
+        case 'downloads':
+          return run(() => this.toggleDownloads())
+        case 'screenshot':
+          return run(() => this.hooks.onScreenshot?.())
+        case 'settings':
+          return run(() => this.openInternal('orbit://settings'))
+        case 'print':
+          return run(() => this.print())
+        case 'devtools':
+          return run(() => this.active?.view?.webContents.toggleDevTools())
+        case 'quit':
+          return run(() => this.hooks.quit?.())
+      }
     }
-    if (key === 'f3' && !mod && !input.alt) return run(() => this.findStep(!input.shift))
-    if (mod && !input.alt && !input.shift && key === 'p') return run(() => this.print())
-    if (key === 'f11' && !mod) return run(() => this.win.setFullScreen(!this.win.isFullScreen()))
-    if (key === 'f5') return run(() => this.reload(mod))
-    if (key === 'f12') return run(() => this.active?.view?.webContents.toggleDevTools())
+
+    // Secondary hardware / browser keys (active if not claimed by a custom binding above)
+    if (mod && !input.alt && !input.shift) {
+      if (key === 'pagedown') return run(() => this.cycle(1))
+      if (key === 'pageup') return run(() => this.cycle(-1))
+    }
+    if (key === 'f5' && !input.alt) return run(() => this.reload(mod))
     if (key === 'browserback') return run(() => this.back())
     if (key === 'browserforward') return run(() => this.forward())
     return false
@@ -2033,12 +2230,17 @@ export class Tabs {
       )
       gap()
     }
+    const resolvedKeys = resolveShortcuts(this.hooks.shortcuts?.())
     const extMenuItems = this.hooks.extensionContextMenuItems?.(wc, p) ?? []
     if (!p.linkURL && !p.isEditable && !p.selectionText.trim() && p.mediaType === 'none') {
-      items.push({ label: 'Print…', accelerator: 'CmdOrCtrl+P', click: () => wc.print({}, () => {}) })
+      items.push({ label: 'Print…', accelerator: toElectronAccelerator(resolvedKeys.print), click: () => wc.print({}, () => {}) })
       gap()
     }
-    items.push({ label: 'Inspect', click: () => wc.inspectElement(p.x, p.y) })
+    items.push(
+      { label: 'Take screenshot…', accelerator: toElectronAccelerator(resolvedKeys.screenshot), click: () => this.hooks.onScreenshot?.() },
+      { type: 'separator' },
+      { label: 'Inspect', click: () => wc.inspectElement(p.x, p.y) }
+    )
     const menu = Menu.buildFromTemplate(items)
     if (extMenuItems.length > 0) {
       const insertAt = Math.max(0, menu.items.length - 1)
@@ -2135,8 +2337,10 @@ export class Tabs {
     }
   }
 
-  /** Opens last time's workspaces and tabs (without loading them yet), or a clean new tab. */
-  restore(restoreTabs = true): void {
+  /** Opens last time's workspaces and tabs (all or pinned-only, without loading yet), or a clean new tab. */
+  restore(startup: StartupBehavior | boolean = 'restore'): void {
+    const mode: StartupBehavior =
+      startup === true ? 'restore' : startup === false ? 'new-tab' : startup
     let raw: unknown = null
     try {
       raw = JSON.parse(readFileSync(this.sessionFile, 'utf8')) as unknown
@@ -2151,17 +2355,18 @@ export class Tabs {
     // Lazy-load isolated workspace sessions only when they are first activated/used.
     this.hooks.ensureSession(this.partitionFor(this.activeWorkspaceId))
 
-    if (!restoreTabs) {
-      this.create('', { workspaceId: this.activeWorkspaceId, activate: true })
+    if (mode === 'new-tab') {
+      this.create('', { workspaceId: this.activeWorkspaceId, activate: true, atEnd: true })
       return
     }
 
     for (const ws of saved.workspaces) {
-      if (!ws.tabs.length) continue
-      const ids = ws.tabs.map((t) =>
-        this.create(t.url, { activate: false, lazy: true, pinned: t.pinned, title: t.title, workspaceId: ws.id })
+      const keptTabs = filterTabsForStartup(ws.tabs, mode)
+      if (!keptTabs.length) continue
+      const ids = keptTabs.map((t) =>
+        this.create(t.url, { activate: false, lazy: true, pinned: t.pinned, title: t.title, workspaceId: ws.id, atEnd: true })
       )
-      if (ws.splits?.length) {
+      if (mode === 'restore' && ws.splits?.length) {
         const groups: SplitGroup[] = []
         for (const sp of ws.splits) {
           const tabIds = sp.tabs.map((idx) => ids[idx]).filter((tid): tid is number => tid !== undefined)
@@ -2180,15 +2385,22 @@ export class Tabs {
           this.sortPinned(ws.id)
         }
       }
-      const activeIdx = Math.max(0, Math.min(ws.active, ids.length - 1))
-      this.workspaceActiveTab.set(ws.id, ids[activeIdx])
+      if (mode === 'restore') {
+        const activeIdx = Math.max(0, Math.min(ws.active, ids.length - 1))
+        this.workspaceActiveTab.set(ws.id, ids[activeIdx])
+      } else {
+        // restore-pinned: prefer the previously active tab if it was pinned, else the first pinned tab
+        const prevActive = ws.tabs[ws.active]
+        const keptIdx = prevActive?.pinned ? keptTabs.indexOf(prevActive) : 0
+        this.workspaceActiveTab.set(ws.id, ids[Math.max(0, keptIdx)])
+      }
     }
 
     const activeTabId = this.workspaceActiveTab.get(this.activeWorkspaceId)
     if (activeTabId !== undefined) {
       this.activate(activeTabId)
     } else {
-      this.create('', { workspaceId: this.activeWorkspaceId, activate: true })
+      this.create('', { workspaceId: this.activeWorkspaceId, activate: true, atEnd: true })
     }
   }
 }

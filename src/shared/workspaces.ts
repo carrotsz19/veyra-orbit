@@ -4,6 +4,8 @@
  */
 import { isAllowedUrl, isInternalUrl } from './url.ts'
 import { DEFAULT_SPLIT_RATIO, MAX_SPLIT_PANES, clampSplitRatio, isSplitOrientation, type SplitOrientation } from './split.ts'
+import { isThemePresetId, sanitizeAccentHex, type AppearanceSettings, type ThemePresetId } from './appearance.ts'
+import { isStartBackgroundMode, type StartBackgroundMode } from './startpage.ts'
 
 export const DEFAULT_WEB_PARTITION = 'persist:web'
 export const PRIVATE_WORKSPACE_ICON = 'eye-off'
@@ -44,6 +46,12 @@ export interface WorkspaceInfo {
   isolated: boolean
   /** When true, this workspace uses a non-persistent in-memory partition and records no history or session restore. */
   private?: boolean
+  /** Optional per-workspace theme preset override ('' or omitted = inherit global theme preset). */
+  themePreset?: ThemePresetId | ''
+  /** Optional per-workspace accent colour hex override ('' or omitted = inherit global accent). */
+  accentColor?: string
+  /** Optional per-workspace start-page background override ('' or omitted = inherit global). */
+  startBackground?: StartBackgroundMode | ''
 }
 
 export interface WorkspaceCreateInput {
@@ -51,6 +59,9 @@ export interface WorkspaceCreateInput {
   icon?: string
   accent?: WorkspaceAccentId
   isolated?: boolean
+  themePreset?: ThemePresetId | ''
+  accentColor?: string
+  startBackground?: StartBackgroundMode | ''
 }
 
 export interface WorkspaceUpdateInput {
@@ -58,6 +69,9 @@ export interface WorkspaceUpdateInput {
   icon?: string
   accent?: WorkspaceAccentId
   isolated?: boolean
+  themePreset?: ThemePresetId | ''
+  accentColor?: string
+  startBackground?: StartBackgroundMode | ''
 }
 
 export interface SavedTab {
@@ -194,18 +208,55 @@ function slugifyId(name: string, existing: Set<string>): string {
   return `space-${Date.now().toString(36)}`
 }
 
+export function sanitizeWorkspaceThemePreset(v: unknown): ThemePresetId | '' | undefined {
+  if (v === undefined) return undefined
+  if (v === '') return ''
+  return isThemePresetId(v) ? v : undefined
+}
+
+export function sanitizeWorkspaceAccentColor(v: unknown): string | undefined {
+  if (v === undefined) return undefined
+  const clean = sanitizeAccentHex(v)
+  return clean !== null ? clean : undefined
+}
+
+export function sanitizeWorkspaceStartBackground(v: unknown): StartBackgroundMode | '' | undefined {
+  if (v === undefined) return undefined
+  if (v === '') return ''
+  return isStartBackgroundMode(v) ? v : undefined
+}
+
+/** Merges a workspace's optional visual overrides onto global appearance settings without mutating either. */
+export function applyWorkspaceAppearance(
+  base: AppearanceSettings,
+  ws?: Pick<WorkspaceInfo, 'themePreset' | 'accentColor'> | null
+): AppearanceSettings {
+  if (!ws) return base
+  const preset = ws.themePreset && isThemePresetId(ws.themePreset) ? ws.themePreset : base.preset
+  const rawAccent = ws.accentColor ? sanitizeAccentHex(ws.accentColor) : null
+  const accent = rawAccent ? rawAccent : base.accent
+  if (preset === base.preset && accent === base.accent) return base
+  return { ...base, preset, accent }
+}
+
 export function createWorkspaceEntry(
   existing: readonly WorkspaceInfo[],
   input: WorkspaceCreateInput
 ): { workspaces: WorkspaceInfo[]; created: WorkspaceInfo } {
   const usedIds = new Set(existing.map((w) => w.id))
   const name = sanitizeWorkspaceName(input.name, `Space ${existing.length + 1}`)
+  const themePreset = sanitizeWorkspaceThemePreset(input.themePreset)
+  const accentColor = sanitizeWorkspaceAccentColor(input.accentColor)
+  const startBackground = sanitizeWorkspaceStartBackground(input.startBackground)
   const created: WorkspaceInfo = {
     id: slugifyId(name, usedIds),
     name,
     icon: sanitizeWorkspaceIcon(input.icon, 'compass'),
     accent: isWorkspaceAccent(input.accent) ? input.accent : WORKSPACE_ACCENTS[existing.length % WORKSPACE_ACCENTS.length].id,
-    isolated: input.isolated === true
+    isolated: input.isolated === true,
+    ...(themePreset ? { themePreset } : {}),
+    ...(accentColor ? { accentColor } : {}),
+    ...(startBackground ? { startBackground } : {})
   }
   return { workspaces: [...existing, created], created }
 }
@@ -221,12 +272,18 @@ export function updateWorkspaceEntry(
   if (cur.private) {
     return { workspaces: [...existing], updated: cur, isolationChanged: false }
   }
+  const nextPreset = patch.themePreset !== undefined ? sanitizeWorkspaceThemePreset(patch.themePreset) : cur.themePreset
+  const nextAccentColor = patch.accentColor !== undefined ? sanitizeWorkspaceAccentColor(patch.accentColor) : cur.accentColor
+  const nextStartBg = patch.startBackground !== undefined ? sanitizeWorkspaceStartBackground(patch.startBackground) : cur.startBackground
   const next: WorkspaceInfo = {
-    ...cur,
+    id: cur.id,
     name: patch.name !== undefined ? sanitizeWorkspaceName(patch.name, cur.name) : cur.name,
     icon: patch.icon !== undefined ? sanitizeWorkspaceIcon(patch.icon, cur.icon) : cur.icon,
     accent: patch.accent !== undefined && isWorkspaceAccent(patch.accent) ? patch.accent : cur.accent,
-    isolated: typeof patch.isolated === 'boolean' ? patch.isolated : cur.isolated
+    isolated: typeof patch.isolated === 'boolean' ? patch.isolated : cur.isolated,
+    ...(nextPreset ? { themePreset: nextPreset } : {}),
+    ...(nextAccentColor ? { accentColor: nextAccentColor } : {}),
+    ...(nextStartBg ? { startBackground: nextStartBg } : {})
   }
   const workspaces = existing.map((w, i) => (i === idx ? next : w))
   return { workspaces, updated: next, isolationChanged: next.isolated !== cur.isolated }
@@ -344,12 +401,18 @@ export function parseSavedSession(raw: unknown): SavedSession {
       usedIds.add(id)
       const tabs = sanitizeSavedTabs(entry.tabs)
       const splits = sanitizeSavedSplits(entry.splits, tabs)
+      const themePreset = sanitizeWorkspaceThemePreset(entry.themePreset)
+      const accentColor = sanitizeWorkspaceAccentColor(entry.accentColor)
+      const startBackground = sanitizeWorkspaceStartBackground(entry.startBackground)
       workspaces.push({
         id,
         name,
         icon: sanitizeWorkspaceIcon(entry.icon, workspaces.length === 0 ? 'home' : 'compass'),
         accent: isWorkspaceAccent(entry.accent) ? entry.accent : WORKSPACE_ACCENTS[workspaces.length % WORKSPACE_ACCENTS.length].id,
         isolated: entry.isolated === true,
+        ...(themePreset ? { themePreset } : {}),
+        ...(accentColor ? { accentColor } : {}),
+        ...(startBackground ? { startBackground } : {}),
         tabs,
         active: clampActive(entry.active, tabs.length),
         ...(splits.length ? { splits } : {})
@@ -401,6 +464,9 @@ export function buildSavedSession(
         icon: ws.icon,
         accent: ws.accent,
         isolated: ws.isolated,
+        ...(ws.themePreset ? { themePreset: ws.themePreset } : {}),
+        ...(ws.accentColor ? { accentColor: ws.accentColor } : {}),
+        ...(ws.startBackground ? { startBackground: ws.startBackground } : {}),
         tabs,
         active: clampActive(active, tabs.length),
         ...(splits && splits.length ? { splits } : {})

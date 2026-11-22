@@ -25,8 +25,9 @@ import {
   type WindowBounds
 } from '../shared/compact'
 import { resolveSleepTimeoutMs } from '../shared/sleep'
+import { extractExternalUrlFromArgv, shouldConfirmWindowClose } from '../shared/behavior'
 import { computeMemorySnapshot } from '../shared/memory'
-import { WORKSPACE_ACCENTS } from '../shared/workspaces'
+import { WORKSPACE_ACCENTS, applyWorkspaceAppearance } from '../shared/workspaces'
 import {
   buildPaletteResults,
   resolveTypedPaletteText,
@@ -45,6 +46,9 @@ import {
   resolveAppearanceTokens,
   type ResolvedAppearance
 } from '../shared/appearance'
+import { isSafeModeLaunch } from '../shared/customCss'
+import { formatShortcutLabel, resolveShortcuts } from '../shared/shortcuts'
+import { isScreenshotMode } from '../shared/screenshot'
 import { Tabs } from './tabs'
 import { Store } from './store'
 import { SettingsStore } from './settings'
@@ -53,6 +57,7 @@ import { attachSessionCompat } from './compat'
 import { Downloads } from './downloads'
 import { Updater } from './updater'
 import { CompactPanel, MenuPopup, PalettePopup, PeekPopup } from './floating'
+import { ScreenshotController } from './screenshot'
 import { BrowserImporter } from './importer'
 import { ExtensionManager } from './extensions'
 import { chooseAndSaveStartBackground, deleteStartBackgroundFile, readStartBackgroundDataUrl } from './backgrounds'
@@ -82,9 +87,25 @@ const COMPACT_POLL_MS = 100
 const COMPACT_HIDE_DELAY_MS = 240
 const PALETTE_PREWARM_DELAY_MS = 4_000
 
+let safeModeActive = isSafeModeLaunch(process.argv, process.env)
+let pendingExternalUrl: string | null = extractExternalUrlFromArgv(process.argv)
+let allowCloseConfirmed = false
+let confirmingClose = false
+const launchedAt = Date.now()
+
 function resolveCurrentAppearance(): ResolvedAppearance {
-  const appCfg = settings?.get().appearance ?? DEFAULT_APPEARANCE
-  return resolveAppearanceTokens(appCfg, nativeTheme.shouldUseDarkColors, acrylic, false)
+  const baseCfg = settings?.get().appearance ?? DEFAULT_APPEARANCE
+  const effectiveCfg = applyWorkspaceAppearance(baseCfg, tabs?.activeWorkspace())
+  return resolveAppearanceTokens(effectiveCfg, nativeTheme.shouldUseDarkColors, acrylic, false, safeModeActive)
+}
+
+let lastWorkspaceLookKey = ''
+function syncWorkspaceAppearanceIfChanged(): void {
+  const ws = tabs?.activeWorkspace()
+  const key = `${ws?.id ?? ''}|${ws?.themePreset ?? ''}|${ws?.accentColor ?? ''}`
+  if (key === lastWorkspaceLookKey) return
+  lastWorkspaceLookKey = key
+  applyWindowAppearance()
 }
 
 function overlay(tokens = resolveCurrentAppearance(), useAcrylic = false): Electron.TitleBarOverlayOptions {
@@ -123,12 +144,14 @@ function applyWindowAppearance(): void {
   menuPopup?.sendAppearance(tokens)
   palettePopup?.sendAppearance(tokens)
   peekPopup?.sendAppearance(tokens)
+  screenshotCtrl?.applyAppearance(tokens)
 }
 
 let win: BrowserWindow | null = null
 let menuPopup: MenuPopup | null = null
 let palettePopup: PalettePopup | null = null
 let peekPopup: PeekPopup | null = null
+let screenshotCtrl: ScreenshotController | null = null
 let compactSidebar: CompactPanel | null = null
 let compactTitlebar: CompactPanel | null = null
 let compactOmniboxOpen = false
@@ -543,6 +566,7 @@ function sendSettings(): void {
 
 function toggleCompactMode(): void {
   if (!settings) return
+  if (settings.get().appearance.tabLayout === 'top') return
   settings.update({ compactMode: !settings.get().compactMode })
   sendSettings()
   syncCompactMode()
@@ -618,7 +642,9 @@ function buildPaletteContext(query: string, mode: PaletteMode): PaletteContext |
     isFullscreen: win.isFullScreen(),
     canReopenClosed: st.canReopenClosed,
     theme: settings.get().theme,
-    searchUrl: settings.searchUrl()
+    searchUrl: settings.searchUrl(),
+    searchEngines: settings.searchEngines(),
+    shortcuts: settings.get().shortcuts
   }
 }
 
@@ -743,6 +769,9 @@ function executePaletteAction(action: PaletteAction, openInNewTab: boolean): voi
         case 'print':
           tabs.print()
           return
+        case 'take-screenshot':
+          screenshotCtrl?.openChooser(null)
+          return
         case 'find':
           tabs.openFind()
           return
@@ -789,7 +818,7 @@ function executePaletteAction(action: PaletteAction, openInNewTab: boolean): voi
 }
 
 function createWindow(): void {
-  settings ??= new SettingsStore(join(app.getPath('userData'), 'settings.json'), app.getPath('downloads'), process.env.VEYRA_DOWNLOADS || '', isWin, acrylic)
+  settings ??= new SettingsStore(join(app.getPath('userData'), 'settings.json'), app.getPath('downloads'), process.env.VEYRA_DOWNLOADS || '', isWin, acrylic, safeModeActive)
   const s = settings
   nativeTheme.themeSource = s.get().theme
   const activeButtons = s.activeWindowButtonsStyle()
@@ -873,7 +902,13 @@ function createWindow(): void {
       }
       sendWinState()
     },
-    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur())
+    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur()),
+    onBeforeInput: (e, input) => {
+      if (input.type === 'keyDown' && (input.control || input.meta || input.alt) && tabs?.shortcut(input)) {
+        menuPopup?.close()
+        e.preventDefault()
+      }
+    }
   })
 
   // Reusable floating acrylic window for the Ctrl+K command palette.
@@ -881,7 +916,13 @@ function createWindow(): void {
   palettePopup = new PalettePopup(w, {
     preload: join(__dirname, '../preload/palette.js'),
     acrylic,
-    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur())
+    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur()),
+    onBeforeInput: (e, input) => {
+      // Forward app shortcuts from the palette window (e.g. pressing the palette shortcut again toggles it).
+      if (input.type === 'keyDown' && (input.control || input.meta || input.alt) && tabs?.shortcut(input)) {
+        e.preventDefault()
+      }
+    }
   })
 
   // The browser's own UI never navigates and never opens windows; pages do that in tabs.
@@ -992,6 +1033,9 @@ function createWindow(): void {
       dataChanged()
     },
     searchUrl: () => s.searchUrl(),
+    searchEngines: () => s.searchEngines(),
+    newTabPosition: () => s.get().newTabPosition,
+    closeTabSelection: () => s.get().closeTabSelection,
     externalApp: (tabId, pageUrl, targetUrl) => {
       ext.request(tabId, pageUrl, targetUrl)
     },
@@ -1051,6 +1095,7 @@ function createWindow(): void {
       w.webContents.send('menu:focus-bar')
     },
     onState: (st) => {
+      syncWorkspaceAppearanceIfChanged()
       compactSidebar?.send('state', st)
       compactTitlebar?.send('state', st)
       if (settings?.get().compactMode && compactTitlebar?.isRevealed()) {
@@ -1122,9 +1167,57 @@ function createWindow(): void {
     isLoadedExtension: (partition, extId) => {
       return extManager?.hasLoadedExtension(partition, extId) ?? false
     },
+    shortcuts: () => s.get().shortcuts,
+    onScreenshot: () => {
+      menuPopup?.close()
+      palettePopup?.close()
+      peekPopup?.close()
+      screenshotCtrl?.openChooser(null)
+    },
     quit: () => app.quit()
   })
   const t = tabs
+
+  screenshotCtrl?.destroy()
+  screenshotCtrl = new ScreenshotController({
+    parent: w,
+    preload: join(__dirname, '../preload/screenshot.js'),
+    acrylic,
+    getActiveTarget: () => t.activeScreenshotTarget(),
+    getThemeInfo: () => {
+      const appearance = resolveCurrentAppearance()
+      const resolved = resolveShortcuts(s.get().shortcuts)
+      return {
+        dark: nativeTheme.shouldUseDarkColors,
+        accent: activeWorkspaceAccentHex(),
+        appearance,
+        shortcutLabel: formatShortcutLabel(resolved.screenshot)
+      }
+    },
+    getDownloadsDir: () => s.effectiveDownloadsDir(),
+    recordDownload: (savePath, sizeBytes, sourceUrl) => {
+      d.recordSavedFile(savePath, sizeBytes, sourceUrl)
+    },
+    setPageOverlayHidden: (hidden) => {
+      t.setScreenshotOverlay(hidden)
+    },
+    onStartAreaSelect: (init) => {
+      if (!w.isDestroyed()) w.webContents.send('screenshot:area-start', init)
+    },
+    onCancelAreaSelect: () => {
+      if (!w.isDestroyed()) w.webContents.send('screenshot:area-start', null)
+    },
+    onChooserVisibilityChange: (open) => {
+      compactPins.titleMenu = open
+      if (settings?.get().compactMode) {
+        applyCompactTargets(
+          compactHover.sidebar || compactPins.sidebar || compactPins.menu,
+          compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu || compactPins.dragging || compactPins.extPopup
+        )
+      }
+      sendWinState()
+    }
+  })
 
   extManager?.dispose()
   extManager = new ExtensionManager({
@@ -1191,6 +1284,13 @@ function createWindow(): void {
   setupWebSession(WEB_PARTITION)
 
   w.webContents.on('before-input-event', (e, input) => {
+    // Recovery: holding Shift while Orbit is launching activates safe mode (disables custom CSS for this session).
+    if (!safeModeActive && Date.now() - launchedAt < 3000 && (input.shift || input.key === 'Shift')) {
+      safeModeActive = true
+      settings?.setSafeMode(true)
+      sendSettings()
+      applyWindowAppearance()
+    }
     if (t.shortcut(input)) e.preventDefault()
   })
 
@@ -1271,7 +1371,45 @@ function createWindow(): void {
   w.on('resized', () => {
     if (settings?.get().compactMode) syncCompactPanels()
   })
-  w.on('close', () => t.save())
+  w.on('close', (e) => {
+    if (!allowCloseConfirmed && settings) {
+      const cur = settings.get()
+      const count = t.tabCount()
+      if (shouldConfirmWindowClose(count, cur.confirmCloseWindow, cur.confirmCloseThreshold)) {
+        e.preventDefault()
+        if (confirmingClose) return
+        confirmingClose = true
+        void dialog
+          .showMessageBox(w, {
+            type: 'question',
+            buttons: ['Close window', 'Cancel'],
+            defaultId: 1,
+            cancelId: 1,
+            title: 'Close Veyra Orbit?',
+            message: `Close window with ${count} open tabs?`,
+            detail:
+              cur.startup === 'restore'
+                ? 'Your tabs will be restored next time you open Orbit.'
+                : cur.startup === 'restore-pinned'
+                  ? 'Only your pinned tabs will be restored next time you open Orbit.'
+                  : 'Your open tabs in this window will be closed.'
+          })
+          .then(({ response }) => {
+            confirmingClose = false
+            if (response === 0 && !w.isDestroyed()) {
+              allowCloseConfirmed = true
+              t.save()
+              w.close()
+            }
+          })
+          .catch(() => {
+            confirmingClose = false
+          })
+        return
+      }
+    }
+    t.save()
+  })
   w.on('closed', () => {
     finishCompactTabDrag(false)
     if (paletteWarmTimer) {
@@ -1296,6 +1434,8 @@ function createWindow(): void {
     peekPopup = null
     menuPopup?.destroy()
     menuPopup = null
+    screenshotCtrl?.destroy()
+    screenshotCtrl = null
     for (const sess of configuredSessions) {
       sess.off('will-download', onAltPeekDownload)
       sess.off('will-download', onDownload)
@@ -1322,7 +1462,13 @@ function createWindow(): void {
   // so the very first navigation already has Google sign-in / Client Hints rules active.
   void em.whenSessionReady(WEB_PARTITION).finally(() => {
     if (!w.isDestroyed() && tabs === t) {
-      t.restore(s.get().startup !== 'new-tab')
+      t.restore(s.get().startup)
+      if (pendingExternalUrl) {
+        const externalUrl = pendingExternalUrl
+        pendingExternalUrl = null
+        t.openExternalUrl(externalUrl, s.get().externalLinks)
+      }
+      syncWorkspaceAppearanceIfChanged()
       syncCompactMode()
     }
   })
@@ -1334,7 +1480,10 @@ function createWindow(): void {
       },
       {
         getMode: () => settings?.get().updateMode ?? 'automatic',
-        onBeforeInstall: () => tabs?.save(),
+        onBeforeInstall: () => {
+          allowCloseConfirmed = true
+          tabs?.save()
+        },
         metaFile: join(app.getPath('userData'), 'update-meta.json')
       }
     )
@@ -1370,6 +1519,11 @@ function fromPalette(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
 /** Only the floating Link Preview ("Peek") toolbar window may call peek:* return channels. */
 function fromPeek(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
   return !!peekPopup && peekPopup.isSender(e.sender)
+}
+
+/** Only the floating Screenshot chooser / preview toast windows may call screenshot-win:* channels. */
+function fromScreenshotWin(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  return !!screenshotCtrl && screenshotCtrl.isSender(e.sender)
 }
 
 const WIN_CMDS = new Set<WinCmd>([
@@ -1578,7 +1732,7 @@ onSurface('tab:new', (t, input?: unknown) => {
     openOrTogglePalette('new-tab')
     return
   }
-  t.create((str(input) && toUrl(input, settings?.searchUrl())) || '')
+  t.create((str(input) && toUrl(input, settings?.searchUrl(), settings?.searchEngines())) || '')
 })
 onSurface('tab:close', (t, id: unknown) => num(id) && t.close(id))
 onSurface('tab:reopen', (t) => t.reopenClosed())
@@ -1601,6 +1755,7 @@ onSurface('nav:back', (t) => t.back())
 onSurface('nav:forward', (t) => t.forward())
 onSurface('nav:reload', (t) => t.reload())
 onSurface('nav:stop', (t) => t.stop())
+onSurface('nav:home', (t) => t.goHome())
 onSurface('nav:zoom-in', (t) => t.zoomIn())
 onSurface('nav:zoom-out', (t) => t.zoomOut())
 onSurface('nav:zoom-reset', (t) => t.resetZoom())
@@ -1665,6 +1820,62 @@ ipcMain.on('menu:dismiss', (e) => {
   if (fromMenu(e)) menuPopup?.dismiss()
 })
 
+// Screenshot tool IPC: UI surfaces open chooser or trigger capture; floating chooser/toast windows use minimal bridge.
+ipcMain.on('screenshot:open-chooser', (e, rawAnchor: unknown) => {
+  if (!fromUiSurface(e) || !screenshotCtrl) return
+  menuPopup?.close()
+  palettePopup?.close()
+  peekPopup?.close()
+  let anchor: { x: number; y: number } | null = null
+  if (rawAnchor && typeof rawAnchor === 'object' && !Array.isArray(rawAnchor)) {
+    const r = rawAnchor as Record<string, unknown>
+    if (num(r.x) && num(r.y)) {
+      const offset = compactTitlebar?.isSender(e.sender) ? compactTitlebar.offsetCss() : { x: 0, y: 0 }
+      anchor = { x: r.x + offset.x, y: r.y + offset.y }
+    }
+  }
+  screenshotCtrl.openChooser(anchor)
+})
+ipcMain.on('screenshot:capture', (e, mode: unknown) => {
+  if (!fromUiSurface(e) || !screenshotCtrl || !isScreenshotMode(mode)) return
+  void screenshotCtrl.capture(mode)
+})
+ipcMain.on('screenshot:area-commit', (e, rect: unknown) => {
+  if (!fromUi(e) || !screenshotCtrl) return
+  screenshotCtrl.commitArea(rect)
+})
+ipcMain.on('screenshot:area-cancel', (e) => {
+  if (!fromUi(e) || !screenshotCtrl) return
+  screenshotCtrl.cancelArea()
+})
+ipcMain.on('screenshot-win:ready', (e) => {
+  if (fromScreenshotWin(e)) screenshotCtrl?.markReady(e.sender)
+})
+ipcMain.on('screenshot-win:size', (e, width: unknown, height: unknown) => {
+  if (fromScreenshotWin(e) && num(width) && num(height)) screenshotCtrl?.resizeForSender(e.sender, width, height)
+})
+ipcMain.on('screenshot-win:choose', (e, mode: unknown) => {
+  if (!fromScreenshotWin(e) || !screenshotCtrl || !isScreenshotMode(mode)) return
+  void screenshotCtrl.capture(mode)
+})
+ipcMain.handle('screenshot-win:save', (e, id: unknown) => {
+  if (!fromScreenshotWin(e) || !screenshotCtrl || !str(id)) return { ok: false, error: 'Invalid screenshot.' }
+  return screenshotCtrl.saveCapture(id)
+})
+ipcMain.handle('screenshot-win:copy', (e, id: unknown) => {
+  if (!fromScreenshotWin(e) || !screenshotCtrl || !str(id)) return false
+  return screenshotCtrl.copyAgain(id)
+})
+ipcMain.on('screenshot-win:show', (e, id: unknown) => {
+  if (fromScreenshotWin(e) && str(id)) screenshotCtrl?.showInFolder(id)
+})
+ipcMain.on('screenshot-win:hover', (e, hovering: unknown) => {
+  if (fromScreenshotWin(e) && typeof hovering === 'boolean') screenshotCtrl?.setToastHover(hovering)
+})
+ipcMain.on('screenshot-win:dismiss', (e) => {
+  if (fromScreenshotWin(e)) screenshotCtrl?.dismissForSender(e.sender)
+})
+
 // Floating Ctrl+K command palette IPC: strict sender check + main-side ID/URL validation.
 ipcMain.on('palette:ready', (e) => {
   if (fromPalette(e)) {
@@ -1686,7 +1897,7 @@ ipcMain.on('palette:pick', (e, id: unknown, openInNewTab: unknown) => {
 })
 ipcMain.on('palette:submit-text', (e, text: unknown, openInNewTab: unknown) => {
   if (!fromPalette(e) || !palettePopup || !settings) return
-  const url = resolveTypedPaletteText(text, settings.searchUrl())
+  const url = resolveTypedPaletteText(text, settings.searchUrl(), settings.searchEngines())
   palettePopup.close()
   if (url) executePaletteAction({ type: 'navigate', url }, openInNewTab === true)
 })
@@ -1774,7 +1985,11 @@ on('split:ratio', (t, groupId: unknown, kind: unknown, ratio: unknown) => {
 onSurface('split:swap', (t, groupId: unknown) => {
   if (str(groupId)) t.swapSplit(groupId)
 })
-onSurface('workspace:switch', (t, id: unknown) => str(id) && t.switchWorkspace(id))
+onSurface('workspace:switch', (t, id: unknown) => {
+  if (!str(id)) return
+  t.switchWorkspace(id)
+  syncWorkspaceAppearanceIfChanged()
+})
 onSurface('compact:toggle', () => toggleCompactMode())
 onSurface('compact:pin', (_t, kind: unknown, pinned: unknown) => {
   if (kind !== 'omnibox' && kind !== 'sidebar') return
@@ -1820,13 +2035,20 @@ handleSurface('workspace:create', (input) => {
     name: str(raw.name) ? raw.name : '',
     icon: str(raw.icon) ? raw.icon : undefined,
     accent: str(raw.accent) ? (raw.accent as WorkspaceCreateInput['accent']) : undefined,
-    isolated: typeof raw.isolated === 'boolean' ? raw.isolated : undefined
+    isolated: typeof raw.isolated === 'boolean' ? raw.isolated : undefined,
+    themePreset: typeof raw.themePreset === 'string' ? (raw.themePreset as WorkspaceCreateInput['themePreset']) : undefined,
+    accentColor: typeof raw.accentColor === 'string' ? raw.accentColor : undefined,
+    startBackground: typeof raw.startBackground === 'string' ? (raw.startBackground as WorkspaceCreateInput['startBackground']) : undefined
   }
-  return tabs.createWorkspace(req)
+  const created = tabs.createWorkspace(req)
+  syncWorkspaceAppearanceIfChanged()
+  return created
 })
 
 handle('workspace:create-private', () => {
-  return tabs?.createPrivateWorkspace() ?? null
+  const created = tabs?.createPrivateWorkspace() ?? null
+  syncWorkspaceAppearanceIfChanged()
+  return created
 })
 
 handleSurface('workspace:update', (id, patch) => {
@@ -1837,12 +2059,19 @@ handleSurface('workspace:update', (id, patch) => {
   if (str(raw.icon)) req.icon = raw.icon
   if (str(raw.accent)) req.accent = raw.accent as WorkspaceUpdateInput['accent']
   if (typeof raw.isolated === 'boolean') req.isolated = raw.isolated
-  return tabs.updateWorkspace(id, req)
+  if (typeof raw.themePreset === 'string') req.themePreset = raw.themePreset as WorkspaceUpdateInput['themePreset']
+  if (typeof raw.accentColor === 'string') req.accentColor = raw.accentColor
+  if (typeof raw.startBackground === 'string') req.startBackground = raw.startBackground as WorkspaceUpdateInput['startBackground']
+  const updated = tabs.updateWorkspace(id, req)
+  syncWorkspaceAppearanceIfChanged()
+  return updated
 })
 
 handleSurface('workspace:delete', (id) => {
   if (!tabs || !str(id)) return false
-  return tabs.deleteWorkspace(id)
+  const ok = tabs.deleteWorkspace(id)
+  if (ok) syncWorkspaceAppearanceIfChanged()
+  return ok
 })
 
 handleSurface('suggest', (input) => {
@@ -1851,7 +2080,7 @@ handleSurface('suggest', (input) => {
     .suggestableTabs()
     .filter((t) => /^https?:/.test(t.url))
     .map((t) => ({ url: t.url, title: t.title, visits: 0, typed: 0, last: 0, bookmarked: t.bookmarked, tabId: t.id }))
-  return suggest(input, [...open, ...store.candidates(input)], Date.now(), 7, settings?.searchUrl())
+  return suggest(input, [...open, ...store.candidates(input)], Date.now(), 7, settings?.searchUrl(), settings?.searchEngines())
 })
 handle('overlay', (open) => tabs?.setOverlay(open === true) ?? null)
 on('overlay:hide', (t) => t.hidePageForOverlay())
@@ -1907,6 +2136,9 @@ handleSurface('bookmark:reorder', (rawOrder) => {
 })
 
 handle('settings:get', () => settings?.view() ?? null)
+on('shortcuts:recording', (t, active: unknown) => {
+  t.setShortcutRecording(active === true)
+})
 handle('settings:update', (patch) => {
   if (!settings || !patch || typeof patch !== 'object' || Array.isArray(patch)) return settings?.view() ?? null
   // Custom downloads folders are chosen only via the main-process folder dialog; here only '' (reset) is accepted.
@@ -1920,7 +2152,11 @@ handle('settings:update', (patch) => {
     safePatch.startPage = sp
   }
   const prev = settings.get()
-  const view = settings.update(safePatch)
+  let view = settings.update(safePatch)
+  // Compact mode is only active with vertical sidebar tabs; disable cleanly when switching to top tabs.
+  if (view.appearance.tabLayout === 'top' && view.compactMode) {
+    view = settings.update({ compactMode: false })
+  }
   if (view.theme !== prev.theme) nativeTheme.themeSource = view.theme
   if (view.compactMode !== prev.compactMode) syncCompactMode()
   if (view.sleepAfterMinutes !== prev.sleepAfterMinutes || view.sleepPinnedTabs !== prev.sleepPinnedTabs) {
@@ -1971,11 +2207,12 @@ handle('settings:import-theme', async () => {
     if (!parsed.ok) return { ok: false, error: parsed.error }
     const patchObj: Record<string, unknown> = { appearance: parsed.appearance }
     if (parsed.theme) patchObj.theme = parsed.theme
+    if (parsed.appearance.tabLayout === 'top') patchObj.compactMode = false
     const view = settings.update(patchObj)
     if (parsed.theme) nativeTheme.themeSource = view.theme
     sendSettings()
     applyWindowAppearance()
-    if (view.compactMode) syncCompactPanels()
+    syncCompactMode()
     return { ok: true, settings: view }
   } catch {
     return { ok: false, error: 'Could not read the selected theme file.' }
@@ -2254,10 +2491,28 @@ nativeTheme.on('updated', () => {
   applyWindowAppearance()
 })
 
-app.on('second-instance', () => {
+app.on('second-instance', (_e, argv) => {
   if (!win) return
   if (win.isMinimized()) win.restore()
   win.focus()
+  const externalUrl = extractExternalUrlFromArgv(argv)
+  if (externalUrl && tabs && settings) {
+    tabs.openExternalUrl(externalUrl, settings.get().externalLinks)
+  }
+})
+
+app.on('open-url', (e, url) => {
+  e.preventDefault()
+  if (!/^https?:\/\//i.test(url) || !isAllowedUrl(url)) return
+  if (tabs && settings) {
+    tabs.openExternalUrl(url, settings.get().externalLinks)
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    }
+  } else {
+    pendingExternalUrl = url
+  }
 })
 
 void app.whenReady().then(() => {

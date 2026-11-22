@@ -1,5 +1,24 @@
 import type { ResolvedAppearance } from '@shared/types'
 
+const CUSTOM_CSS_STYLE_ID = 'orbit-custom-css'
+
+function applyCustomCssStyle(css: string): void {
+  if (typeof document === 'undefined' || !document.head) return
+  let el = document.getElementById(CUSTOM_CSS_STYLE_ID) as HTMLStyleElement | null
+  if (!css) {
+    if (el) el.remove()
+    return
+  }
+  if (!el) {
+    el = document.createElement('style')
+    el.id = CUSTOM_CSS_STYLE_ID
+    document.head.appendChild(el)
+  }
+  if (el.textContent !== css) {
+    el.textContent = css
+  }
+}
+
 /**
  * Applies resolved appearance tokens live onto document.documentElement without reloading.
  * Used by the main browser window AND every floating renderer (menus, palette, peek, compact panels).
@@ -42,4 +61,6 @@ export function applyResolvedAppearance(tokens: ResolvedAppearance): void {
     root.style.setProperty('--spring-snappy-ms', '100ms')
     root.style.setProperty('--spring-bouncy-ms', '100ms')
   }
+
+  applyCustomCssStyle(tokens.safeMode ? '' : tokens.customCss || '')
 }

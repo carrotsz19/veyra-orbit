@@ -147,6 +147,12 @@ test('buildMenus produces all seven Orbit menus with shortcuts and checked/disab
   const readyHelp = itemsOnly(readySections.find((s) => s.id === 'help')!.items)
   assert.equal(readyHelp[0]?.id, 'help:install-update')
   assert.equal(readyHelp[0]?.label, 'Restart to update (v26.11.9)')
+
+  // Compact mode is disabled in View menu when tabs are on top
+  const topTabSections = buildMenus(baseCtx({ tabLayout: 'top', compactMode: true }))
+  const topView = itemsOnly(topTabSections.find((s) => s.id === 'view')!.items)
+  assert.equal(topView.find((i) => i.id === 'view:compact')?.disabled, true)
+  assert.equal(topView.find((i) => i.id === 'view:compact')?.checked, false)
 })
 
 test('buildMenus disables page-only commands on internal pages and caps recent history/bookmarks', () => {

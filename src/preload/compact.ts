@@ -48,6 +48,7 @@ const uiSubset = {
   forward: () => ipcRenderer.send('nav:forward'),
   reload: () => ipcRenderer.send('nav:reload'),
   stop: () => ipcRenderer.send('nav:stop'),
+  goHome: () => ipcRenderer.send('nav:home'),
   resetZoom: () => ipcRenderer.send('nav:zoom-reset'),
   togglePin: (id: number) => ipcRenderer.send('tab:pin', id),
   move: (id: number, to: number) => ipcRenderer.send('tab:move', id, to),
@@ -113,6 +114,13 @@ const uiSubset = {
     setPinned: (id: string, pinned: boolean) => ipcRenderer.invoke('extensions:set-pinned', id, pinned) as Promise<boolean>,
     clickAction: (id: string, anchorRect: Rect) => ipcRenderer.send('extensions:action-click', id, anchorRect),
     contextMenuAction: (id: string, anchorRect: Rect) => ipcRenderer.send('extensions:action-context-menu', id, anchorRect)
+  },
+  screenshot: {
+    openChooser: (anchor?: { x: number; y: number }) => ipcRenderer.send('screenshot:open-chooser', anchor ?? null),
+    capture: (mode: string) => ipcRenderer.send('screenshot:capture', mode),
+    onAreaStart: () => () => {},
+    commitArea: () => {},
+    cancelArea: () => {}
   }
 }
 

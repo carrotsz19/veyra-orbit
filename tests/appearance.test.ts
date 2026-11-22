@@ -24,6 +24,7 @@ test('sanitizeAppearance clamps numeric ranges, validates hex colours and enums,
     cornerRadius: 99,
     density: 'spacious',
     textScale: 50,
+    tabLayout: 'top',
     sidebarSide: 'right',
     sidebarWidth: 120,
     translucentSidebar: false,
@@ -32,13 +33,17 @@ test('sanitizeAppearance clamps numeric ranges, validates hex colours and enums,
     showNavButtons: false,
     showBookmarkStar: false,
     showExtensions: false,
+    toolbarItems: ['address-bar', 'screenshot'],
     menuBarStyle: 'hamburger',
     bookmarkBar: 'always',
     pageGap: -10,
     pageRadius: 42.6,
     pageShadow: false,
     motion: 'reduced',
-    customCss: 'body { display: none }',
+    customCssEnabled: true,
+    customCss: '@import "https://evil.example/a.css"; .ok { color: red; }',
+    enabledMods: ['larger-tab-rows', 'not-a-mod'],
+    unknownExtra: 'drop me',
     __proto__: { evil: true }
   })
 
@@ -48,6 +53,7 @@ test('sanitizeAppearance clamps numeric ranges, validates hex colours and enums,
     cornerRadius: APPEARANCE_LIMITS.cornerRadius.max,
     density: 'spacious',
     textScale: APPEARANCE_LIMITS.textScale.min,
+    tabLayout: 'top',
     sidebarSide: 'right',
     sidebarWidth: APPEARANCE_LIMITS.sidebarWidth.min,
     translucentSidebar: false,
@@ -56,14 +62,18 @@ test('sanitizeAppearance clamps numeric ranges, validates hex colours and enums,
     showNavButtons: false,
     showBookmarkStar: false,
     showExtensions: false,
+    toolbarItems: ['address-bar', 'screenshot'],
     menuBarStyle: 'hamburger',
     bookmarkBar: 'always',
     pageGap: APPEARANCE_LIMITS.pageGap.min,
     pageRadius: APPEARANCE_LIMITS.pageRadius.max,
     pageShadow: false,
-    motion: 'reduced'
+    motion: 'reduced',
+    customCssEnabled: true,
+    customCss: ' .ok { color: red; }',
+    enabledMods: ['larger-tab-rows']
   })
-  assert.equal('customCss' in cleaned, false)
+  assert.equal('unknownExtra' in cleaned, false)
 })
 
 test('sanitizeAppearance falls back to defaults on invalid enum, NaN, Infinity, and bad hex strings', () => {
@@ -73,6 +83,7 @@ test('sanitizeAppearance falls back to defaults on invalid enum, NaN, Infinity, 
     cornerRadius: Number.NaN,
     density: 'huge',
     textScale: Number.POSITIVE_INFINITY,
+    tabLayout: 'bottom',
     sidebarSide: 'top',
     sidebarWidth: '300',
     translucentSidebar: 'yes',
@@ -197,9 +208,9 @@ test('exportAppearanceJson and parseImportedAppearanceJson round-trip safely and
   assert.equal(parseImportedAppearanceJson('[]').ok, false)
   assert.equal(parseImportedAppearanceJson(JSON.stringify({ format: 'evil-theme', appearance: { preset: 'ocean' } })).ok, false)
   assert.equal(parseImportedAppearanceJson(JSON.stringify({ unrelated: 123 })).ok, false)
-  assert.equal(parseImportedAppearanceJson('{"preset":"ocean","pad":"' + 'a'.repeat(40_000) + '"}').ok, false)
+  assert.equal(parseImportedAppearanceJson('{"preset":"ocean","pad":"' + 'a'.repeat(140_000) + '"}').ok, false)
 
-  // Strips unknown / injected fields even inside valid JSON
+  // Strips unknown / injected fields and sanitizes customCss even inside valid JSON
   const injected = parseImportedAppearanceJson(
     JSON.stringify({
       format: 'veyra-orbit-theme',
@@ -208,7 +219,7 @@ test('exportAppearanceJson and parseImportedAppearanceJson round-trip safely and
       appearance: {
         preset: 'rose',
         accent: '#a63e5c',
-        customCss: '*{background:red}',
+        customCss: '@import "https://evil.example/x.css"; *{background:url(https://evil.example/a.png)}',
         customJs: 'alert(1)',
         cornerRadius: 500
       }
@@ -218,7 +229,7 @@ test('exportAppearanceJson and parseImportedAppearanceJson round-trip safely and
   if (injected.ok) {
     assert.equal(injected.appearance.preset, 'rose')
     assert.equal(injected.appearance.cornerRadius, APPEARANCE_LIMITS.cornerRadius.max)
-    assert.equal('customCss' in injected.appearance, false)
+    assert.equal(injected.appearance.customCss.includes('evil.example'), false)
     assert.equal('customJs' in injected.appearance, false)
   }
 })

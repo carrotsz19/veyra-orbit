@@ -525,6 +525,7 @@ export class MenuPopup {
       acrylic: boolean
       onOpenChange?: (open: boolean) => void
       onFocusChange?: (focused: boolean) => void
+      onBeforeInput?: (e: Electron.Event, input: Input) => void
     }
   ) {
     this.parent = parent
@@ -540,6 +541,7 @@ export class MenuPopup {
       hideOnBlur: true,
       hideOnParentMove: true,
       onFocusChange: opts.onFocusChange,
+      onBeforeInput: opts.onBeforeInput,
       onHidden: (reason) => {
         this.pendingAnchor = null
         this.setOpen(false)
@@ -850,6 +852,7 @@ export class PalettePopup {
       acrylic: boolean
       onFocusChange?: (focused: boolean) => void
       onHidden?: () => void
+      onBeforeInput?: (e: Electron.Event, input: Input) => void
     }
   ) {
     this.parent = parent
@@ -864,6 +867,7 @@ export class PalettePopup {
       hideOnBlur: true,
       hideOnParentMove: true,
       onFocusChange: opts.onFocusChange,
+      onBeforeInput: opts.onBeforeInput,
       onHidden: () => {
         this.actions.clear()
         opts.onHidden?.()

@@ -223,6 +223,7 @@ export function CompactTitlebarWindow(): React.JSX.Element {
           onPointerEdge={(inside) => api.setCompactHover('toolbar', inside)}
           onNewWorkspace={() => panel.requestNewWorkspace()}
           onOpenSettingsSection={(sectionId) => panel.openSettingsSection(sectionId)}
+          onScreenshot={(anchor) => api.screenshot.openChooser(anchor)}
           inCompactPanel
           onCompactDragStart={handleCompactDragStart}
           onCompactDragDoubleClick={() => api.winCmd('maximize')}

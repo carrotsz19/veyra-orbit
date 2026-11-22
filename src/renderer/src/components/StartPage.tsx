@@ -15,7 +15,8 @@ import type {
   StartPageData,
   StartPagePatch,
   StartPageSettings,
-  StartWidgetId
+  StartWidgetId,
+  WorkspaceInfo
 } from '@shared/types'
 import {
   DEFAULT_START_PAGE,
@@ -108,6 +109,7 @@ interface LinkEditorState {
 interface Props {
   tabId: number
   settings: SettingsView | null
+  workspace?: WorkspaceInfo
   isPrivate?: boolean
   onOpenAppearance?: () => void
 }
@@ -120,8 +122,11 @@ const EMPTY_DATA: StartPageData = {
 }
 
 /** Calm, Safari-style local-first start page. Renders instantly with zero external widget network calls. */
-export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance }: Props): React.JSX.Element {
-  const config: StartPageSettings = settings?.startPage ?? DEFAULT_START_PAGE
+export function StartPage({ tabId, settings, workspace, isPrivate = false, onOpenAppearance }: Props): React.JSX.Element {
+  const baseConfig: StartPageSettings = settings?.startPage ?? DEFAULT_START_PAGE
+  const config: StartPageSettings = workspace?.startBackground
+    ? { ...baseConfig, background: workspace.startBackground }
+    : baseConfig
   const [text, setText] = useState('')
   const [now, setNow] = useState(() => new Date())
   const [data, setData] = useState<StartPageData>(EMPTY_DATA)

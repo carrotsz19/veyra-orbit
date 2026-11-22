@@ -29,7 +29,9 @@ import './import-private.css'
 import './extensions.css'
 import { applyResolvedAppearance } from './applyAppearance'
 import { Sidebar } from './components/Sidebar'
+import { TopTabBar } from './components/TopTabBar'
 import { TitleBar } from './components/TitleBar'
+import { Downloads } from './components/Downloads'
 import { BookmarkBar } from './components/BookmarkBar'
 import { StartPage } from './components/StartPage'
 import { ErrorPage } from './components/ErrorPage'
@@ -38,6 +40,9 @@ import { ExtensionInstallBar } from './components/ExtensionInstallBar'
 import { FindBar } from './components/FindBar'
 import { BookmarksPage, DownloadsPage, HistoryPage } from './components/Library'
 import { SettingsPage } from './components/SettingsPage'
+import { ToolbarCustomizeSheet } from './components/ToolbarEditor'
+import { WorkspaceEditSheet } from './components/WorkspaceEditSheet'
+import { ScreenshotAreaOverlay } from './components/ScreenshotAreaOverlay'
 
 const api = window.veyra
 
@@ -59,9 +64,9 @@ function renderTabSurface(
   downloads: DownloadInfo[],
   onOpenAppearance: () => void,
   shot?: string,
-  isPrivate = false
+  workspace?: import('@shared/types').WorkspaceInfo
 ): React.JSX.Element | null {
-  if (!tab.url) return <StartPage tabId={tab.id} settings={settings} isPrivate={isPrivate} onOpenAppearance={onOpenAppearance} />
+  if (!tab.url) return <StartPage tabId={tab.id} settings={settings} workspace={workspace} isPrivate={!!workspace?.private} onOpenAppearance={onOpenAppearance} />
   if (tab.url === 'orbit://history') return <HistoryPage key={tab.id} tabId={tab.id} />
   if (tab.url === 'orbit://bookmarks') return <BookmarksPage key={tab.id} tabId={tab.id} />
   if (tab.url === 'orbit://downloads') return <DownloadsPage key={tab.id} items={downloads} />
@@ -100,6 +105,13 @@ export function App(): React.JSX.Element {
   const [compactDropSide, setCompactDropSide] = useState<SplitPlacement | null>(null)
   const [resizingKind, setResizingKind] = useState<'col' | 'row' | null>(null)
   const [resizingSidebar, setResizingSidebar] = useState(false)
+  const [sidebarHidden, setSidebarHidden] = useState(false)
+  const [toolbarSheetOpen, setToolbarSheetOpen] = useState(false)
+  const [areaShot, setAreaShot] = useState<import('@shared/types').ScreenshotAreaInit | null>(null)
+  const [workspaceSheet, setWorkspaceSheet] = useState<
+    { mode: 'create' } | { mode: 'edit'; workspace: import('@shared/types').WorkspaceInfo } | null
+  >(null)
+  const modalOverlayRef = useRef(false)
   const pageRef = useRef<HTMLDivElement>(null)
   const pageFullscreenRef = useRef(false)
   const maxDownloadId = useRef(0)
@@ -128,6 +140,7 @@ export function App(): React.JSX.Element {
         lastTokensRef.current = tokens
         applyResolvedAppearance(tokens)
       }),
+      api.screenshot.onAreaStart((init) => setAreaShot(init)),
       api.onUpdateState(setUpdate),
       api.onCompactState(setCompact),
       api.onWinState(setWinState),
@@ -233,6 +246,22 @@ export function App(): React.JSX.Element {
     }
   }, [dragTabId])
 
+  // While an in-window modal sheet (Customize toolbar or Edit workspace) is open, swap native page views for screenshots.
+  const anyModalSheetOpen = toolbarSheetOpen || workspaceSheet !== null
+  useEffect(() => {
+    if (anyModalSheetOpen && !modalOverlayRef.current) {
+      modalOverlayRef.current = true
+      void api.overlay(true).then((captured) => {
+        if (!modalOverlayRef.current) return
+        setShots(captured)
+        requestAnimationFrame(() => requestAnimationFrame(() => modalOverlayRef.current && api.hidePageForOverlay()))
+      })
+    } else if (!anyModalSheetOpen && modalOverlayRef.current) {
+      modalOverlayRef.current = false
+      void api.overlay(false).then(() => setShots(null))
+    }
+  }, [anyModalSheetOpen])
+
   const sendBounds = useCallback((): void => {
     if (pageFullscreenRef.current) return
     const el = pageRef.current
@@ -277,8 +306,10 @@ export function App(): React.JSX.Element {
     extInstallAsks.length,
     !!update?.justUpdated,
     findOpen,
+    appearance.tabLayout,
     appearance.sidebarSide,
     appearance.sidebarWidth,
+    sidebarHidden,
     appearance.pageGap,
     appearance.density,
     appearance.textScale,
@@ -310,7 +341,7 @@ export function App(): React.JSX.Element {
   const tabExternalAsks = externalAsks.filter((a) => a.tabId === null || a.tabId === -1 || visibleTabIds.has(a.tabId))
 
   const handleNewWorkspace = useCallback((): void => {
-    setNewWorkspaceTick((n) => n + 1)
+    setWorkspaceSheet({ mode: 'create' })
   }, [])
 
   const handleOpenSettingsSection = useCallback((sectionId: string): void => {
@@ -459,15 +490,17 @@ export function App(): React.JSX.Element {
 
   // In compact mode, the main window always keeps the page full-size; sidebar and titlebar
   // float above the page in dedicated overlay windows so the page never jumps or resizes.
-  const compactClasses = compact.enabled ? 'compact' : ''
+  const isTopTabs = appearance.tabLayout === 'top'
+  const compactClasses = compact.enabled && !isTopTabs ? 'compact' : ''
+  const sideCollapsed = isTopTabs || (!compact.enabled && !pageFullscreen && sidebarHidden)
 
   return (
     <div
-      className={`shell ${pageFullscreen ? 'fullscreen' : ''} ${compactClasses} ${resizingSidebar ? 'resizing-side' : ''}`}
+      className={`shell ${pageFullscreen ? 'fullscreen' : ''} ${compactClasses} ${isTopTabs ? 'tabs-top' : ''} ${!isTopTabs && sideCollapsed ? 'side-hidden' : ''} ${resizingSidebar ? 'resizing-side' : ''}`}
       data-ws-accent={activeWorkspace?.accent ?? 'clay'}
       data-ws-private={activeWorkspace?.private ? 'true' : undefined}
     >
-      {compact.enabled && !pageFullscreen && (
+      {compact.enabled && !isTopTabs && !pageFullscreen && (
         <>
           <div
             className={`compact-edge ${appearance.sidebarSide === 'right' ? 'compact-edge-right' : 'compact-edge-left'}`}
@@ -489,29 +522,55 @@ export function App(): React.JSX.Element {
         winState={winState}
         onPageShot={setShots}
         onEditingChange={setOmniboxEditing}
-        onPointerEdge={compact.enabled ? (inside) => api.setCompactHover('toolbar', inside) : undefined}
+        onPointerEdge={compact.enabled && !isTopTabs ? (inside) => api.setCompactHover('toolbar', inside) : undefined}
         onNewWorkspace={handleNewWorkspace}
         onOpenSettingsSection={handleOpenSettingsSection}
+        onToggleSidebar={isTopTabs ? undefined : () => setSidebarHidden((v) => !v)}
+        sidebarHidden={sidebarHidden}
+        onCustomizeToolbar={() => setToolbarSheetOpen(true)}
+        onScreenshot={(anchor) => api.screenshot.openChooser(anchor)}
       />
-      <Sidebar
-        state={state}
-        downloads={downloads}
-        downloadsOpen={downloadsOpen}
-        hasUnseenDownloads={hasUnseenDownloads}
-        downloadPulseTick={downloadPulseTick}
-        onToggleDownloads={() => {
-          setDownloadsOpen((v) => {
-            if (!v) setHasUnseenDownloads(false)
-            return !v
-          })
-        }}
-        onCloseDownloads={() => setDownloadsOpen(false)}
-        onEditorOpenChange={setSidebarEditing}
-        onPointerEdge={compact.enabled ? (inside) => api.setCompactHover('sidebar', inside) : undefined}
-        onDragTabChange={setDragTabId}
-        openNewWorkspaceTick={newWorkspaceTick}
-      />
-      {!compact.enabled && !pageFullscreen && (
+      {isTopTabs && !pageFullscreen && (
+        <TopTabBar
+          state={state}
+          settings={settings}
+          downloads={downloads}
+          downloadsOpen={downloadsOpen}
+          hasUnseenDownloads={hasUnseenDownloads}
+          downloadPulseTick={downloadPulseTick}
+          onToggleDownloads={() => {
+            setDownloadsOpen((v) => {
+              if (!v) setHasUnseenDownloads(false)
+              return !v
+            })
+          }}
+          onDragTabChange={setDragTabId}
+          onNewWorkspace={handleNewWorkspace}
+          onEditWorkspace={(ws) => setWorkspaceSheet({ mode: 'edit', workspace: ws })}
+        />
+      )}
+      {!sideCollapsed && (
+        <Sidebar
+          state={state}
+          downloads={downloads}
+          downloadsOpen={downloadsOpen}
+          hasUnseenDownloads={hasUnseenDownloads}
+          downloadPulseTick={downloadPulseTick}
+          onToggleDownloads={() => {
+            setDownloadsOpen((v) => {
+              if (!v) setHasUnseenDownloads(false)
+              return !v
+            })
+          }}
+          onCloseDownloads={() => setDownloadsOpen(false)}
+          onEditorOpenChange={setSidebarEditing}
+          onPointerEdge={compact.enabled ? (inside) => api.setCompactHover('sidebar', inside) : undefined}
+          onDragTabChange={setDragTabId}
+          openNewWorkspaceTick={newWorkspaceTick}
+          onOpenWorkspaceSheet={setWorkspaceSheet}
+        />
+      )}
+      {!compact.enabled && !pageFullscreen && !sideCollapsed && (
         <div
           role="separator"
           tabIndex={0}
@@ -603,7 +662,7 @@ export function App(): React.JSX.Element {
                     }}
                   >
                     <div className="split-pane-inner">
-                      {renderTabSurface(pane, settings, update, downloads, () => handleOpenSettingsSection('set-appearance'), shots?.[pane.id], !!activeWorkspace?.private)}
+                      {renderTabSurface(pane, settings, update, downloads, () => handleOpenSettingsSection('set-appearance'), shots?.[pane.id], activeWorkspace)}
                     </div>
                   </div>
                 )
@@ -630,7 +689,7 @@ export function App(): React.JSX.Element {
               ))}
             </>
           ) : (
-            active && renderTabSurface(active, settings, update, downloads, () => handleOpenSettingsSection('set-appearance'), shots?.[active.id], !!activeWorkspace?.private)
+            active && renderTabSurface(active, settings, update, downloads, () => handleOpenSettingsSection('set-appearance'), shots?.[active.id], activeWorkspace)
           )}
 
           {activeDropSide && (
@@ -640,8 +699,47 @@ export function App(): React.JSX.Element {
               </div>
             </div>
           )}
+
+          {areaShot && (
+            <ScreenshotAreaOverlay
+              init={areaShot}
+              onCommit={(rect) => {
+                setAreaShot(null)
+                api.screenshot.commitArea(rect)
+              }}
+              onCancel={() => {
+                setAreaShot(null)
+                api.screenshot.cancelArea()
+              }}
+            />
+          )}
         </div>
       </main>
+      {isTopTabs && downloadsOpen && !pageFullscreen && (
+        <div className="top-dl-popover">
+          <Downloads items={downloads} onClose={() => setDownloadsOpen(false)} />
+        </div>
+      )}
+      {toolbarSheetOpen && (
+        <ToolbarCustomizeSheet
+          items={appearance.toolbarItems}
+          onChange={(next) => void api.updateSettings({ appearance: { toolbarItems: next } })}
+          onClose={() => setToolbarSheetOpen(false)}
+        />
+      )}
+      {workspaceSheet && (
+        <WorkspaceEditSheet
+          mode={workspaceSheet.mode}
+          workspace={workspaceSheet.mode === 'edit' ? workspaceSheet.workspace : undefined}
+          workspaceCount={state.workspaces.length}
+          tabCount={workspaceSheet.mode === 'edit' ? (state.tabCounts[workspaceSheet.workspace.id] ?? 0) : 0}
+          canDelete={
+            workspaceSheet.mode === 'edit' &&
+            (workspaceSheet.workspace.private || state.workspaces.filter((w) => !w.private).length > 1)
+          }
+          onClose={() => setWorkspaceSheet(null)}
+        />
+      )}
       {dlFly && (
         <div
           key={dlFly.key}

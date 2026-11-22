@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DEFAULT_SETTINGS, SEARCH_ENGINES, mergeSettings, sanitizeSettings, searchUrlFor } from '../src/shared/settings.ts'
+import { DEFAULT_SEARCH_ENGINES } from '../src/shared/search.ts'
 import { DEFAULT_APPEARANCE } from '../src/shared/appearance.ts'
 import { DEFAULT_START_PAGE } from '../src/shared/startpage.ts'
 import { SettingsStore } from '../src/main/settings.ts'
@@ -30,9 +31,15 @@ test('sanitizeSettings returns safe defaults for non-objects and drops unknown k
   })
   assert.deepEqual(cleaned, {
     searchEngine: 'duckduckgo',
+    searchEngines: DEFAULT_SEARCH_ENGINES,
     theme: 'dark',
     startup: 'new-tab',
     newTabBehavior: 'command-bar',
+    externalLinks: 'new-tab',
+    newTabPosition: 'end',
+    closeTabSelection: 'right',
+    confirmCloseWindow: false,
+    confirmCloseThreshold: 5,
     downloadsDir: 'C:\\Temp\\DL',
     askWhereToSave: true,
     compactMode: true,
@@ -41,7 +48,8 @@ test('sanitizeSettings returns safe defaults for non-objects and drops unknown k
     windowButtons: 'dots',
     updateMode: 'notify',
     appearance: DEFAULT_APPEARANCE,
-    startPage: DEFAULT_START_PAGE
+    startPage: DEFAULT_START_PAGE,
+    shortcuts: {}
   })
   assert.equal('extra' in cleaned, false)
 })
@@ -81,9 +89,15 @@ test('mergeSettings applies valid fields and ignores invalid or unknown ones', (
   })
   assert.deepEqual(next, {
     searchEngine: 'brave',
+    searchEngines: DEFAULT_SEARCH_ENGINES,
     theme: 'system',
     startup: 'new-tab',
     newTabBehavior: 'command-bar',
+    externalLinks: 'new-tab',
+    newTabPosition: 'end',
+    closeTabSelection: 'right',
+    confirmCloseWindow: false,
+    confirmCloseThreshold: 5,
     downloadsDir: 'C:\\Downloads',
     askWhereToSave: true,
     compactMode: true,
@@ -92,7 +106,8 @@ test('mergeSettings applies valid fields and ignores invalid or unknown ones', (
     windowButtons: 'dots',
     updateMode: 'notify',
     appearance: DEFAULT_APPEARANCE,
-    startPage: DEFAULT_START_PAGE
+    startPage: DEFAULT_START_PAGE,
+    shortcuts: {}
   })
   assert.deepEqual(mergeSettings(next, null), next)
   assert.deepEqual(mergeSettings(next, { downloadsDir: 'bad\nline' }), next)

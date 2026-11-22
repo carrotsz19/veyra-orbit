@@ -51,6 +51,7 @@ const api: VeyraApi = {
   forward: () => ipcRenderer.send('nav:forward'),
   reload: () => ipcRenderer.send('nav:reload'),
   stop: () => ipcRenderer.send('nav:stop'),
+  goHome: () => ipcRenderer.send('nav:home'),
   resetZoom: () => ipcRenderer.send('nav:zoom-reset'),
   togglePin: (id) => ipcRenderer.send('tab:pin', id),
   move: (id, to) => ipcRenderer.send('tab:move', id, to),
@@ -90,6 +91,7 @@ const api: VeyraApi = {
   clearFinishedDownloads: () => ipcRenderer.send('download:clear'),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
+  setShortcutRecording: (active) => ipcRenderer.send('shortcuts:recording', active),
   chooseDownloadsDir: () => ipcRenderer.invoke('settings:choose-downloads-dir'),
   exportAppearanceTheme: () => ipcRenderer.invoke('settings:export-theme'),
   importAppearanceTheme: () => ipcRenderer.invoke('settings:import-theme'),
@@ -166,6 +168,13 @@ const api: VeyraApi = {
     clickAction: (id, anchorRect) => ipcRenderer.send('extensions:action-click', id, anchorRect),
     contextMenuAction: (id, anchorRect) => ipcRenderer.send('extensions:action-context-menu', id, anchorRect),
     answerInstall: (requestId, allow) => ipcRenderer.send('extensions:install-answer', requestId, allow)
+  },
+  screenshot: {
+    openChooser: (anchor) => ipcRenderer.send('screenshot:open-chooser', anchor ?? null),
+    capture: (mode) => ipcRenderer.send('screenshot:capture', mode),
+    onAreaStart: (cb) => listen('screenshot:area-start', cb),
+    commitArea: (rect) => ipcRenderer.send('screenshot:area-commit', rect),
+    cancelArea: () => ipcRenderer.send('screenshot:area-cancel')
   }
 }
 

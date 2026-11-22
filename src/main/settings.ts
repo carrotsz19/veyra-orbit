@@ -19,6 +19,7 @@ export class SettingsStore {
   private readonly envDownloadsDir: string
   private readonly supportsWindowButtons: boolean
   private readonly supportsAcrylic: boolean
+  private safeMode: boolean
   private activeWindowButtons: WindowButtonsStyle
   private data: Settings
 
@@ -27,15 +28,25 @@ export class SettingsStore {
     defaultDownloadsDir: string,
     envDownloadsDir = '',
     supportsWindowButtons = process.platform === 'win32',
-    supportsAcrylic = false
+    supportsAcrylic = false,
+    safeMode = false
   ) {
     this.file = file
     this.defaultDownloadsDir = defaultDownloadsDir
     this.envDownloadsDir = envDownloadsDir
     this.supportsWindowButtons = supportsWindowButtons
     this.supportsAcrylic = supportsAcrylic
+    this.safeMode = safeMode
     this.data = this.load()
     this.activeWindowButtons = supportsWindowButtons ? this.data.windowButtons : 'windows'
+  }
+
+  setSafeMode(on: boolean): void {
+    this.safeMode = on
+  }
+
+  isSafeMode(): boolean {
+    return this.safeMode
   }
 
   private load(): Settings {
@@ -59,17 +70,27 @@ export class SettingsStore {
   get(): Settings {
     return {
       ...this.data,
-      appearance: { ...this.data.appearance },
+      searchEngines: this.data.searchEngines.map((e) => ({ ...e })),
+      appearance: {
+        ...this.data.appearance,
+        toolbarItems: [...this.data.appearance.toolbarItems],
+        enabledMods: [...this.data.appearance.enabledMods]
+      },
       startPage: {
         ...this.data.startPage,
         quickLinks: this.data.startPage.quickLinks.map((l) => ({ ...l })),
         widgets: this.data.startPage.widgets.map((w) => ({ ...w }))
-      }
+      },
+      shortcuts: { ...this.data.shortcuts }
     }
   }
 
+  searchEngines() {
+    return this.data.searchEngines.map((e) => ({ ...e }))
+  }
+
   searchUrl(): string {
-    return searchUrlFor(this.data.searchEngine)
+    return searchUrlFor(this.data.searchEngine, this.data.searchEngines)
   }
 
   effectiveDownloadsDir(): string {
@@ -91,7 +112,8 @@ export class SettingsStore {
       downloadsOverridden: !!this.envDownloadsDir,
       activeWindowButtons: this.activeWindowButtons,
       supportsWindowButtons: this.supportsWindowButtons,
-      supportsAcrylic: this.supportsAcrylic
+      supportsAcrylic: this.supportsAcrylic,
+      safeMode: this.safeMode
     }
   }
 

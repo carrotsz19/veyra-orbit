@@ -317,6 +317,10 @@
 .set-switch.on:hover {
   background: var(--tint-hover);
 }
+.set-switch:disabled {
+  opacity: 0.42;
+  pointer-events: none;
+}
 .set-switch-thumb {
   width: 18px;
   height: 18px;
@@ -325,7 +329,11 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
   transition: transform var(--t-base) var(--ease-sheet);
 }
-.set-switch.on .set-switch-thumb {
+.set-switch.on .set-switch:disabled {
+  opacity: 0.42;
+  pointer-events: none;
+}
+.set-switch-thumb {
   transform: translateX(16px);
 }
 
@@ -795,6 +803,345 @@
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   color: var(--label-secondary);
+}
+
+/* ---- Keyboard shortcuts editor (SettingsShortcuts.tsx) -------------------- */
+.sc-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-3);
+}
+.sc-search {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 220px;
+  max-width: 300px;
+  height: 30px;
+  padding: 0 8px 0 28px;
+  border-radius: var(--r-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--hairline);
+}
+.dark .sc-search {
+  background: var(--bg-surface-raised);
+}
+.sc-search:focus-within {
+  border-color: color-mix(in srgb, var(--tint) 55%, transparent);
+  box-shadow: 0 0 0 3px var(--tint-ring);
+}
+.sc-search-icon {
+  position: absolute;
+  left: 9px;
+  color: var(--label-tertiary);
+  pointer-events: none;
+}
+.sc-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 12.5px;
+  color: var(--label-primary);
+  user-select: text;
+}
+.sc-search input::placeholder {
+  color: var(--label-tertiary);
+}
+.sc-search-clear {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-xs);
+  color: var(--label-tertiary);
+}
+.sc-search-clear:hover {
+  background: var(--fill-hover);
+  color: var(--label-primary);
+}
+.sc-hint {
+  font-size: 11.5px;
+  color: var(--label-tertiary);
+}
+.sc-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-3);
+  padding: 9px 12px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--warning) 10%, var(--bg-elevated));
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+  color: var(--label-primary);
+  font-size: 12.5px;
+}
+.sc-alert-text {
+  color: var(--warning);
+  font-weight: 500;
+}
+.sc-alert-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sc-group + .sc-group {
+  margin-top: 2px;
+}
+.sc-row {
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+.sc-row.recording {
+  background: var(--tint-soft);
+}
+.sc-mod-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--tint);
+  margin-left: 7px;
+  vertical-align: middle;
+}
+.sc-row-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.sc-pill {
+  min-width: 96px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-xs);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--fill-tertiary);
+  border: 1px solid var(--hairline);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--label-primary);
+  transition: background-color var(--t-fast) var(--ease-state), border-color var(--t-fast) var(--ease-state);
+}
+.sc-pill:hover {
+  background: var(--fill-hover);
+  border-color: var(--hairline-strong);
+}
+.sc-pill kbd {
+  background: none;
+  box-shadow: none;
+  padding: 0;
+  color: inherit;
+  font-size: 11.5px;
+}
+.sc-pill.disabled {
+  color: var(--label-tertiary);
+  font-style: italic;
+}
+.sc-pill.recording {
+  background: var(--tint);
+  border-color: var(--tint);
+  color: var(--on-tint);
+}
+
+/* ---- Custom CSS editor (SettingsAppearance.tsx) -------------------------- */
+.css-safe-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.css-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.css-byte-count {
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--label-tertiary);
+}
+.css-editor-wrap {
+  display: flex;
+  height: 184px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--hairline-strong);
+  background: var(--bg-grouped);
+  overflow: hidden;
+}
+.css-editor-wrap:focus-within {
+  border-color: color-mix(in srgb, var(--tint) 55%, transparent);
+  box-shadow: 0 0 0 3px var(--tint-ring);
+}
+.css-editor-gutter {
+  flex: none;
+  width: 38px;
+  padding: 10px 6px 10px 0;
+  border-right: 1px solid var(--hairline);
+  background: var(--fill-tertiary);
+  color: var(--label-tertiary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+  overflow: hidden;
+  user-select: none;
+}
+.css-editor-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  resize: none;
+  padding: 10px 12px;
+  background: transparent;
+  color: var(--label-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  tab-size: 2;
+  white-space: pre;
+  overflow: auto;
+  user-select: text;
+}
+.css-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---- Search engines editor (SettingsSearch.tsx) -------------------------- */
+.se-select {
+  height: 30px;
+  min-width: 164px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--hairline-strong);
+  background: var(--bg-grouped);
+  color: var(--label-primary);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.se-row {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.se-name-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.se-kw {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.se-default-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--tint-soft);
+  color: var(--tint-text, var(--tint));
+  font-size: 11px;
+  font-weight: 600;
+}
+.se-url {
+  margin-top: 2px;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  color: var(--label-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.se-form {
+  background: var(--bg-grouped);
+}
+.se-form-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--label-primary);
+}
+.se-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 140px;
+  gap: 10px;
+}
+.se-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--label-secondary);
+}
+.se-field input {
+  height: 30px;
+  padding: 0 9px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--hairline-strong);
+  background: var(--bg-elevated);
+  color: var(--label-primary);
+  font-size: 12.5px;
+  outline: none;
+  user-select: text;
+}
+.dark .se-field input {
+  background: var(--bg-surface-raised);
+}
+.se-field input:focus {
+  border-color: color-mix(in srgb, var(--tint) 55%, transparent);
+  box-shadow: 0 0 0 3px var(--tint-ring);
+}
+.se-field-url {
+  grid-column: 1 / -1;
+}
+.se-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.set-threshold-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--label-secondary);
+}
+.set-threshold-input {
+  width: 58px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--hairline-strong);
+  background: var(--bg-grouped);
+  color: var(--label-primary);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  outline: none;
+}
+.set-threshold-input:focus {
+  border-color: color-mix(in srgb, var(--tint) 55%, transparent);
+  box-shadow: 0 0 0 3px var(--tint-ring);
+}
+.set-threshold-unit {
+  font-size: 12px;
+  color: var(--label-tertiary);
 }
 
 @media (max-width: 900px) {

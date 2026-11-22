@@ -1,5 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, ArrowUpCircle, Copy, EyeOff, Menu as MenuIcon, Minus, RotateCw, Square, X } from 'lucide-react'
+import {
+  ArrowLeft,
+  ArrowRight,
+  ArrowUpCircle,
+  Camera,
+  Columns2,
+  Copy,
+  Download,
+  EyeOff,
+  Home,
+  Layers,
+  Menu as MenuIcon,
+  Minus,
+  PanelLeft,
+  RotateCw,
+  Settings,
+  Square,
+  Star,
+  X
+} from 'lucide-react'
 import type {
   Bookmark,
   BrowserState,
@@ -9,6 +28,7 @@ import type {
   MenuId,
   SettingsView,
   TabInfo,
+  ToolbarItemId,
   UpdateState,
   WindowButtonsStyle,
   WindowState
@@ -24,6 +44,8 @@ import {
 } from '@shared/menu'
 import { isInternalUrl } from '@shared/url'
 import { shouldShowBookmarkBar } from '@shared/bookmarks'
+import { formatShortcutLabel, resolveShortcuts } from '@shared/shortcuts'
+import { DEFAULT_TOOLBAR_ITEMS, sanitizeToolbarItems } from '@shared/toolbar'
 import { Omnibox } from './Omnibox'
 import { ExtensionToolbar } from './ExtensionToolbar'
 
@@ -117,7 +139,7 @@ function WindowWinButtons({ state }: { state: WindowState }): React.JSX.Element 
   )
 }
 
-type OpenTarget = MenuId | 'collapsed' | 'extensions' | null
+type OpenTarget = MenuId | 'collapsed' | 'extensions' | 'toolbar-ws' | 'toolbar-ctx' | null
 
 interface TitleBarProps {
   state: BrowserState
@@ -132,6 +154,10 @@ interface TitleBarProps {
   onPointerEdge?: (inside: boolean) => void
   onNewWorkspace: () => void
   onOpenSettingsSection: (sectionId: string) => void
+  onToggleSidebar?: () => void
+  sidebarHidden?: boolean
+  onCustomizeToolbar?: () => void
+  onScreenshot?: (anchor: { x: number; y: number }) => void
   /** True when rendered inside the floating compact-mode titlebar child window. */
   inCompactPanel?: boolean
   onCompactDragStart?: (e: React.PointerEvent<HTMLElement>) => void
@@ -151,12 +177,17 @@ export function TitleBar({
   onPointerEdge,
   onNewWorkspace,
   onOpenSettingsSection,
+  onToggleSidebar,
+  sidebarHidden = false,
+  onCustomizeToolbar,
+  onScreenshot,
   inCompactPanel = false,
   onCompactDragStart,
   onCompactDragDoubleClick
 }: TitleBarProps): React.JSX.Element {
   const [windowWidth, setWindowWidth] = useState(() => window.innerWidth)
   const [openTarget, setOpenTarget] = useState<OpenTarget>(null)
+  const [ctxAnchor, setCtxAnchor] = useState<{ x: number; y: number } | null>(null)
   const [collapsedSub, setCollapsedSub] = useState<MenuId | null>(null)
   const [openViaKeyboard, setOpenViaKeyboard] = useState(false)
   const [history, setHistory] = useState<HistoryEntry[]>([])
@@ -172,9 +203,11 @@ export function TitleBar({
   const appCfg = settings?.appearance
   const menuStyle = appCfg?.menuBarStyle ?? 'full'
   const addressBarAlign = appCfg?.addressBarAlign ?? 'center'
-  const showNavButtons = appCfg?.showNavButtons ?? true
-  const showBookmarkStar = appCfg?.showBookmarkStar ?? true
-  const showExtensions = appCfg?.showExtensions ?? true
+  const toolbarItems: ToolbarItemId[] = useMemo(
+    () => (appCfg?.toolbarItems ? sanitizeToolbarItems(appCfg.toolbarItems) : [...DEFAULT_TOOLBAR_ITEMS]),
+    [appCfg?.toolbarItems]
+  )
+  const resolvedShortcuts = useMemo(() => resolveShortcuts(settings?.shortcuts), [settings?.shortcuts])
   const collapsed =
     menuStyle === 'hamburger' ||
     shouldCollapseMenus(windowWidth, {
@@ -203,11 +236,13 @@ export function TitleBar({
     return api.extensions.onActions(setExtActions)
   }, [])
 
-  // Close open menu if layout flips between expanded and collapsed (leave extensions overflow untouched).
+  // Close open menu if layout flips between expanded and collapsed (leave extensions/toolbar menus untouched).
   useEffect(() => {
     if (
       openTarget &&
       openTarget !== 'extensions' &&
+      openTarget !== 'toolbar-ws' &&
+      openTarget !== 'toolbar-ctx' &&
       ((collapsed && openTarget !== 'collapsed') || (!collapsed && openTarget === 'collapsed'))
     ) {
       setOpenTarget(null)
@@ -238,6 +273,7 @@ export function TitleBar({
         workspaces: state.workspaces.map((w) => ({ id: w.id, name: w.name, private: w.private })),
         activeWorkspaceId: state.activeWorkspaceId,
         compactMode: !!settings?.compactMode,
+        tabLayout: settings?.appearance.tabLayout,
         bookmarkBarVisible: shouldShowBookmarkBar(
           settings?.appearance.bookmarkBar ?? 'start-page',
           !!tab && !tab.url && !tab.error,
@@ -252,9 +288,10 @@ export function TitleBar({
         bookmarks: bookmarks.map((b) => ({ url: b.url, title: b.title })),
         appVersion: INITIAL_VERSION,
         isDev: __CHANNEL__ === 'dev',
-        updateReadyVersion: update?.status === 'ready' ? (update.availableVersion ?? '') : null
+        updateReadyVersion: update?.status === 'ready' ? (update.availableVersion ?? '') : null,
+        shortcuts: settings?.shortcuts
       }),
-    [tab, activeSplitGroup, state.workspaces, state.activeWorkspaceId, state.canReopenClosed, settings?.compactMode, settings?.appearance.bookmarkBar, winState.fullscreen, history, bookmarks, update?.status, update?.availableVersion]
+    [tab, activeSplitGroup, state.workspaces, state.activeWorkspaceId, state.canReopenClosed, settings?.compactMode, settings?.appearance.tabLayout, settings?.appearance.bookmarkBar, settings?.shortcuts, winState.fullscreen, history, bookmarks, update?.status, update?.availableVersion]
   )
 
   const recentUrls = useMemo(() => recentHistoryItems(history.map((h) => ({ url: h.url, title: h.title }))), [history])
@@ -269,7 +306,7 @@ export function TitleBar({
 
   const runAction = useCallback(
     (id: string): void => {
-      if (id.startsWith('bmbar:') || id.startsWith('submenu:bmbar-folder:')) return
+      if (id.startsWith('bmbar:') || id.startsWith('submenu:bmbar-folder:') || id.startsWith('toptab-ws:') || id.startsWith('ws-ctx:')) return
       if (!liveRef.current.openTarget && (id.startsWith('submenu:') || id === 'submenu-back')) return
       if (id.startsWith('submenu:')) {
         const subId = id.slice('submenu:'.length) as MenuId
@@ -321,6 +358,11 @@ export function TitleBar({
       }
       if (id === 'ext:manage') {
         onOpenSettingsSection('set-extensions')
+        return
+      }
+      if (id === 'toolbar:customize') {
+        if (onCustomizeToolbar) onCustomizeToolbar()
+        else onOpenSettingsSection('set-toolbar')
         return
       }
 
@@ -446,7 +488,7 @@ export function TitleBar({
           return
       }
     },
-    [bookmarks, extActions, onNewWorkspace, onOpenSettingsSection, openUrlInTab, recentUrls, refreshLibraryData, state.activeWorkspaceId, state.workspaces, tab]
+    [bookmarks, extActions, onCustomizeToolbar, onNewWorkspace, onOpenSettingsSection, openUrlInTab, recentUrls, refreshLibraryData, state.activeWorkspaceId, state.workspaces, tab]
   )
 
   const liveRef = useRef({ openTarget, sections, runAction, collapsed })
@@ -458,15 +500,29 @@ export function TitleBar({
       api.menu.close()
       return
     }
-    const btn = btnRefs.current.get(openTarget)
-    if (!btn) return
-    const rect = btn.getBoundingClientRect()
     const dark = window.matchMedia('(prefers-color-scheme: dark)').matches
     const accent = getComputedStyle(document.documentElement).getPropertyValue('--tint').trim() || '#b3492b'
 
+    let x = 0
+    let y = 0
+    if (openTarget === 'toolbar-ctx' && ctxAnchor) {
+      x = ctxAnchor.x
+      y = ctxAnchor.y
+    } else {
+      const btn = btnRefs.current.get(openTarget)
+      if (!btn) return
+      const rect = btn.getBoundingClientRect()
+      x = rect.left
+      y = rect.bottom + 4
+    }
+
     let items: MenuEntry[]
     let header
-    if (openTarget === 'extensions') {
+    if (openTarget === 'toolbar-ctx') {
+      items = [{ kind: 'item', id: 'toolbar:customize', label: 'Customize toolbar…' }]
+    } else if (openTarget === 'toolbar-ws') {
+      items = sections.find((s) => s.id === 'workspaces')?.items ?? []
+    } else if (openTarget === 'extensions') {
       items = [
         ...extActions.map((a): MenuEntry => ({
           kind: 'item',
@@ -496,15 +552,15 @@ export function TitleBar({
     }
 
     api.menu.open({
-      x: rect.left,
-      y: rect.bottom + 4,
+      x,
+      y,
       dark,
       accent,
       items,
       initialActive: openViaKeyboard ? firstSelectableIndex(items) : -1,
       header
     })
-  }, [openTarget, collapsedSub, openViaKeyboard, sections, extActions, settings?.theme])
+  }, [openTarget, ctxAnchor, collapsedSub, openViaKeyboard, sections, extActions, settings?.theme])
 
   const toggleMenuBarFocus = useCallback((): void => {
     if (liveRef.current.openTarget) {
@@ -557,7 +613,7 @@ export function TitleBar({
       }),
       api.menu.onStep((by) => {
         const cur = liveRef.current.openTarget
-        if (!cur || cur === 'collapsed' || cur === 'extensions') return
+        if (!cur || cur === 'collapsed' || cur === 'extensions' || cur === 'toolbar-ws' || cur === 'toolbar-ctx') return
         const ids = liveRef.current.sections.map((s) => s.id)
         const idx = ids.indexOf(cur)
         if (idx < 0) return
@@ -579,14 +635,15 @@ export function TitleBar({
     }
   }, [refreshLibraryData, toggleMenuBarFocus])
 
-  const openMenu = (target: MenuId | 'collapsed' | 'extensions', viaKeyboard: boolean): void => {
+  const openMenu = (target: OpenTarget, viaKeyboard: boolean): void => {
+    if (!target) return
     if (target === 'history' || target === 'bookmarks' || target === 'collapsed') refreshLibraryData()
     setCollapsedSub(null)
     setOpenViaKeyboard(viaKeyboard)
     setOpenTarget(target)
   }
 
-  const handleMenuBtnMouseDown = (e: React.MouseEvent, target: MenuId | 'collapsed' | 'extensions'): void => {
+  const handleMenuBtnMouseDown = (e: React.MouseEvent, target: Exclude<OpenTarget, null | 'toolbar-ctx'>): void => {
     e.preventDefault()
     // Clicking the open menu's own button closes it (its floating window already hid on blur).
     if (lastClosedRef.current.target === target && Date.now() - lastClosedRef.current.at < 300) {
@@ -636,11 +693,219 @@ export function TitleBar({
     return !target.closest('button, input, a, [role="button"], .omni-wrap, .wb-dots, .wb-win-btns, .wb-menus, .ext-toolbar')
   }
 
+  const hint = (label: string, shortcutId?: keyof typeof resolvedShortcuts): string => {
+    const key = shortcutId ? formatShortcutLabel(resolvedShortcuts[shortcutId]) : undefined
+    return key ? `${label} (${key})` : label
+  }
+
+  const canBookmark = !!tab && /^https?:/.test(tab.url) && !tab.error
+  const activeWs = state.workspaces.find((w) => w.id === state.activeWorkspaceId)
+
+  const renderToolbarItem = (id: ToolbarItemId): React.JSX.Element | null => {
+    switch (id) {
+      case 'back':
+        return (
+          <button
+            key={id}
+            type="button"
+            className="icon-btn"
+            aria-label="Back"
+            title={hint('Back', 'back')}
+            disabled={!tab?.canGoBack}
+            onClick={() => api.back()}
+          >
+            <ArrowLeft size={15} strokeWidth={1.75} />
+          </button>
+        )
+      case 'forward':
+        return (
+          <button
+            key={id}
+            type="button"
+            className="icon-btn"
+            aria-label="Forward"
+            title={hint('Forward', 'forward')}
+            disabled={!tab?.canGoForward}
+            onClick={() => api.forward()}
+          >
+            <ArrowRight size={15} strokeWidth={1.75} />
+          </button>
+        )
+      case 'reload':
+        return tab?.loading ? (
+          <button key={id} type="button" className="icon-btn" aria-label="Stop" title="Stop" onClick={() => api.stop()}>
+            <X size={15} strokeWidth={1.75} />
+          </button>
+        ) : (
+          <button
+            key={id}
+            type="button"
+            className="icon-btn"
+            aria-label="Reload"
+            title={hint('Reload', 'reload')}
+            disabled={!tab?.url || isInternalUrl(tab.url)}
+            onClick={() => api.reload()}
+          >
+            <RotateCw size={14} strokeWidth={1.75} />
+          </button>
+        )
+      case 'home':
+        return (
+          <button
+            key={id}
+            type="button"
+            className="icon-btn"
+            aria-label="Home"
+            title="Start page"
+            disabled={!tab || (!tab.url && !tab.error)}
+            onClick={() => api.goHome()}
+          >
+            <Home size={14} strokeWidth={1.75} />
+          </button>
+        )
+      case 'bookmark-star':
+        return (
+          <button
+            key={id}
+            type="button"
+            className={`icon-btn ${tab?.bookmarked ? 'active-star' : ''}`}
+            aria-label={tab?.bookmarked ? 'Remove bookmark' : 'Bookmark this page'}
+            aria-pressed={!!tab?.bookmarked}
+            title={hint(tab?.bookmarked ? 'Remove bookmark' : 'Bookmark this page', 'bookmark-toggle')}
+            disabled={!canBookmark}
+            onClick={() => api.toggleBookmark()}
+          >
+            <Star size={14} strokeWidth={1.75} fill={tab?.bookmarked ? 'currentColor' : 'none'} />
+          </button>
+        )
+      case 'downloads':
+        return (
+          <button
+            key={id}
+            type="button"
+            className="icon-btn"
+            aria-label="Downloads"
+            title={hint('Downloads', 'downloads')}
+            onClick={() => api.toggleDownloads()}
+          >
+            <Download size={14} strokeWidth={1.75} />
+          </button>
+        )
+      case 'split':
+        return (
+          <button
+            key={id}
+            type="button"
+            className={`icon-btn ${activeSplitGroup ? 'on' : ''}`}
+            aria-label={activeSplitGroup ? 'Unsplit view' : 'Split view'}
+            aria-pressed={!!activeSplitGroup}
+            title={hint(activeSplitGroup ? 'Unsplit view' : 'Split view with next tab', 'split-view')}
+            disabled={!tab}
+            onClick={() => api.splitWithNext()}
+          >
+            <Columns2 size={14} strokeWidth={1.75} />
+          </button>
+        )
+      case 'sidebar-toggle':
+        return (
+          <button
+            key={id}
+            type="button"
+            className={`icon-btn ${!sidebarHidden ? 'on' : ''}`}
+            aria-label={sidebarHidden ? 'Show sidebar' : 'Hide sidebar'}
+            aria-pressed={!sidebarHidden}
+            title={sidebarHidden ? 'Show sidebar' : 'Hide sidebar'}
+            disabled={inCompactPanel || !onToggleSidebar}
+            onClick={() => onToggleSidebar?.()}
+          >
+            <PanelLeft size={14} strokeWidth={1.75} />
+          </button>
+        )
+      case 'screenshot':
+        return (
+          <button
+            key={id}
+            type="button"
+            className="icon-btn"
+            aria-label="Take screenshot"
+            title={hint('Take screenshot', 'screenshot')}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect()
+              onScreenshot?.({ x: r.left, y: r.bottom + 6 })
+            }}
+          >
+            <Camera size={14} strokeWidth={1.75} />
+          </button>
+        )
+      case 'workspaces':
+        return (
+          <button
+            key={id}
+            type="button"
+            ref={(el) => void btnRefs.current.set('toolbar-ws', el)}
+            className={`icon-btn ${openTarget === 'toolbar-ws' ? 'on' : ''}`}
+            aria-label="Workspaces"
+            aria-haspopup="menu"
+            aria-expanded={openTarget === 'toolbar-ws'}
+            title={activeWs ? `Workspace: ${activeWs.name}` : 'Workspaces'}
+            onMouseDown={(e) => handleMenuBtnMouseDown(e, 'toolbar-ws')}
+          >
+            <Layers size={14} strokeWidth={1.75} />
+          </button>
+        )
+      case 'settings':
+        return (
+          <button
+            key={id}
+            type="button"
+            className="icon-btn"
+            aria-label="Settings"
+            title={hint('Settings', 'settings')}
+            onClick={() => api.openInternal('orbit://settings')}
+          >
+            <Settings size={14} strokeWidth={1.75} />
+          </button>
+        )
+      case 'extensions':
+        return (
+          <ExtensionToolbar
+            key={id}
+            actions={extActions}
+            compact={collapsed}
+            overflowOpen={openTarget === 'extensions'}
+            puzzleBtnRef={(el) => void btnRefs.current.set('extensions', el)}
+            onToggleOverflow={(e) => handleMenuBtnMouseDown(e, 'extensions')}
+          />
+        )
+      case 'address-bar':
+        return (
+          <Omnibox
+            key={id}
+            tab={tab}
+            onPageShot={onPageShot}
+            onEditingChange={onEditingChange}
+            onOpenChange={onOmniboxOpenChange}
+            useOverlay={useOmniboxOverlay}
+            showStar={false}
+            searchEngines={settings?.searchEngines}
+          />
+        )
+    }
+  }
+
   return (
     <header
       className={titlebarClasses}
       onMouseEnter={() => onPointerEdge?.(true)}
       onMouseLeave={() => onPointerEdge?.(false)}
+      onContextMenu={(e) => {
+        if ((e.target as Element).closest('input, textarea')) return
+        e.preventDefault()
+        setCtxAnchor({ x: e.clientX, y: e.clientY })
+        setCollapsedSub(null)
+        setOpenViaKeyboard(false)
+        setOpenTarget('toolbar-ctx')
+      }}
       onPointerDown={(e) => {
         if (e.button === 0 && isCompactDragTarget(e.target)) {
           onCompactDragStart?.(e)
@@ -691,7 +956,7 @@ export function TitleBar({
                 aria-expanded={openTarget === sec.id}
                 onMouseDown={(e) => handleMenuBtnMouseDown(e, sec.id)}
                 onMouseEnter={() => {
-                  if (openTarget && openTarget !== sec.id && openTarget !== 'collapsed') {
+                  if (openTarget && openTarget !== sec.id && openTarget !== 'collapsed' && openTarget !== 'toolbar-ws' && openTarget !== 'toolbar-ctx' && openTarget !== 'extensions') {
                     openMenu(sec.id, false)
                   }
                 }}
@@ -707,56 +972,8 @@ export function TitleBar({
       {addressBarAlign === 'center' && <div className="tb-drag" />}
 
       <div className="tb-center">
-        {showNavButtons && (
-          <div className="nav">
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label="Back"
-              title="Back (Alt+Left)"
-              disabled={!tab?.canGoBack}
-              onClick={() => api.back()}
-            >
-              <ArrowLeft size={15} strokeWidth={1.75} />
-            </button>
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label="Forward"
-              title="Forward (Alt+Right)"
-              disabled={!tab?.canGoForward}
-              onClick={() => api.forward()}
-            >
-              <ArrowRight size={15} strokeWidth={1.75} />
-            </button>
-            {tab?.loading ? (
-              <button type="button" className="icon-btn" aria-label="Stop" title="Stop" onClick={() => api.stop()}>
-                <X size={15} strokeWidth={1.75} />
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="icon-btn"
-                aria-label="Reload"
-                title="Reload (Ctrl+R)"
-                disabled={!tab?.url || isInternalUrl(tab.url)}
-                onClick={() => api.reload()}
-              >
-                <RotateCw size={14} strokeWidth={1.75} />
-              </button>
-            )}
-          </div>
-        )}
-
-        <Omnibox
-          tab={tab}
-          onPageShot={onPageShot}
-          onEditingChange={onEditingChange}
-          onOpenChange={onOmniboxOpenChange}
-          useOverlay={useOmniboxOverlay}
-          showStar={showBookmarkStar}
-        />
-        {state.workspaces.find((w) => w.id === state.activeWorkspaceId)?.private && (
+        {toolbarItems.map((id) => renderToolbarItem(id))}
+        {activeWs?.private && (
           <span className="private-pill" title="Private workspace — history, cookies and site data are not saved">
             <EyeOff size={12} aria-hidden />
             <span>Private</span>
@@ -779,20 +996,11 @@ export function TitleBar({
             type="button"
             className="zoom-pill"
             aria-label={`Zoom ${tab.zoom}%, click to reset`}
-            title="Reset zoom (Ctrl+0)"
+            title={hint('Reset zoom', 'zoom-reset')}
             onClick={() => api.resetZoom()}
           >
             {tab.zoom}%
           </button>
-        )}
-        {showExtensions && (
-          <ExtensionToolbar
-            actions={extActions}
-            compact={collapsed}
-            overflowOpen={openTarget === 'extensions'}
-            puzzleBtnRef={(el) => void btnRefs.current.set('extensions', el)}
-            onToggleOverflow={(e) => handleMenuBtnMouseDown(e, 'extensions')}
-          />
         )}
       </div>
 

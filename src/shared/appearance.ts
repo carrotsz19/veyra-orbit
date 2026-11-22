@@ -5,6 +5,19 @@
  *
  * Pure module (no Electron or Node imports) so it runs in main, renderers, and unit tests.
  */
+import {
+  DEFAULT_TOOLBAR_ITEMS,
+  deriveLegacyToolbarFlags,
+  migrateLegacyToolbarButtons,
+  sanitizeToolbarItems,
+  type ToolbarItemId
+} from './toolbar.ts'
+import {
+  buildEffectiveCustomCss,
+  sanitizeCustomCss,
+  sanitizeEnabledMods,
+  type BuiltinModId
+} from './customCss.ts'
 
 export const THEME_PRESET_IDS = [
   'veyra-clay',
@@ -18,12 +31,19 @@ export const THEME_PRESET_IDS = [
 
 export type ThemePresetId = (typeof THEME_PRESET_IDS)[number]
 export type UiDensity = 'compact' | 'comfortable' | 'spacious'
+export type TabLayout = 'sidebar' | 'top'
 export type SidebarSide = 'left' | 'right'
 export type TabCloseButtonsMode = 'hover' | 'always'
 export type AddressBarAlign = 'center' | 'left'
 export type MenuBarStyle = 'full' | 'hamburger'
 export type BookmarkBarMode = 'always' | 'start-page' | 'never'
 export type MotionMode = 'full' | 'reduced' | 'off'
+
+export const SIDEBAR_WIDTH_PRESETS = Object.freeze([
+  { id: 'narrow', label: 'Narrow', width: 204 },
+  { id: 'default', label: 'Default', width: 248 },
+  { id: 'wide', label: 'Wide', width: 308 }
+] as const)
 
 export interface AppearanceSettings {
   /** Named colour palette (full light + dark token set). */
@@ -36,6 +56,8 @@ export interface AppearanceSettings {
   density: UiDensity
   /** Root UI text scale percentage (90..120). */
   textScale: number
+  /** Tab strip layout: vertical sidebar (default) or horizontal top tab bar. */
+  tabLayout: TabLayout
   /** Which side of the window the vertical tab sidebar sits on. */
   sidebarSide: SidebarSide
   /** Sidebar width in CSS pixels (200..360). */
@@ -46,12 +68,14 @@ export interface AppearanceSettings {
   tabCloseButtons: TabCloseButtonsMode
   /** Address bar horizontal alignment in the title bar. */
   addressBarAlign: AddressBarAlign
-  /** Show back / forward / reload navigation buttons. */
+  /** Show back / forward / reload navigation buttons (migrated into toolbarItems). */
   showNavButtons: boolean
-  /** Show bookmark star inside the address bar. */
+  /** Show bookmark star button (migrated into toolbarItems). */
   showBookmarkStar: boolean
-  /** Show extensions toolbar buttons & puzzle overflow. */
+  /** Show extensions toolbar buttons & puzzle overflow (migrated into toolbarItems). */
   showExtensions: boolean
+  /** Ordered toolbar layout including 'address-bar' and active toolbar buttons. */
+  toolbarItems: ToolbarItemId[]
   /** Full title-bar menus (File/Edit/...) or single hamburger menu. */
   menuBarStyle: MenuBarStyle
   /** Bookmark bar visibility: always, only on start page (default), or never. */
@@ -64,6 +88,12 @@ export interface AppearanceSettings {
   pageShadow: boolean
   /** Motion level; 'full' still honours OS prefers-reduced-motion. */
   motion: MotionMode
+  /** Whether user custom CSS is active on Orbit's UI chrome (never applied to web pages). */
+  customCssEnabled: boolean
+  /** Sanitized custom CSS snippet applied only to Orbit's own UI windows (max 64 KB). */
+  customCss: string
+  /** Enabled built-in UI CSS mods. */
+  enabledMods: BuiltinModId[]
 }
 
 export type AppearancePatch = Partial<AppearanceSettings>
@@ -82,6 +112,7 @@ export const DEFAULT_APPEARANCE: Readonly<AppearanceSettings> = Object.freeze({
   cornerRadius: 10,
   density: 'comfortable',
   textScale: 100,
+  tabLayout: 'sidebar',
   sidebarSide: 'left',
   sidebarWidth: 248,
   translucentSidebar: true,
@@ -90,12 +121,16 @@ export const DEFAULT_APPEARANCE: Readonly<AppearanceSettings> = Object.freeze({
   showNavButtons: true,
   showBookmarkStar: true,
   showExtensions: true,
+  toolbarItems: DEFAULT_TOOLBAR_ITEMS as unknown as ToolbarItemId[],
   menuBarStyle: 'full',
   bookmarkBar: 'start-page',
   pageGap: 8,
   pageRadius: 10,
   pageShadow: true,
-  motion: 'full'
+  motion: 'full',
+  customCssEnabled: false,
+  customCss: '',
+  enabledMods: Object.freeze([]) as unknown as BuiltinModId[]
 })
 
 export interface PresetPalette {
@@ -540,6 +575,7 @@ export const THEME_PRESETS: readonly ThemePresetDefinition[] = [
 
 const PRESET_MAP = new Map<string, ThemePresetDefinition>(THEME_PRESETS.map((p) => [p.id, p]))
 const DENSITIES = new Set<string>(['compact', 'comfortable', 'spacious'])
+const TAB_LAYOUTS = new Set<string>(['sidebar', 'top'])
 const SIDEBAR_SIDES = new Set<string>(['left', 'right'])
 const TAB_CLOSE_MODES = new Set<string>(['hover', 'always'])
 const ADDR_ALIGNS = new Set<string>(['center', 'left'])
@@ -555,6 +591,10 @@ export function isThemePresetId(v: unknown): v is ThemePresetId {
 
 export function isUiDensity(v: unknown): v is UiDensity {
   return typeof v === 'string' && DENSITIES.has(v)
+}
+
+export function isTabLayout(v: unknown): v is TabLayout {
+  return typeof v === 'string' && TAB_LAYOUTS.has(v)
 }
 
 export function isSidebarSide(v: unknown): v is SidebarSide {
@@ -614,34 +654,53 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 
 /** Validates arbitrary parsed JSON into a safe AppearanceSettings object, dropping unknown keys. */
 export function sanitizeAppearance(raw: unknown): AppearanceSettings {
-  if (!isPlainObject(raw)) return { ...DEFAULT_APPEARANCE }
+  if (!isPlainObject(raw)) {
+    return { ...DEFAULT_APPEARANCE, toolbarItems: [...DEFAULT_TOOLBAR_ITEMS], enabledMods: [] }
+  }
   const accent = sanitizeAccentHex(raw.accent)
+  const toolbarItems = Array.isArray(raw.toolbarItems)
+    ? sanitizeToolbarItems(raw.toolbarItems)
+    : migrateLegacyToolbarButtons({
+        showNavButtons: raw.showNavButtons,
+        showBookmarkStar: raw.showBookmarkStar,
+        showExtensions: raw.showExtensions
+      })
+  const legacyFlags = deriveLegacyToolbarFlags(toolbarItems)
   return {
     preset: isThemePresetId(raw.preset) ? raw.preset : DEFAULT_APPEARANCE.preset,
     accent: accent !== null ? accent : DEFAULT_APPEARANCE.accent,
     cornerRadius: clampInt(raw.cornerRadius, APPEARANCE_LIMITS.cornerRadius.min, APPEARANCE_LIMITS.cornerRadius.max, DEFAULT_APPEARANCE.cornerRadius),
     density: isUiDensity(raw.density) ? raw.density : DEFAULT_APPEARANCE.density,
     textScale: clampInt(raw.textScale, APPEARANCE_LIMITS.textScale.min, APPEARANCE_LIMITS.textScale.max, DEFAULT_APPEARANCE.textScale),
+    tabLayout: isTabLayout(raw.tabLayout) ? raw.tabLayout : DEFAULT_APPEARANCE.tabLayout,
     sidebarSide: isSidebarSide(raw.sidebarSide) ? raw.sidebarSide : DEFAULT_APPEARANCE.sidebarSide,
     sidebarWidth: clampInt(raw.sidebarWidth, APPEARANCE_LIMITS.sidebarWidth.min, APPEARANCE_LIMITS.sidebarWidth.max, DEFAULT_APPEARANCE.sidebarWidth),
     translucentSidebar: typeof raw.translucentSidebar === 'boolean' ? raw.translucentSidebar : DEFAULT_APPEARANCE.translucentSidebar,
     tabCloseButtons: isTabCloseButtonsMode(raw.tabCloseButtons) ? raw.tabCloseButtons : DEFAULT_APPEARANCE.tabCloseButtons,
     addressBarAlign: isAddressBarAlign(raw.addressBarAlign) ? raw.addressBarAlign : DEFAULT_APPEARANCE.addressBarAlign,
-    showNavButtons: typeof raw.showNavButtons === 'boolean' ? raw.showNavButtons : DEFAULT_APPEARANCE.showNavButtons,
-    showBookmarkStar: typeof raw.showBookmarkStar === 'boolean' ? raw.showBookmarkStar : DEFAULT_APPEARANCE.showBookmarkStar,
-    showExtensions: typeof raw.showExtensions === 'boolean' ? raw.showExtensions : DEFAULT_APPEARANCE.showExtensions,
+    showNavButtons: legacyFlags.showNavButtons,
+    showBookmarkStar: legacyFlags.showBookmarkStar,
+    showExtensions: legacyFlags.showExtensions,
+    toolbarItems,
     menuBarStyle: isMenuBarStyle(raw.menuBarStyle) ? raw.menuBarStyle : DEFAULT_APPEARANCE.menuBarStyle,
     bookmarkBar: isBookmarkBarMode(raw.bookmarkBar) ? raw.bookmarkBar : DEFAULT_APPEARANCE.bookmarkBar,
     pageGap: clampInt(raw.pageGap, APPEARANCE_LIMITS.pageGap.min, APPEARANCE_LIMITS.pageGap.max, DEFAULT_APPEARANCE.pageGap),
     pageRadius: clampInt(raw.pageRadius, APPEARANCE_LIMITS.pageRadius.min, APPEARANCE_LIMITS.pageRadius.max, DEFAULT_APPEARANCE.pageRadius),
     pageShadow: typeof raw.pageShadow === 'boolean' ? raw.pageShadow : DEFAULT_APPEARANCE.pageShadow,
-    motion: isMotionMode(raw.motion) ? raw.motion : DEFAULT_APPEARANCE.motion
+    motion: isMotionMode(raw.motion) ? raw.motion : DEFAULT_APPEARANCE.motion,
+    customCssEnabled: typeof raw.customCssEnabled === 'boolean' ? raw.customCssEnabled : DEFAULT_APPEARANCE.customCssEnabled,
+    customCss: sanitizeCustomCss(raw.customCss),
+    enabledMods: sanitizeEnabledMods(raw.enabledMods)
   }
 }
 
 /** Applies a partial appearance update to current appearance settings, ignoring invalid/unknown fields. */
 export function mergeAppearance(current: AppearanceSettings, patch: unknown): AppearanceSettings {
-  const next: AppearanceSettings = { ...current }
+  const next: AppearanceSettings = {
+    ...current,
+    toolbarItems: sanitizeToolbarItems(current.toolbarItems),
+    enabledMods: sanitizeEnabledMods(current.enabledMods)
+  }
   if (!isPlainObject(patch)) return next
   const own = (k: string): boolean => Object.prototype.hasOwnProperty.call(patch, k)
   if (own('preset') && isThemePresetId(patch.preset)) next.preset = patch.preset
@@ -656,6 +715,7 @@ export function mergeAppearance(current: AppearanceSettings, patch: unknown): Ap
   if (own('textScale') && typeof patch.textScale === 'number' && Number.isFinite(patch.textScale)) {
     next.textScale = clampInt(patch.textScale, APPEARANCE_LIMITS.textScale.min, APPEARANCE_LIMITS.textScale.max, next.textScale)
   }
+  if (own('tabLayout') && isTabLayout(patch.tabLayout)) next.tabLayout = patch.tabLayout
   if (own('sidebarSide') && isSidebarSide(patch.sidebarSide)) next.sidebarSide = patch.sidebarSide
   if (own('sidebarWidth') && typeof patch.sidebarWidth === 'number' && Number.isFinite(patch.sidebarWidth)) {
     next.sidebarWidth = clampInt(patch.sidebarWidth, APPEARANCE_LIMITS.sidebarWidth.min, APPEARANCE_LIMITS.sidebarWidth.max, next.sidebarWidth)
@@ -663,9 +723,34 @@ export function mergeAppearance(current: AppearanceSettings, patch: unknown): Ap
   if (own('translucentSidebar') && typeof patch.translucentSidebar === 'boolean') next.translucentSidebar = patch.translucentSidebar
   if (own('tabCloseButtons') && isTabCloseButtonsMode(patch.tabCloseButtons)) next.tabCloseButtons = patch.tabCloseButtons
   if (own('addressBarAlign') && isAddressBarAlign(patch.addressBarAlign)) next.addressBarAlign = patch.addressBarAlign
-  if (own('showNavButtons') && typeof patch.showNavButtons === 'boolean') next.showNavButtons = patch.showNavButtons
-  if (own('showBookmarkStar') && typeof patch.showBookmarkStar === 'boolean') next.showBookmarkStar = patch.showBookmarkStar
-  if (own('showExtensions') && typeof patch.showExtensions === 'boolean') next.showExtensions = patch.showExtensions
+  if (own('toolbarItems') && Array.isArray(patch.toolbarItems)) {
+    next.toolbarItems = sanitizeToolbarItems(patch.toolbarItems)
+  } else {
+    let items = [...next.toolbarItems]
+    if (own('showNavButtons') && typeof patch.showNavButtons === 'boolean') {
+      items = items.filter((id) => id !== 'back' && id !== 'forward' && id !== 'reload')
+      if (patch.showNavButtons) {
+        const addrIdx = Math.max(0, items.indexOf('address-bar'))
+        items.splice(addrIdx, 0, 'back', 'forward', 'reload')
+      }
+    }
+    if (own('showBookmarkStar') && typeof patch.showBookmarkStar === 'boolean') {
+      items = items.filter((id) => id !== 'bookmark-star')
+      if (patch.showBookmarkStar) {
+        const addrIdx = items.indexOf('address-bar')
+        items.splice(addrIdx >= 0 ? addrIdx + 1 : items.length, 0, 'bookmark-star')
+      }
+    }
+    if (own('showExtensions') && typeof patch.showExtensions === 'boolean') {
+      items = items.filter((id) => id !== 'extensions')
+      if (patch.showExtensions) items.push('extensions')
+    }
+    next.toolbarItems = sanitizeToolbarItems(items)
+  }
+  const flags = deriveLegacyToolbarFlags(next.toolbarItems)
+  next.showNavButtons = flags.showNavButtons
+  next.showBookmarkStar = flags.showBookmarkStar
+  next.showExtensions = flags.showExtensions
   if (own('menuBarStyle') && isMenuBarStyle(patch.menuBarStyle)) next.menuBarStyle = patch.menuBarStyle
   if (own('bookmarkBar') && isBookmarkBarMode(patch.bookmarkBar)) next.bookmarkBar = patch.bookmarkBar
   if (own('pageGap') && typeof patch.pageGap === 'number' && Number.isFinite(patch.pageGap)) {
@@ -676,6 +761,9 @@ export function mergeAppearance(current: AppearanceSettings, patch: unknown): Ap
   }
   if (own('pageShadow') && typeof patch.pageShadow === 'boolean') next.pageShadow = patch.pageShadow
   if (own('motion') && isMotionMode(patch.motion)) next.motion = patch.motion
+  if (own('customCssEnabled') && typeof patch.customCssEnabled === 'boolean') next.customCssEnabled = patch.customCssEnabled
+  if (own('customCss') && typeof patch.customCss === 'string') next.customCss = sanitizeCustomCss(patch.customCss)
+  if (own('enabledMods') && Array.isArray(patch.enabledMods)) next.enabledMods = sanitizeEnabledMods(patch.enabledMods)
   return next
 }
 
@@ -876,6 +964,10 @@ export interface ResolvedAppearance {
   sidebarWidth: number
   vars: Record<string, string>
   attrs: Record<string, string>
+  /** Sanitized CSS (enabled mods + user custom CSS) for Orbit UI windows only, or '' in safe mode. */
+  customCss: string
+  /** True when safe mode (--safe-mode or Shift on launch) has disabled custom CSS for this session. */
+  safeMode: boolean
 }
 
 export function getThemePreset(id: ThemePresetId): ThemePresetDefinition {
@@ -886,7 +978,8 @@ export function resolveAppearanceTokens(
   appearance: AppearanceSettings,
   isDark: boolean,
   supportsAcrylic: boolean,
-  systemReducedMotion = false
+  systemReducedMotion = false,
+  safeMode = false
 ): ResolvedAppearance {
   const presetDef = getThemePreset(appearance.preset)
   const pal = isDark ? presetDef.dark : presetDef.light
@@ -1000,6 +1093,7 @@ export function resolveAppearanceTokens(
     material: effectiveMaterial,
     density: appearance.density,
     motion: effectiveMotion,
+    tabLayout: appearance.tabLayout,
     sidebarSide: appearance.sidebarSide,
     tabClose: appearance.tabCloseButtons,
     addrAlign: appearance.addressBarAlign
@@ -1018,7 +1112,14 @@ export function resolveAppearanceTokens(
     sidebarSide: appearance.sidebarSide,
     sidebarWidth: appearance.sidebarWidth,
     vars,
-    attrs
+    attrs,
+    customCss: buildEffectiveCustomCss({
+      customCssEnabled: appearance.customCssEnabled,
+      customCss: appearance.customCss,
+      enabledMods: appearance.enabledMods,
+      safeMode
+    }),
+    safeMode
   }
 }
 
@@ -1026,7 +1127,7 @@ export function resolveAppearanceTokens(
 
 export const THEME_EXPORT_FORMAT = 'veyra-orbit-theme'
 export const THEME_EXPORT_VERSION = 1
-const MAX_THEME_JSON_BYTES = 32_768
+const MAX_THEME_JSON_BYTES = 131_072
 
 export interface ThemeExportEnvelope {
   format: typeof THEME_EXPORT_FORMAT
@@ -1063,7 +1164,7 @@ export function parseImportedAppearanceJson(rawJson: unknown): ThemeImportResult
     return { ok: false, error: 'Theme file is empty.' }
   }
   if (rawJson.length > MAX_THEME_JSON_BYTES) {
-    return { ok: false, error: 'Theme file is too large (max 32 KB).' }
+    return { ok: false, error: 'Theme file is too large (max 128 KB).' }
   }
   let parsed: unknown
   try {

@@ -3,6 +3,7 @@
  * Pure, so it's tested on its own (tests/suggest.test.ts).
  */
 import { SEARCH_URL, buildSearchUrl, displayUrl, toUrl } from './url.ts'
+import { buildEngineSearchUrl, parseKeywordSearch, type SearchEngine } from './search.ts'
 
 export interface Candidate {
   url: string
@@ -18,7 +19,7 @@ export interface Candidate {
 }
 
 export type Suggestion =
-  | { kind: 'search'; text: string; url: string }
+  | { kind: 'search'; text: string; url: string; engineName?: string; engineKeyword?: string }
   | { kind: 'url'; url: string }
   | { kind: 'tab'; url: string; title: string; tabId: number }
   | { kind: 'page'; url: string; title: string; bookmarked: boolean }
@@ -83,14 +84,36 @@ export function score(c: Candidate, input: string, now: number): number {
  * The list under the address bar. The first row is always what Enter does with the text as typed
  * (go to the address, or search for it).
  */
-export function suggest(input: string, candidates: Candidate[], now = Date.now(), max = 7, searchUrl = SEARCH_URL): Suggestion[] {
+export function suggest(
+  input: string,
+  candidates: Candidate[],
+  now = Date.now(),
+  max = 7,
+  searchUrl = SEARCH_URL,
+  engines?: readonly SearchEngine[]
+): Suggestion[] {
   const text = input.trim()
   if (!text) return []
+
+  const kwMatch = engines && engines.length > 0 ? parseKeywordSearch(input, engines) : null
+  if (kwMatch && kwMatch.query) {
+    return [
+      {
+        kind: 'search',
+        text: kwMatch.query,
+        url: buildEngineSearchUrl(kwMatch.query, kwMatch.engine),
+        engineName: kwMatch.engine.name,
+        engineKeyword: kwMatch.engine.keyword
+      }
+    ]
+  }
+
   const target = toUrl(text, searchUrl)
+  const defaultSearchTarget = buildSearchUrl(text, searchUrl)
   const out: Suggestion[] = []
   const seen = new Set<string>()
 
-  if (target && !target.startsWith(searchUrl)) {
+  if (target && target !== defaultSearchTarget) {
     out.push({ kind: 'url', url: target })
     seen.add(target)
   }

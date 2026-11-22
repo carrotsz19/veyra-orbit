@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Check } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Check, ShieldAlert } from 'lucide-react'
 import type {
   AddressBarAlign,
   AppearancePatch,
   BookmarkBarMode,
+  BuiltinModId,
   MenuBarStyle,
   MotionMode,
   SettingsPatch,
   SettingsView,
   SidebarSide,
   TabCloseButtonsMode,
+  TabLayout,
   ThemeSource,
   UiDensity
 } from '@shared/types'
@@ -17,12 +19,15 @@ import {
   ACCENT_SWATCHES,
   APPEARANCE_LIMITS,
   DEFAULT_APPEARANCE,
+  SIDEBAR_WIDTH_PRESETS,
   THEME_PRESETS,
   deriveAccentTokens,
   getThemePreset,
   normalizeHexColor
 } from '@shared/appearance'
+import { BUILTIN_MODS, MAX_CUSTOM_CSS_BYTES, utf8ByteLength } from '@shared/customCss'
 import { SegmentedControl, type SegmentedOption } from './SegmentedControl'
+import { ToolbarEditor } from './ToolbarEditor'
 
 const api = window.veyra
 
@@ -42,6 +47,11 @@ const MOTIONS: readonly SegmentedOption<MotionMode>[] = [
   { value: 'full', label: 'Full' },
   { value: 'reduced', label: 'Reduced' },
   { value: 'off', label: 'Off' }
+]
+
+const TAB_LAYOUT_OPTIONS: readonly SegmentedOption<TabLayout>[] = [
+  { value: 'sidebar', label: 'Sidebar (vertical)' },
+  { value: 'top', label: 'Top bar (horizontal)' }
 ]
 
 const SIDEBAR_SIDES: readonly SegmentedOption<SidebarSide>[] = [
@@ -84,6 +94,8 @@ interface Props {
 export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Props): React.JSX.Element {
   const app = settings.appearance
   const [hexDraft, setHexDraft] = useState(app.accent)
+  const [cssDraft, setCssDraft] = useState(app.customCss)
+  const cssGutterRef = useRef<HTMLDivElement>(null)
   const [ioStatus, setIoStatus] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [systemDark, setSystemDark] = useState(() =>
     typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -95,6 +107,10 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
   useEffect(() => {
     setHexDraft(app.accent)
   }, [app.accent])
+
+  useEffect(() => {
+    setCssDraft(app.customCss)
+  }, [app.customCss])
 
   useEffect(() => {
     const mqDark = window.matchMedia('(prefers-color-scheme: dark)')
@@ -396,75 +412,106 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
         </div>
       </div>
 
-      {/* Sidebar */}
-      <h3 className="set-subhead">Sidebar</h3>
+      {/* Tabs & sidebar */}
+      <h3 className="set-subhead">Tabs &amp; sidebar</h3>
       <div className="set-card">
         <div className="set-row">
           <div className="set-row-info">
-            <div className="set-label">Sidebar position</div>
-            <div className="set-desc">Place vertical tabs on the left or right edge of the window.</div>
+            <div className="set-label">Tab layout</div>
+            <div className="set-desc">Keep vertical tabs in the sidebar or use a classic horizontal tab strip on top.</div>
           </div>
           <SegmentedControl
-            options={SIDEBAR_SIDES}
-            value={app.sidebarSide}
-            onChange={(side) => patchApp({ sidebarSide: side })}
-            ariaLabel="Sidebar position"
+            options={TAB_LAYOUT_OPTIONS}
+            value={app.tabLayout}
+            onChange={(layout) => patchApp({ tabLayout: layout })}
+            ariaLabel="Tab layout"
           />
         </div>
 
         <div className="set-row">
           <div className="set-row-info">
-            <div className="set-label">Sidebar width</div>
-            <div className="set-desc">You can also drag the inner edge of the sidebar to resize it live.</div>
-          </div>
-          <div className="set-slider-wrap">
-            <input
-              type="range"
-              className="set-slider"
-              aria-label="Sidebar width"
-              min={APPEARANCE_LIMITS.sidebarWidth.min}
-              max={APPEARANCE_LIMITS.sidebarWidth.max}
-              step={4}
-              value={app.sidebarWidth}
-              onChange={(e) => patchApp({ sidebarWidth: Number(e.target.value) })}
-            />
-            <span className="set-slider-val">{app.sidebarWidth} px</span>
-          </div>
-        </div>
-
-        <div className="set-row">
-          <div className="set-row-info">
-            <div className="set-label">Translucent sidebar</div>
-            <div className="set-desc">
-              {settings.supportsAcrylic
-                ? 'Subtle Windows 11 acrylic backdrop behind the sidebar and title bar.'
-                : 'Uses a solid theme surface on systems without acrylic backdrop support.'}
-            </div>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={app.translucentSidebar}
-            aria-label="Translucent sidebar"
-            className={`set-switch ${app.translucentSidebar ? 'on' : ''}`}
-            onClick={() => patchApp({ translucentSidebar: !app.translucentSidebar })}
-          >
-            <span className="set-switch-thumb" />
-          </button>
-        </div>
-
-        <div className="set-row">
-          <div className="set-row-info">
-            <div className="set-label">Tab close buttons</div>
+            <div className="set-label">Show tab close buttons</div>
             <div className="set-desc">Show the close button only on hover and active tabs, or on every tab.</div>
           </div>
           <SegmentedControl
             options={TAB_CLOSE_OPTIONS}
             value={app.tabCloseButtons}
             onChange={(mode) => patchApp({ tabCloseButtons: mode })}
-            ariaLabel="Tab close buttons"
+            ariaLabel="Show tab close buttons"
           />
         </div>
+
+        {app.tabLayout === 'sidebar' && (
+          <>
+            <div className="set-row">
+              <div className="set-row-info">
+                <div className="set-label">Sidebar position</div>
+                <div className="set-desc">Place vertical tabs on the left or right edge of the window.</div>
+              </div>
+              <SegmentedControl
+                options={SIDEBAR_SIDES}
+                value={app.sidebarSide}
+                onChange={(side) => patchApp({ sidebarSide: side })}
+                ariaLabel="Sidebar position"
+              />
+            </div>
+
+            <div className="set-row stack">
+              <div className="set-row-top">
+                <div className="set-row-info">
+                  <div className="set-label">Sidebar width</div>
+                  <div className="set-desc">Choose a preset or drag the inner edge of the sidebar to resize it live.</div>
+                </div>
+                <div className="set-pills" role="group" aria-label="Sidebar width presets">
+                  {SIDEBAR_WIDTH_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      className={`set-pill ${app.sidebarWidth === preset.width ? 'on' : ''}`}
+                      onClick={() => patchApp({ sidebarWidth: preset.width })}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="set-slider-wrap">
+                <input
+                  type="range"
+                  className="set-slider"
+                  aria-label="Sidebar width"
+                  min={APPEARANCE_LIMITS.sidebarWidth.min}
+                  max={APPEARANCE_LIMITS.sidebarWidth.max}
+                  step={4}
+                  value={app.sidebarWidth}
+                  onChange={(e) => patchApp({ sidebarWidth: Number(e.target.value) })}
+                />
+                <span className="set-slider-val">{app.sidebarWidth} px</span>
+              </div>
+            </div>
+
+            <div className="set-row">
+              <div className="set-row-info">
+                <div className="set-label">Translucent sidebar</div>
+                <div className="set-desc">
+                  {settings.supportsAcrylic
+                    ? 'Subtle Windows 11 acrylic backdrop behind the sidebar and title bar.'
+                    : 'Uses a solid theme surface on systems without acrylic backdrop support.'}
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={app.translucentSidebar}
+                aria-label="Translucent sidebar"
+                className={`set-switch ${app.translucentSidebar ? 'on' : ''}`}
+                onClick={() => patchApp({ translucentSidebar: !app.translucentSidebar })}
+              >
+                <span className="set-switch-thumb" />
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Toolbar & Window */}
@@ -509,37 +556,17 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
           />
         </div>
 
-        <div className="set-row stack">
+        <div className="set-row stack" id="set-toolbar">
           <div className="set-row-info">
             <div className="set-label">Toolbar buttons</div>
-            <div className="set-desc">Choose which controls appear around the address bar.</div>
+            <div className="set-desc">
+              Drag buttons between the toolbar and available list, or right-click the toolbar and choose “Customize toolbar…”.
+            </div>
           </div>
-          <div className="set-checks">
-            <label className="set-check">
-              <input
-                type="checkbox"
-                checked={app.showNavButtons}
-                onChange={(e) => patchApp({ showNavButtons: e.target.checked })}
-              />
-              <span>Back, forward &amp; reload</span>
-            </label>
-            <label className="set-check">
-              <input
-                type="checkbox"
-                checked={app.showBookmarkStar}
-                onChange={(e) => patchApp({ showBookmarkStar: e.target.checked })}
-              />
-              <span>Bookmark star</span>
-            </label>
-            <label className="set-check">
-              <input
-                type="checkbox"
-                checked={app.showExtensions}
-                onChange={(e) => patchApp({ showExtensions: e.target.checked })}
-              />
-              <span>Extensions buttons</span>
-            </label>
-          </div>
+          <ToolbarEditor
+            items={app.toolbarItems}
+            onChange={(next) => patchApp({ toolbarItems: next })}
+          />
         </div>
 
         <div className="set-row">
@@ -548,13 +575,17 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
             <div className="set-desc">
               Hide the sidebar and toolbar so the page fills the window. Move to the edge to reveal them (<kbd>Ctrl+Shift+S</kbd>).
             </div>
+            {app.tabLayout === 'top' && (
+              <div className="set-note">Compact mode is available when tabs are in the sidebar.</div>
+            )}
           </div>
           <button
             type="button"
             role="switch"
-            aria-checked={settings.compactMode}
+            disabled={app.tabLayout === 'top'}
+            aria-checked={app.tabLayout !== 'top' && settings.compactMode}
             aria-label="Compact mode"
-            className={`set-switch ${settings.compactMode ? 'on' : ''}`}
+            className={`set-switch ${app.tabLayout !== 'top' && settings.compactMode ? 'on' : ''}`}
             onClick={() => onPatch({ compactMode: !settings.compactMode })}
           >
             <span className="set-switch-thumb" />
@@ -666,6 +697,127 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
             onChange={(m) => patchApp({ motion: m })}
             ariaLabel="Motion"
           />
+        </div>
+      </div>
+
+      {/* Advanced: Mods & Custom CSS */}
+      <h3 className="set-subhead" id="set-appearance-advanced">Advanced — Mods &amp; Custom CSS</h3>
+      {settings.safeMode && (
+        <div className="app-io-banner err css-safe-banner" role="status" aria-live="polite">
+          <ShieldAlert size={14} aria-hidden />
+          <span>
+            Safe mode is active — Custom CSS and mods are disabled for this session. Restart Orbit without holding Shift or{' '}
+            <code>--safe-mode</code> to re-enable them.
+          </span>
+        </div>
+      )}
+      <div className="set-card">
+        {BUILTIN_MODS.map((mod) => {
+          const enabled = app.enabledMods.includes(mod.id)
+          const toggleMod = (): void => {
+            const next: BuiltinModId[] = enabled
+              ? app.enabledMods.filter((id) => id !== mod.id)
+              : [...app.enabledMods, mod.id]
+            patchApp({ enabledMods: next })
+          }
+          return (
+            <div key={mod.id} className="set-row">
+              <div className="set-row-info">
+                <div className="set-label">{mod.name}</div>
+                <div className="set-desc">{mod.description}</div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={enabled}
+                aria-label={mod.name}
+                className={`set-switch ${enabled ? 'on' : ''}`}
+                onClick={toggleMod}
+              >
+                <span className="set-switch-thumb" />
+              </button>
+            </div>
+          )
+        })}
+
+        <div className="set-row">
+          <div className="set-row-info">
+            <div className="set-label">Custom CSS</div>
+            <div className="set-desc">
+              Style Orbit&apos;s own interface windows only — never applied to web pages. Hold <kbd>Shift</kbd> while launching or pass{' '}
+              <code>--safe-mode</code> to recover if a style breaks the UI.
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={app.customCssEnabled}
+            aria-label="Enable custom CSS"
+            className={`set-switch ${app.customCssEnabled ? 'on' : ''}`}
+            onClick={() => patchApp({ customCssEnabled: !app.customCssEnabled })}
+          >
+            <span className="set-switch-thumb" />
+          </button>
+        </div>
+
+        <div className="set-row stack">
+          <div className="css-editor-head">
+            <span className="set-desc">
+              <code>@import</code> and non-<code>data:</code> <code>url()</code> loads are stripped automatically.
+            </span>
+            <span className="css-byte-count">
+              {(utf8ByteLength(cssDraft) / 1024).toFixed(1)} / {Math.round(MAX_CUSTOM_CSS_BYTES / 1024)} KB
+            </span>
+          </div>
+          <div className="css-editor-wrap">
+            <div ref={cssGutterRef} className="css-editor-gutter" aria-hidden>
+              {Array.from({ length: Math.max(6, cssDraft.split('\n').length) }, (_, i) => (
+                <div key={i}>{i + 1}</div>
+              ))}
+            </div>
+            <textarea
+              className="css-editor-input"
+              spellCheck={false}
+              aria-label="Custom CSS editor"
+              placeholder={'/* Example: soften sidebar tabs */\n.tab.on {\n  border-radius: 12px;\n}'}
+              value={cssDraft}
+              onChange={(e) => setCssDraft(e.target.value)}
+              onScroll={(e) => {
+                if (cssGutterRef.current) cssGutterRef.current.scrollTop = e.currentTarget.scrollTop
+              }}
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                  e.preventDefault()
+                  patchApp({ customCss: cssDraft, customCssEnabled: true })
+                }
+              }}
+            />
+          </div>
+          <div className="css-editor-actions">
+            <button
+              type="button"
+              className="btn sm primary"
+              disabled={cssDraft === app.customCss}
+              onClick={() => {
+                patchApp({ customCss: cssDraft })
+                setIoStatus({ kind: 'ok', text: 'Custom CSS saved and applied.' })
+              }}
+            >
+              Apply CSS
+            </button>
+            {cssDraft && (
+              <button
+                type="button"
+                className="btn sm ghost"
+                onClick={() => {
+                  setCssDraft('')
+                  patchApp({ customCss: '' })
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </section>

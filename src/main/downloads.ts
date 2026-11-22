@@ -78,6 +78,40 @@ export class Downloads {
     return this.items.map((entry) => ({ ...entry.info }))
   }
 
+  /** Records a file saved directly by Orbit (such as a screenshot PNG) in the Downloads list. */
+  recordSavedFile(savePath: string, sizeBytes: number, sourceUrl = ''): DownloadInfo {
+    const cleanPath = resolve(savePath)
+    const filename = basename(cleanPath) || 'Screenshot.png'
+    const safeBytes = Number.isFinite(sizeBytes) && sizeBytes >= 0 ? Math.round(sizeBytes) : 0
+    const entry: TrackedDownload = {
+      item: null,
+      fileIcon: null,
+      info: {
+        id: this.nextId++,
+        filename,
+        savePath: cleanPath,
+        url: sourceUrl,
+        state: 'completed',
+        receivedBytes: safeBytes,
+        totalBytes: safeBytes,
+        speed: 0,
+        canResume: false,
+        startedAt: Date.now()
+      }
+    }
+    this.items.unshift(entry)
+    void app
+      .getFileIcon(cleanPath, { size: 'normal' })
+      .then((img) => {
+        if (!img.isEmpty()) entry.fileIcon = img
+      })
+      .catch(() => {
+        /* fallback icon will be used */
+      })
+    this.emitNow()
+    return { ...entry.info }
+  }
+
   private handle(item: DownloadItem): void {
     const { dir, askWhereToSave } = this.getConfig()
     const baseDir = resolve(dir)
