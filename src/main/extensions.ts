@@ -63,7 +63,8 @@ import { parseAndVerifyCrx3 } from '../shared/crx3'
 import { clampPopupBounds } from '../shared/menu'
 import { isAllowedUrl } from '../shared/url'
 import type { Rect } from '../shared/types'
-import { buildOrbitCompatDnrRules, chromeIdentity, detachSessionCompat } from './compat'
+import { ORBIT_COMPAT_READY_PREFIX, buildOrbitCompatWorkerScript } from '../shared/compat'
+import { attachSessionCompat, buildOrbitCompatDnrRules, chromeIdentity, detachSessionCompat } from './compat'
 
 // Internal structural shapes for electron-chrome-extensions@4.10.0 patching.
 interface EceHandlerEntry {
@@ -306,7 +307,9 @@ function findLatestStoreVersionDir(extensionsDir: string, extId: string): string
 
 /**
  * Generates (or refreshes) Orbit's hidden built-in DNR compatibility extension on disk.
- * Uses a static MV3 declarativeNetRequest ruleset (zero background service worker overhead).
+ * Uses a tiny MV3 background service worker to install session DNR rules via
+ * `declarativeNetRequest.updateSessionRules`, because Electron's `loadExtension`
+ * does not index static `declarative_net_request.rule_resources`.
  */
 function ensureOrbitCompatExtensionDir(userDataDir: string): string {
   const dir = join(userDataDir, 'internal-extensions', 'orbit-compat')
@@ -315,30 +318,24 @@ function ensureOrbitCompatExtensionDir(userDataDir: string): string {
   const manifest = {
     manifest_version: 3,
     name: 'Veyra Orbit Compatibility',
-    version: '1.0.0',
+    version: '1.1.0',
     description: 'Internal browser compatibility rules for Veyra Orbit.',
     permissions: ['declarativeNetRequest'],
     host_permissions: ['<all_urls>'],
-    declarative_net_request: {
-      rule_resources: [
-        {
-          id: 'orbit_compat',
-          enabled: true,
-          path: 'rules.json'
-        }
-      ]
+    background: {
+      service_worker: 'bg.js'
     }
   }
   const rules = buildOrbitCompatDnrRules(id)
   const manifestStr = JSON.stringify(manifest, null, 2) + '\n'
-  const rulesStr = JSON.stringify(rules, null, 2) + '\n'
+  const workerStr = buildOrbitCompatWorkerScript(rules)
   const manifestPath = join(dir, 'manifest.json')
-  const rulesPath = join(dir, 'rules.json')
+  const workerPath = join(dir, 'bg.js')
   if (!existsSync(manifestPath) || readFileSync(manifestPath, 'utf8') !== manifestStr) {
     writeFileSync(manifestPath, manifestStr, 'utf8')
   }
-  if (!existsSync(rulesPath) || readFileSync(rulesPath, 'utf8') !== rulesStr) {
-    writeFileSync(rulesPath, rulesStr, 'utf8')
+  if (!existsSync(workerPath) || readFileSync(workerPath, 'utf8') !== workerStr) {
+    writeFileSync(workerPath, workerStr, 'utf8')
   }
   return dir
 }
@@ -485,8 +482,9 @@ export class ExtensionManager {
     const existing = this.sessions.get(partition)
     if (existing) return existing.readyPromise
 
-    // Ensure session.webRequest.onBeforeSendHeaders is NOT attached (it disables DNR!).
-    detachSessionCompat(sess)
+    // Bridge header rewrites with session.webRequest until orbit-compat confirms its
+    // DNR session rules are active, then detach webRequest so extension DNR stays active.
+    attachSessionCompat(sess)
 
     const ecePreload = resolvePreloadFile('chrome-extension-api.preload.js')
     const compatPreload = resolvePreloadFile('ext-compat.js')
@@ -769,14 +767,76 @@ export class ExtensionManager {
     }
   }
 
-  private async initializeSessionExtensions(st: SessionExtState): Promise<void> {
-    // 1. Always load Orbit's hidden internal DNR compatibility extension first.
+  private async loadAndAwaitOrbitCompat(st: SessionExtState): Promise<boolean> {
+    const seenReadyIds = new Set<string>()
+    let expectedId: string | null = null
+    let resolveReady: ((ok: boolean) => void) | null = null
+    const readyPromise = new Promise<boolean>((resolve) => {
+      resolveReady = resolve
+    })
+
+    const onConsole = (_event: Electron.Event, details: { message?: string }): void => {
+      const msg = typeof details?.message === 'string' ? details.message : ''
+      if (!msg.startsWith(ORBIT_COMPAT_READY_PREFIX)) return
+      const id = msg.slice(ORBIT_COMPAT_READY_PREFIX.length)
+      seenReadyIds.add(id)
+      if (expectedId && id === expectedId) {
+        resolveReady?.(true)
+      }
+    }
+
+    st.session.serviceWorkers.on('console-message', onConsole)
     try {
       const compatExt = await st.session.extensions.loadExtension(this.compatDir, { allowFileAccess: false })
       st.compatExtId = compatExt.id
       this.compatExtIds.add(compatExt.id)
+      expectedId = compatExt.id
+
+      if (seenReadyIds.has(compatExt.id)) {
+        return true
+      }
+
+      // Give Electron a short moment to auto-start the MV3 service worker, then nudge it if needed.
+      const scope = `chrome-extension://${compatExt.id}/`
+      const nudgeTimer = setTimeout(() => {
+        if (seenReadyIds.has(compatExt.id)) return
+        void st.session.serviceWorkers.startWorkerForScope(scope).catch(() => {})
+      }, 180)
+      const nudgeTimer2 = setTimeout(() => {
+        if (seenReadyIds.has(compatExt.id)) return
+        void st.session.serviceWorkers.startWorkerForScope(scope).catch(() => {})
+      }, 750)
+      const timeoutTimer = setTimeout(() => resolveReady?.(false), 3000)
+
+      try {
+        return await readyPromise
+      } finally {
+        clearTimeout(nudgeTimer)
+        clearTimeout(nudgeTimer2)
+        clearTimeout(timeoutTimer)
+      }
     } catch (err) {
       console.error('[extensions] Failed to load orbit-compat DNR extension:', err)
+      return false
+    } finally {
+      st.session.serviceWorkers.off('console-message', onConsole)
+    }
+  }
+
+  private async initializeSessionExtensions(st: SessionExtState): Promise<void> {
+    // 1. Always load Orbit's hidden internal DNR compatibility extension first and wait for its
+    //    session rules to commit before detaching the temporary webRequest fallback.
+    const compatReady = await this.loadAndAwaitOrbitCompat(st)
+    if (compatReady) {
+      detachSessionCompat(st.session)
+    } else {
+      // Even if orbit-compat failed to confirm within the startup window, detach webRequest when
+      // user extensions are installed so extension DNR isn't blocked; otherwise keep fallback active.
+      const hasEnabledUserExt = this.registry.extensions.some(
+        (e) => e.enabled && (e.source !== 'unpacked' || this.registry.developerMode)
+      )
+      if (hasEnabledUserExt) detachSessionCompat(st.session)
+      console.error(`[extensions] orbit-compat DNR rules did not confirm ready in ${st.partition}`)
     }
 
     // 2. Load enabled user extensions into this session.

@@ -3,7 +3,10 @@ import assert from 'node:assert/strict'
 import {
   applyCompatRequestHeaders,
   buildChromeIdentity,
+  buildOrbitCompatDnrRules,
+  buildOrbitCompatWorkerScript,
   isGoogleAuthUrl,
+  ORBIT_COMPAT_READY_PREFIX,
   WEBAUTHN_CONDITIONAL_SHIM
 } from '../src/shared/compat.ts'
 
@@ -138,4 +141,25 @@ test('the Google sign-in Firefox shape only acts on accounts.google.com', async 
   assert.deepEqual(other.uad, { brands: [] })
   assert.equal(other.vendor, 'Google Inc.')
   assert.deepEqual(other.chrome, {})
+})
+
+test('orbit-compat DNR rules exclude accounts.google.com from Chrome hints and apply Firefox UA via session rules worker', () => {
+  const id = buildChromeIdentity({ chromeVersion: '156.0.8078.96', platform: 'win32', arch: 'x64', osRelease: '10.0.26300' })
+  const rules = buildOrbitCompatDnrRules(id)
+  assert.equal(rules.length, 2)
+
+  const chromeRule = rules.find((r) => r.id === 1)!
+  assert.deepEqual(chromeRule.condition.excludedRequestDomains, ['accounts.google.com'])
+  assert.ok(chromeRule.action.requestHeaders.some((h) => h.header === 'Sec-CH-UA' && h.operation === 'set' && h.value === id.secChUa))
+
+  const googleRule = rules.find((r) => r.id === 2)!
+  assert.deepEqual(googleRule.condition.requestDomains, ['accounts.google.com'])
+  assert.ok(googleRule.action.requestHeaders.some((h) => h.header === 'User-Agent' && h.operation === 'set' && h.value === id.firefoxUserAgent))
+  assert.ok(googleRule.action.requestHeaders.some((h) => h.header === 'Sec-CH-UA' && h.operation === 'remove'))
+  assert.ok(googleRule.action.requestHeaders.some((h) => h.header === 'Sec-CH-UA-Full-Version-List' && h.operation === 'remove'))
+
+  const worker = buildOrbitCompatWorkerScript(rules)
+  assert.ok(worker.includes('updateSessionRules'))
+  assert.ok(worker.includes(JSON.stringify(ORBIT_COMPAT_READY_PREFIX)))
+  assert.ok(worker.includes(id.firefoxUserAgent))
 })

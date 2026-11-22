@@ -366,7 +366,7 @@ export class Tabs {
     view.setBackgroundColor('#ffffffff')
     this.radius(view, 10)
     if (tab.info.muted) view.webContents.setAudioMuted(true)
-    attachPageCompat(view.webContents)
+    attachPageCompat(view.webContents, tab.info.url || tab.pendingUrl)
     this.wire(tab, view)
     this.hooks.onTabViewCreated?.(view.webContents, tab.info.id, partition)
     return view
@@ -1630,8 +1630,8 @@ export class Tabs {
       this.create(url, { activate: disposition !== 'background-tab', after: info.id, workspaceId: info.workspaceId })
       return { action: 'deny' }
     })
-    wc.on('did-create-window', (popup) => {
-      attachPageCompat(popup.webContents)
+    wc.on('did-create-window', (popup, details) => {
+      attachPageCompat(popup.webContents, details.url)
       popup.webContents.on('will-navigate', (e, url) => {
         if (!isAllowedUrl(url)) {
           e.preventDefault()
