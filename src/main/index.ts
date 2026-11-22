@@ -66,7 +66,7 @@ function logSmoke(tag: string, data: unknown): void {
 const TITLE_BAR_H = 40
 const HOUR_MS = 3_600_000
 const CLEAR_RANGES = new Set<ClearDataRange>(['hour', 'day', 'all'])
-const COMPACT_POLL_MS = 60
+const COMPACT_POLL_MS = 100
 const COMPACT_HIDE_DELAY_MS = 240
 
 function overlay(): Electron.TitleBarOverlayOptions {
@@ -113,6 +113,14 @@ const COMPACT_SIDEBAR_W = 264
 const COMPACT_TITLEBAR_H = 52
 const COMPACT_TITLEBAR_OPEN_H = 380
 const COMPACT_MARGIN = 6
+
+function compactToolbarPinned(): boolean {
+  return compactPins.omnibox || compactPins.titleMenu || compactPins.dragging || compactPins.extPopup
+}
+
+function compactSidebarPinned(): boolean {
+  return compactPins.sidebar || compactPins.menu
+}
 
 function isAnyOrbitFocused(): boolean {
   return (
@@ -1045,7 +1053,11 @@ function createWindow(): void {
     if (settings?.get().compactMode) syncCompactPanels()
   })
   w.on('moved', () => {
-    if (settings?.get().compactMode) syncCompactPanels()
+    if (settings?.get().compactMode) {
+      compactHover = { sidebar: false, toolbar: false }
+      lastPolledCursor = null
+      syncCompactPanels()
+    }
   })
   w.on('enter-full-screen', () => {
     if (acrylic) {
@@ -1304,6 +1316,8 @@ ipcMain.on('compact-panel:drag-end', (e) => {
   const drag = compactDrag
   compactDrag = null
   compactPins.dragging = false
+  compactHover = { sidebar: false, toolbar: false }
+  lastPolledCursor = null
   if (drag?.moved && win && !win.isDestroyed() && !win.isFullScreen()) {
     const cursor = screen.getCursorScreenPoint()
     const workArea = screen.getDisplayNearestPoint(cursor).workArea
@@ -1314,8 +1328,15 @@ ipcMain.on('compact-panel:drag-end', (e) => {
       win.setBounds(snap.bounds)
     }
     syncCompactPanels()
-    sendWinState()
   }
+  // Clicking/dragging the floating titlebar moves OS focus onto that child window.
+  // Return focus to the main window so hiding the titlebar after the drag never drops
+  // Orbit's foreground focus (which would disable top-edge hover reveal).
+  if (win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && compactTitlebar.isFocused()) {
+    win.focus()
+  }
+  sendWinState()
+  if (settings?.get().compactMode) pollCompactCursor()
 })
 
 onSurface('tab:new', (t, input?: unknown) => {
@@ -1506,20 +1527,14 @@ onSurface('compact:pin', (_t, kind: unknown, pinned: unknown) => {
   const k = kind as CompactPinKind
   compactPins[k] = pinned === true
   if (settings?.get().compactMode) {
-    applyCompactTargets(
-      compactHover.sidebar || compactPins.sidebar || compactPins.menu,
-      compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu
-    )
+    applyCompactTargets(compactHover.sidebar || compactSidebarPinned(), compactHover.toolbar || compactToolbarPinned())
   }
 })
 onSurface('compact:hover', (_t, edge: unknown, hovering: unknown) => {
   if (edge !== 'sidebar' && edge !== 'toolbar') return
   compactHover[edge] = hovering === true
   if (settings?.get().compactMode && !tabs?.isPageFullscreen()) {
-    applyCompactTargets(
-      compactHover.sidebar || compactPins.sidebar || compactPins.menu,
-      compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu
-    )
+    applyCompactTargets(compactHover.sidebar || compactSidebarPinned(), compactHover.toolbar || compactToolbarPinned())
   }
 })
 on('bounds', (t, r: unknown) => {

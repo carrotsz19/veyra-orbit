@@ -17,6 +17,7 @@ import {
   type PaletteOpenState
 } from '../shared/palette'
 import { PEEK_TAB_ID, computePeekBounds, computePeekViewRect, type PeekState } from '../shared/peek'
+import { shouldRestoreParentFocusOnCompactHide } from '../shared/compact'
 import { isAllowedUrl } from '../shared/url'
 import { isSafeSubframeUrl, parseExternalAppUrl } from '../shared/external'
 import { attachPageCompat } from './compat'
@@ -553,13 +554,26 @@ export class CompactPanel {
     this.revealed = false
     if (!this.floating.isVisible()) return
     this.floating.send('compact-panel:visible', false)
-    if (immediate) {
+    const finishHide = (): void => {
+      const parentAlive = !this.parent.isDestroyed()
+      if (
+        shouldRestoreParentFocusOnCompactHide({
+          panelFocused: this.floating.isFocused(),
+          parentVisible: parentAlive && this.parent.isVisible(),
+          parentMinimized: parentAlive && this.parent.isMinimized()
+        })
+      ) {
+        this.parent.focus()
+      }
       this.floating.hide('asked')
+    }
+    if (immediate) {
+      finishHide()
       return
     }
     this.hideTimer = setTimeout(() => {
       this.hideTimer = null
-      if (!this.revealed) this.floating.hide('asked')
+      if (!this.revealed) finishHide()
     }, COMPACT_EXIT_MS)
   }
 

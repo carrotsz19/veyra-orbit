@@ -5,7 +5,8 @@ import {
   computeCompactZones,
   computeEdgeSnap,
   computeRestoreDragBounds,
-  pickActiveSection
+  pickActiveSection,
+  shouldRestoreParentFocusOnCompactHide
 } from '../src/shared/compact.ts'
 
 test('computeCompactZones triggers sidebar at left edge and toolbar at top edge with hysteresis', () => {
@@ -99,4 +100,25 @@ test('computeEdgeSnap detects top maximize and left/right half-screen snaps', ()
     bounds: { x: 960, y: 0, width: 960, height: 1040 }
   })
   assert.deepEqual(computeEdgeSnap({ x: 900, y: 400 }, wa), { kind: 'none' })
+})
+
+test('shouldRestoreParentFocusOnCompactHide restores parent focus only when a focused compact panel hides over a visible window', () => {
+  assert.equal(
+    shouldRestoreParentFocusOnCompactHide({ panelFocused: true, parentVisible: true, parentMinimized: false }),
+    true
+  )
+  // Another app took focus (panel already blurred): do not steal focus back
+  assert.equal(
+    shouldRestoreParentFocusOnCompactHide({ panelFocused: false, parentVisible: true, parentMinimized: false }),
+    false
+  )
+  // Parent hidden or minimized: do not focus
+  assert.equal(
+    shouldRestoreParentFocusOnCompactHide({ panelFocused: true, parentVisible: false, parentMinimized: false }),
+    false
+  )
+  assert.equal(
+    shouldRestoreParentFocusOnCompactHide({ panelFocused: true, parentVisible: true, parentMinimized: true }),
+    false
+  )
 })
