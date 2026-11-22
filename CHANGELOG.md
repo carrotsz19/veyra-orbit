@@ -4,6 +4,8 @@ All notable changes to Veyra Orbit are documented here.
 
 ## Unreleased
 
+## 26.11.9 — 2026-11-22
+
 - Screenshot tool: click the camera button in the toolbar, right-click any page → Take screenshot…, or press Ctrl+Shift+2 to capture the visible area, the full scrollable page, or a dragged selection area. Captures copy straight to your clipboard with a floating preview to Save PNG (saved into Downloads and shown in the sidebar downloads list) or Copy again. Works on `orbit://` pages too and never auto-saves in private workspaces.
 - Tab and window behaviour options in Settings → General: choose to reopen only pinned tabs on start, open links from other apps in a new tab or the current tab, place new tabs at the end of the list or after the current tab, select the tab to the right, left, or last used when closing a tab, and optionally confirm before closing a window with many open tabs.
 - Custom search engines and `!` keyword shortcuts in Settings → Search: add, edit, or remove `https://` search engines, set your default, and type shortcuts like `w cats` or `!w cats` in the address bar (with a live engine badge while typing). Includes built-in defaults for Google, DuckDuckGo, Bing, Brave, Ecosia, Wikipedia (`w`), YouTube (`yt`), GitHub (`gh`), and MDN (`mdn`).
