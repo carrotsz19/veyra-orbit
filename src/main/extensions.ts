@@ -45,12 +45,12 @@ import {
   hasManifestPermission,
   isAllowedWebStoreOrigin,
   isCookiePermittedByHostPermissions,
-  isSafeZipEntryPath,
   isUrlPermittedByHostPermissions,
   resolveAllowedExtensionTabUrl,
   sanitizeExtensionsRegistry,
   shouldLoadExtensionsForPartition,
   validateExtensionId,
+  validateZipEntryNames,
   type ExtensionActionView,
   type ExtensionInstallAsk,
   type ExtensionSummary,
@@ -1556,11 +1556,13 @@ export class ExtensionManager {
 
     const zip = new AdmZip(Buffer.from(verified.zipBytes))
     const entries = zip.getEntries()
-    if (entries.length === 0) throw new Error('CRX3 archive is empty')
-    for (const entry of entries) {
-      if (!isSafeZipEntryPath(entry.entryName)) {
-        throw new Error(`Unsafe path in CRX archive: ${entry.entryName}`)
+    const entryCheck = validateZipEntryNames(entries.map((e) => e.entryName))
+    if (!entryCheck.ok) {
+      if (entryCheck.reason === 'empty') throw new Error('CRX3 archive is empty')
+      if (entryCheck.reason === 'duplicate') {
+        throw new Error(`Duplicate entry in CRX archive: ${entryCheck.entry}`)
       }
+      throw new Error(`Unsafe path in CRX archive: ${entryCheck.entry}`)
     }
 
     const stagingDir = join(this.extensionsDir, extensionId, `.stage-${randomUUID()}`)

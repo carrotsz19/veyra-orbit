@@ -471,6 +471,49 @@ export function isSafeZipEntryPath(entryName: string): boolean {
   return true
 }
 
+export type ZipEntriesValidationResult =
+  | { ok: true }
+  | { ok: false; reason: 'empty' }
+  | { ok: false; reason: 'unsafe' | 'duplicate'; entry: string }
+
+/**
+ * Normalizes a safe ZIP entry path for collision detection across separators,
+ * redundant `.` segments, trailing slashes, and case-insensitive filesystems (Windows/macOS).
+ */
+function canonicalZipEntryKey(entryName: string): string {
+  const parts = entryName
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter((seg) => seg !== '' && seg !== '.')
+  return parts.join('/').toLowerCase()
+}
+
+/**
+ * Validates every entry name in a ZIP archive before extraction:
+ *  - rejects empty archives
+ *  - rejects unsafe paths (Zip-Slip, absolute paths, drive letters, null bytes)
+ *  - rejects duplicate or case/separator-colliding entry names (prevents getEntry() vs
+ *    extractAllTo() content mismatches)
+ */
+export function validateZipEntryNames(entryNames: readonly string[]): ZipEntriesValidationResult {
+  if (entryNames.length === 0) return { ok: false, reason: 'empty' }
+  const seen = new Set<string>()
+  for (const name of entryNames) {
+    if (!isSafeZipEntryPath(name)) {
+      return { ok: false, reason: 'unsafe', entry: name }
+    }
+    const key = canonicalZipEntryKey(name)
+    if (!key) {
+      return { ok: false, reason: 'unsafe', entry: name }
+    }
+    if (seen.has(key)) {
+      return { ok: false, reason: 'duplicate', entry: name }
+    }
+    seen.add(key)
+  }
+  return { ok: true }
+}
+
 // ---- Registry sanitization -------------------------------------------------
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
