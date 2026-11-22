@@ -41,7 +41,8 @@ test('sanitizeSettings returns safe defaults for non-objects and drops unknown k
     windowButtons: 'dots',
     updateMode: 'notify',
     appearance: DEFAULT_APPEARANCE,
-    startPage: DEFAULT_START_PAGE
+    startPage: DEFAULT_START_PAGE,
+    shortcuts: {}
   })
   assert.equal('extra' in cleaned, false)
 })
@@ -92,7 +93,8 @@ test('mergeSettings applies valid fields and ignores invalid or unknown ones', (
     windowButtons: 'dots',
     updateMode: 'notify',
     appearance: DEFAULT_APPEARANCE,
-    startPage: DEFAULT_START_PAGE
+    startPage: DEFAULT_START_PAGE,
+    shortcuts: {}
   })
   assert.deepEqual(mergeSettings(next, null), next)
   assert.deepEqual(mergeSettings(next, { downloadsDir: 'bad\nline' }), next)

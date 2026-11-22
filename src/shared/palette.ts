@@ -11,6 +11,7 @@ import { SEARCH_URL, buildSearchUrl, displayUrl, isAllowedUrl, isInternalUrl, to
 import { score, scoreCommand, type Candidate } from './suggest.ts'
 import { clampPopupBounds, type BoundsRect } from './menu.ts'
 import type { ThemeSource } from './settings.ts'
+import { formatShortcutLabel, resolveShortcuts, type ShortcutId, type ShortcutOverrides } from './shortcuts.ts'
 
 export type PaletteMode = 'command' | 'new-tab'
 
@@ -152,6 +153,7 @@ export interface PaletteContext {
   canReopenClosed: boolean
   theme: ThemeSource
   searchUrl?: string
+  shortcuts?: ShortcutOverrides
   now?: number
   maxItems?: number
 }
@@ -171,6 +173,7 @@ interface CommandDef {
 const SETTINGS_SECTIONS: readonly { id: string; label: string; keywords: string }[] = [
   { id: 'set-general', label: 'General & search settings', keywords: 'search engine startup new tab command bar start page' },
   { id: 'set-appearance', label: 'Appearance settings', keywords: 'theme light dark compact mode window buttons dots' },
+  { id: 'set-shortcuts', label: 'Keyboard shortcuts', keywords: 'hotkeys keybindings rebind shortcuts keys' },
   { id: 'set-performance', label: 'Performance & sleeping tabs', keywords: 'memory sleep inactive tabs pinned' },
   { id: 'set-downloads', label: 'Downloads settings', keywords: 'folder save location ask' },
   { id: 'set-privacy', label: 'Privacy & clear browsing data', keywords: 'clear history cookies cache site data delete' },
@@ -182,6 +185,8 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
   const tab = ctx.activeTab
   const isWeb = !!tab && !!tab.url && !tab.hasError && !isInternalUrl(tab.url)
   const canBookmark = !!tab && /^https?:/.test(tab.url) && !tab.hasError
+  const resolved = resolveShortcuts(ctx.shortcuts)
+  const k = (id: ShortcutId): string | undefined => formatShortcutLabel(resolved[id])
 
   return [
     {
@@ -189,7 +194,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: 'New tab',
       keywords: 'open blank start page create tab',
       icon: 'plus',
-      keys: 'Ctrl+T',
+      keys: k('new-tab'),
       showWhenEmpty: true,
       boost: 6
     },
@@ -198,7 +203,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: ctx.isSplit ? 'Unsplit view' : 'Split view with next tab',
       keywords: 'split pane side by side tile unsplit',
       icon: ctx.isSplit ? 'unsplit' : 'split',
-      keys: 'Ctrl+Shift+\\',
+      keys: k('split-view'),
       showWhenEmpty: true,
       enabled: !!tab,
       boost: 6
@@ -208,7 +213,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: ctx.compactMode ? 'Turn off compact mode' : 'Turn on compact mode',
       keywords: 'compact mode hide sidebar toolbar zen focus',
       icon: 'compact',
-      keys: 'Ctrl+Shift+S',
+      keys: k('compact-mode'),
       showWhenEmpty: true,
       boost: 5
     },
@@ -225,7 +230,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: 'Open Settings',
       keywords: 'preferences options config orbit://settings',
       icon: 'settings',
-      keys: 'Ctrl+,',
+      keys: k('settings'),
       showWhenEmpty: true,
       boost: 4
     },
@@ -234,7 +239,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: 'Open History',
       keywords: 'recent pages visited orbit://history',
       icon: 'history',
-      keys: 'Ctrl+H',
+      keys: k('history'),
       showWhenEmpty: true
     },
     {
@@ -242,7 +247,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: 'Open Bookmarks',
       keywords: 'saved favorites stars orbit://bookmarks',
       icon: 'bookmark',
-      keys: 'Ctrl+Shift+O',
+      keys: k('bookmarks'),
       showWhenEmpty: true
     },
     {
@@ -250,7 +255,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: 'Toggle Downloads',
       keywords: 'files saved downloads panel',
       icon: 'downloads',
-      keys: 'Ctrl+J',
+      keys: k('downloads'),
       showWhenEmpty: true
     },
     {
@@ -258,7 +263,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: 'Reopen closed tab',
       keywords: 'undo close restore tab',
       icon: 'reopen',
-      keys: 'Ctrl+Shift+T',
+      keys: k('reopen-closed-tab'),
       enabled: ctx.canReopenClosed,
       showWhenEmpty: ctx.canReopenClosed
     },
@@ -267,7 +272,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: tab?.bookmarked ? 'Remove bookmark' : 'Bookmark this page',
       keywords: 'star save favorite bookmark',
       icon: 'star',
-      keys: 'Ctrl+D',
+      keys: k('bookmark-toggle'),
       enabled: canBookmark
     },
     {
@@ -275,7 +280,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: 'Reload page',
       keywords: 'refresh tab',
       icon: 'reload',
-      keys: 'Ctrl+R',
+      keys: k('reload'),
       enabled: isWeb
     },
     {
@@ -283,7 +288,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: 'Hard reload (ignore cache)',
       keywords: 'force refresh cache clear reload',
       icon: 'reload',
-      keys: 'Ctrl+Shift+R',
+      keys: k('hard-reload'),
       enabled: isWeb
     },
     {
@@ -312,7 +317,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: 'Close tab',
       keywords: 'close current tab',
       icon: 'close',
-      keys: 'Ctrl+W',
+      keys: k('close-tab'),
       enabled: !!tab
     },
     {
@@ -320,7 +325,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: 'Find in page',
       keywords: 'search text page',
       icon: 'find',
-      keys: 'Ctrl+F',
+      keys: k('find'),
       enabled: isWeb
     },
     {
@@ -328,7 +333,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: 'Print page',
       keywords: 'pdf print document',
       icon: 'print',
-      keys: 'Ctrl+P',
+      keys: k('print'),
       enabled: isWeb
     },
     {
@@ -336,7 +341,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: 'Zoom in',
       keywords: 'magnify larger text scale',
       icon: 'zoom-in',
-      keys: 'Ctrl+=',
+      keys: k('zoom-in'),
       enabled: isWeb
     },
     {
@@ -344,7 +349,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: 'Zoom out',
       keywords: 'smaller text scale',
       icon: 'zoom-out',
-      keys: 'Ctrl+−',
+      keys: k('zoom-out'),
       enabled: isWeb
     },
     {
@@ -352,7 +357,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: 'Reset zoom',
       keywords: 'zoom 100 default normal scale',
       icon: 'zoom-reset',
-      keys: 'Ctrl+0',
+      keys: k('zoom-reset'),
       enabled: isWeb && (tab?.zoom ?? 100) !== 100
     },
     {
@@ -360,7 +365,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: 'Toggle Developer Tools',
       keywords: 'inspect console elements debugger devtools',
       icon: 'code',
-      keys: 'F12',
+      keys: k('devtools'),
       enabled: isWeb
     },
     {
@@ -368,7 +373,7 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       label: ctx.isFullscreen ? 'Exit full screen' : 'Enter full screen',
       keywords: 'fullscreen maximize window',
       icon: 'fullscreen',
-      keys: 'F11'
+      keys: k('fullscreen')
     },
     {
       cmd: 'clear-history-hour',

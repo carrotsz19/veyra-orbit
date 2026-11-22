@@ -18,6 +18,11 @@ import {
   type StartPagePatch,
   type StartPageSettings
 } from './startpage.ts'
+import {
+  mergeShortcutOverrides,
+  sanitizeShortcutOverrides,
+  type ShortcutOverrides
+} from './shortcuts.ts'
 
 export const SEARCH_ENGINES = [
   { id: 'google', name: 'Google', url: 'https://www.google.com/search?q=' },
@@ -33,7 +38,7 @@ export type StartupBehavior = 'restore' | 'new-tab'
 export type NewTabBehavior = 'start-page' | 'command-bar'
 export type WindowButtonsStyle = 'windows' | 'dots'
 export type UpdateMode = 'automatic' | 'notify'
-export type { SleepMinutes, AppearanceSettings, AppearancePatch, StartPageSettings, StartPagePatch }
+export type { SleepMinutes, AppearanceSettings, AppearancePatch, StartPageSettings, StartPagePatch, ShortcutOverrides }
 
 export interface Settings {
   searchEngine: SearchEngineId
@@ -58,11 +63,16 @@ export interface Settings {
   appearance: AppearanceSettings
   /** Rich start page background, layout, clock, quick links, focus note and widget preferences. */
   startPage: StartPageSettings
+  /** Keyboard shortcut overrides (shortcut id -> accelerator string, or '' when disabled). */
+  shortcuts: ShortcutOverrides
 }
 
-export type SettingsPatch = Partial<Omit<Settings, 'appearance' | 'startPage'>> & {
+export type SettingsPatch = Partial<Omit<Settings, 'appearance' | 'startPage' | 'shortcuts'>> & {
   appearance?: AppearancePatch
   startPage?: StartPagePatch
+  shortcuts?: Record<string, string | null>
+  /** When true, clears all shortcut overrides back to defaults before applying any patch entries. */
+  resetShortcuts?: boolean
 }
 
 export interface SettingsView extends Settings {
@@ -91,7 +101,8 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   windowButtons: 'windows',
   updateMode: 'automatic',
   appearance: DEFAULT_APPEARANCE,
-  startPage: DEFAULT_START_PAGE
+  startPage: DEFAULT_START_PAGE,
+  shortcuts: Object.freeze({}) as ShortcutOverrides
 })
 
 const ENGINE_MAP = new Map<string, string>(SEARCH_ENGINES.map((e) => [e.id, e.url]))
@@ -149,7 +160,8 @@ export function sanitizeSettings(raw: unknown): Settings {
     return {
       ...DEFAULT_SETTINGS,
       appearance: { ...DEFAULT_APPEARANCE },
-      startPage: sanitizeStartPage(null)
+      startPage: sanitizeStartPage(null),
+      shortcuts: {}
     }
   }
   return {
@@ -165,7 +177,8 @@ export function sanitizeSettings(raw: unknown): Settings {
     windowButtons: isWindowButtonsStyle(raw.windowButtons) ? raw.windowButtons : DEFAULT_SETTINGS.windowButtons,
     updateMode: isUpdateMode(raw.updateMode) ? raw.updateMode : DEFAULT_SETTINGS.updateMode,
     appearance: sanitizeAppearance(raw.appearance),
-    startPage: sanitizeStartPage(raw.startPage)
+    startPage: sanitizeStartPage(raw.startPage),
+    shortcuts: sanitizeShortcutOverrides(raw.shortcuts)
   }
 }
 
@@ -174,7 +187,8 @@ export function mergeSettings(current: Settings, patch: unknown): Settings {
   const next: Settings = {
     ...current,
     appearance: { ...current.appearance },
-    startPage: sanitizeStartPage(current.startPage)
+    startPage: sanitizeStartPage(current.startPage),
+    shortcuts: sanitizeShortcutOverrides(current.shortcuts)
   }
   if (!isPlainObject(patch)) return next
   const own = (k: string): boolean => Object.prototype.hasOwnProperty.call(patch, k)
@@ -191,5 +205,9 @@ export function mergeSettings(current: Settings, patch: unknown): Settings {
   if (own('updateMode') && isUpdateMode(patch.updateMode)) next.updateMode = patch.updateMode
   if (own('appearance')) next.appearance = mergeAppearance(next.appearance, patch.appearance)
   if (own('startPage')) next.startPage = mergeStartPage(next.startPage, patch.startPage)
+  if (own('resetShortcuts') && patch.resetShortcuts === true) {
+    next.shortcuts = {}
+  }
+  if (own('shortcuts')) next.shortcuts = mergeShortcutOverrides(next.shortcuts, patch.shortcuts)
   return next
 }

@@ -252,9 +252,10 @@ export function TitleBar({
         bookmarks: bookmarks.map((b) => ({ url: b.url, title: b.title })),
         appVersion: INITIAL_VERSION,
         isDev: __CHANNEL__ === 'dev',
-        updateReadyVersion: update?.status === 'ready' ? (update.availableVersion ?? '') : null
+        updateReadyVersion: update?.status === 'ready' ? (update.availableVersion ?? '') : null,
+        shortcuts: settings?.shortcuts
       }),
-    [tab, activeSplitGroup, state.workspaces, state.activeWorkspaceId, state.canReopenClosed, settings?.compactMode, settings?.appearance.bookmarkBar, winState.fullscreen, history, bookmarks, update?.status, update?.availableVersion]
+    [tab, activeSplitGroup, state.workspaces, state.activeWorkspaceId, state.canReopenClosed, settings?.compactMode, settings?.appearance.bookmarkBar, settings?.shortcuts, winState.fullscreen, history, bookmarks, update?.status, update?.availableVersion]
   )
 
   const recentUrls = useMemo(() => recentHistoryItems(history.map((h) => ({ url: h.url, title: h.title }))), [history])

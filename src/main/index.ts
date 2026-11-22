@@ -616,7 +616,8 @@ function buildPaletteContext(query: string, mode: PaletteMode): PaletteContext |
     isFullscreen: win.isFullScreen(),
     canReopenClosed: st.canReopenClosed,
     theme: settings.get().theme,
-    searchUrl: settings.searchUrl()
+    searchUrl: settings.searchUrl(),
+    shortcuts: settings.get().shortcuts
   }
 }
 
@@ -871,7 +872,13 @@ function createWindow(): void {
       }
       sendWinState()
     },
-    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur())
+    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur()),
+    onBeforeInput: (e, input) => {
+      if (input.type === 'keyDown' && (input.control || input.meta || input.alt) && tabs?.shortcut(input)) {
+        menuPopup?.close()
+        e.preventDefault()
+      }
+    }
   })
 
   // Reusable floating acrylic window for the Ctrl+K command palette.
@@ -879,7 +886,13 @@ function createWindow(): void {
   palettePopup = new PalettePopup(w, {
     preload: join(__dirname, '../preload/palette.js'),
     acrylic,
-    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur())
+    onFocusChange: (focused) => (focused ? sendWinState() : handleOrbitFocusBlur()),
+    onBeforeInput: (e, input) => {
+      // Forward app shortcuts from the palette window (e.g. pressing the palette shortcut again toggles it).
+      if (input.type === 'keyDown' && (input.control || input.meta || input.alt) && tabs?.shortcut(input)) {
+        e.preventDefault()
+      }
+    }
   })
 
   // The browser's own UI never navigates and never opens windows; pages do that in tabs.
@@ -1111,6 +1124,7 @@ function createWindow(): void {
     isLoadedExtension: (partition, extId) => {
       return extManager?.hasLoadedExtension(partition, extId) ?? false
     },
+    shortcuts: () => s.get().shortcuts,
     quit: () => app.quit()
   })
   const t = tabs
@@ -1896,6 +1910,9 @@ handleSurface('bookmark:reorder', (rawOrder) => {
 })
 
 handle('settings:get', () => settings?.view() ?? null)
+on('shortcuts:recording', (t, active: unknown) => {
+  t.setShortcutRecording(active === true)
+})
 handle('settings:update', (patch) => {
   if (!settings || !patch || typeof patch !== 'object' || Array.isArray(patch)) return settings?.view() ?? null
   // Custom downloads folders are chosen only via the main-process folder dialog; here only '' (reset) is accepted.

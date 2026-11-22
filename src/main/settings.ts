@@ -64,7 +64,8 @@ export class SettingsStore {
         ...this.data.startPage,
         quickLinks: this.data.startPage.quickLinks.map((l) => ({ ...l })),
         widgets: this.data.startPage.widgets.map((w) => ({ ...w }))
-      }
+      },
+      shortcuts: { ...this.data.shortcuts }
     }
   }
 

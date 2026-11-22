@@ -90,6 +90,7 @@ const api: VeyraApi = {
   clearFinishedDownloads: () => ipcRenderer.send('download:clear'),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
+  setShortcutRecording: (active) => ipcRenderer.send('shortcuts:recording', active),
   chooseDownloadsDir: () => ipcRenderer.invoke('settings:choose-downloads-dir'),
   exportAppearanceTheme: () => ipcRenderer.invoke('settings:export-theme'),
   importAppearanceTheme: () => ipcRenderer.invoke('settings:import-theme'),

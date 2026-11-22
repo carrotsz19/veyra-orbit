@@ -40,6 +40,12 @@ import {
 } from '../shared/split'
 import { FORM_DIRTY_CHECK_SCRIPT, canSleepTab, isTypingKeyInput, type SleepPolicy } from '../shared/sleep'
 import { shouldPeekWindowOpen } from '../shared/peek'
+import {
+  matchShortcut,
+  resolveShortcuts,
+  toElectronAccelerator,
+  type ShortcutOverrides
+} from '../shared/shortcuts'
 import { attachPageCompat } from './compat'
 
 interface Tab {
@@ -108,6 +114,10 @@ export interface TabHooks {
   onActiveTabChanged?(wc: WebContents | null, partition: string): void
   extensionContextMenuItems?(wc: WebContents, params: Electron.ContextMenuParams): Electron.MenuItem[]
   isLoadedExtension?(partition: string, extensionId: string): boolean
+  /** Current user keyboard shortcut overrides. */
+  shortcuts?(): ShortcutOverrides
+  /** Opens the screenshot chooser (wired in Part 8). */
+  onScreenshot?(): void
   /** Quits the application (Ctrl+Q). */
   quit?(): void
 }
@@ -153,6 +163,8 @@ export class Tabs {
   private shiftHeld = false
   private altHeld = false
   private lastAltAt = 0
+  /** Pauses global shortcut dispatch while the user is recording a new shortcut in Settings. */
+  private shortcutRecording = false
 
   constructor(
     private win: BrowserWindow,
@@ -167,7 +179,12 @@ export class Tabs {
       this.altStandalone = false
       this.shiftHeld = false
       this.altHeld = false
+      this.shortcutRecording = false
     })
+  }
+
+  setShortcutRecording(active: boolean): void {
+    this.shortcutRecording = active
   }
 
   // ---- reading ------------------------------------------------------------
@@ -1493,6 +1510,7 @@ export class Tabs {
       activeTab!.info.id !== id &&
       (!activeGroup || (!activeGroup.tabIds.includes(id) && activeGroup.tabIds.length < MAX_SPLIT_PANES))
 
+    const resolvedKeys = resolveShortcuts(this.hooks.shortcuts?.())
     const splitItems: Electron.MenuItemConstructorOptions[] = []
     if (canSplitWithActive) {
       splitItems.push({
@@ -1502,7 +1520,7 @@ export class Tabs {
     } else if (!tabGroup && activeTab?.info.id === id) {
       splitItems.push({
         label: 'Split with next tab',
-        accelerator: 'CmdOrCtrl+Shift+\\',
+        accelerator: toElectronAccelerator(resolvedKeys['split-view']),
         click: () => this.splitWithNext()
       })
     }
@@ -1540,13 +1558,13 @@ export class Tabs {
       { label: muted ? 'Unmute tab' : 'Mute tab', click: () => this.toggleMute(id) },
       { label: 'Sleep tab', enabled: this.canSleep(tab, true), click: () => this.sleepTab(id, true) },
       { type: 'separator' },
-      { label: 'Close tab', accelerator: 'CmdOrCtrl+W', click: () => this.close(id) },
+      { label: 'Close tab', accelerator: toElectronAccelerator(resolvedKeys['close-tab']), click: () => this.close(id) },
       {
         label: 'Close other tabs',
         enabled: wsTabs.some((t) => t.info.id !== id && !t.info.pinned),
         click: () => this.closeOthers(id)
       },
-      { label: 'Reopen closed tab', accelerator: 'CmdOrCtrl+Shift+T', enabled: this.closed.length > 0, click: () => this.reopenClosed() }
+      { label: 'Reopen closed tab', accelerator: toElectronAccelerator(resolvedKeys['reopen-closed-tab']), enabled: this.closed.length > 0, click: () => this.reopenClosed() }
     ]).popup({
       window: targetWin,
       callback: () => this.hooks.onMenuOpen?.(false)
@@ -1661,20 +1679,14 @@ export class Tabs {
     this.altHeld = input.alt
     this.altStandalone = false
 
+    if (this.shortcutRecording) return false
+
     const mod = process.platform === 'darwin' ? input.meta : input.control
     const key = input.key.toLowerCase()
     const run = (f: () => void): true => (f(), true)
 
-    // Workspace shortcuts: Ctrl+Alt+1..9 and Ctrl+Alt+Left/Right
+    // Reserved numbered workspace & tab switching (Ctrl+Alt+1..9 and Ctrl+1..9)
     if (mod && input.alt && !input.shift) {
-      if (key === 'arrowleft') {
-        const next = nextWorkspaceId(this.workspaces, this.activeWorkspaceId, -1)
-        return run(() => next && this.switchWorkspace(next, -1))
-      }
-      if (key === 'arrowright') {
-        const next = nextWorkspaceId(this.workspaces, this.activeWorkspaceId, 1)
-        return run(() => next && this.switchWorkspace(next, 1))
-      }
       const digitMatch = /^[1-9]$/.exec(key) ?? /^Digit([1-9])$/.exec(input.code)
       if (digitMatch) {
         const n = Number(digitMatch[1] ?? digitMatch[0])
@@ -1682,47 +1694,102 @@ export class Tabs {
         return run(() => ws && this.switchWorkspace(ws.id))
       }
     }
-
-    if (mod && !input.alt) {
-      if (key === 'q' && !input.shift) return run(() => this.hooks.quit?.())
-      if (key === 'k' && !input.shift) return run(() => this.hooks.onTogglePalette?.('command'))
-      if (key === 'n' && input.shift) return run(() => this.createPrivateWorkspace())
-      if (key === 's' && input.shift) return run(() => this.hooks.toggleCompactMode())
-      if (key === 'b' && input.shift) return run(() => this.hooks.toggleBookmarkBar?.())
-      if (input.shift && (key === '\\' || key === '|' || input.code === 'Backslash')) return run(() => this.splitWithNext())
-      if (key === 't' && input.shift) return run(() => this.reopenClosed())
-      if (key === 't') return run(() => { if (!this.hooks.onNewTabShortcut?.()) this.create() })
-      if (key === 'w') return run(() => this.activeId !== null && this.close(this.activeId))
-      if (key === 'l') return run(() => this.focusOmnibox())
-      if (key === 'f') return run(() => this.openFind())
-      if (key === 'j') return run(() => this.toggleDownloads())
-      if (key === 'h') return run(() => this.openInternal('orbit://history'))
-      if (key === 'o' && input.shift) return run(() => this.openInternal('orbit://bookmarks'))
-      if (key === ',') return run(() => this.openInternal('orbit://settings'))
-      if (key === 'd') return run(() => this.toggleBookmark())
-      if (key === 'r') return run(() => this.reload(input.shift))
-      if (key === 'tab') return run(() => this.cycle(input.shift ? -1 : 1))
-      if (key === 'pagedown') return run(() => this.cycle(1))
-      if (key === 'pageup') return run(() => this.cycle(-1))
-      if (key === '=' || key === '+') return run(() => this.zoom(ZOOM_STEP))
-      if (key === '-') return run(() => this.zoom(-ZOOM_STEP))
-      if (key === '0') return run(() => this.zoom(null))
-      if (/^[1-9]$/.test(key)) {
+    if (mod && !input.alt && !input.shift) {
+      const digitMatch = /^[1-9]$/.exec(key) ?? /^Digit([1-9])$/.exec(input.code)
+      if (digitMatch) {
         const wsTabs = this.workspaceTabs(this.activeWorkspaceId)
-        const n = Number(key)
+        const n = Number(digitMatch[1] ?? digitMatch[0])
         const tab = n === 9 ? wsTabs[wsTabs.length - 1] : wsTabs[n - 1]
         return run(() => tab && this.activate(tab.info.id))
       }
     }
-    if (input.alt && !mod) {
-      if (key === 'arrowleft') return run(() => this.back())
-      if (key === 'arrowright') return run(() => this.forward())
+
+    // Customizable registry shortcuts
+    const resolved = resolveShortcuts(this.hooks.shortcuts?.())
+    const matched = matchShortcut(input, resolved, process.platform)
+    if (matched) {
+      switch (matched) {
+        case 'new-tab':
+          return run(() => {
+            if (!this.hooks.onNewTabShortcut?.()) this.create()
+          })
+        case 'close-tab':
+          return run(() => this.activeId !== null && this.close(this.activeId))
+        case 'reopen-closed-tab':
+          return run(() => this.reopenClosed())
+        case 'next-tab':
+          return run(() => this.cycle(1))
+        case 'prev-tab':
+          return run(() => this.cycle(-1))
+        case 'focus-omnibox':
+          return run(() => this.focusOmnibox())
+        case 'back':
+          return run(() => this.back())
+        case 'forward':
+          return run(() => this.forward())
+        case 'reload':
+          return run(() => this.reload(false))
+        case 'hard-reload':
+          return run(() => this.reload(true))
+        case 'compact-mode':
+          return run(() => this.hooks.toggleCompactMode())
+        case 'bookmark-bar':
+          return run(() => this.hooks.toggleBookmarkBar?.())
+        case 'split-view':
+          return run(() => this.splitWithNext())
+        case 'zoom-in':
+          return run(() => this.zoom(ZOOM_STEP))
+        case 'zoom-out':
+          return run(() => this.zoom(-ZOOM_STEP))
+        case 'zoom-reset':
+          return run(() => this.zoom(null))
+        case 'fullscreen':
+          return run(() => this.win.setFullScreen(!this.win.isFullScreen()))
+        case 'new-private-workspace':
+          return run(() => this.createPrivateWorkspace())
+        case 'prev-workspace': {
+          const next = nextWorkspaceId(this.workspaces, this.activeWorkspaceId, -1)
+          return run(() => next && this.switchWorkspace(next, -1))
+        }
+        case 'next-workspace': {
+          const next = nextWorkspaceId(this.workspaces, this.activeWorkspaceId, 1)
+          return run(() => next && this.switchWorkspace(next, 1))
+        }
+        case 'command-palette':
+          return run(() => this.hooks.onTogglePalette?.('command'))
+        case 'find':
+          return run(() => this.openFind())
+        case 'find-next':
+          return run(() => this.findStep(true))
+        case 'find-prev':
+          return run(() => this.findStep(false))
+        case 'bookmark-toggle':
+          return run(() => this.toggleBookmark())
+        case 'bookmarks':
+          return run(() => this.openInternal('orbit://bookmarks'))
+        case 'history':
+          return run(() => this.openInternal('orbit://history'))
+        case 'downloads':
+          return run(() => this.toggleDownloads())
+        case 'screenshot':
+          return run(() => this.hooks.onScreenshot?.())
+        case 'settings':
+          return run(() => this.openInternal('orbit://settings'))
+        case 'print':
+          return run(() => this.print())
+        case 'devtools':
+          return run(() => this.active?.view?.webContents.toggleDevTools())
+        case 'quit':
+          return run(() => this.hooks.quit?.())
+      }
     }
-    if (key === 'f3' && !mod && !input.alt) return run(() => this.findStep(!input.shift))
-    if (mod && !input.alt && !input.shift && key === 'p') return run(() => this.print())
-    if (key === 'f11' && !mod) return run(() => this.win.setFullScreen(!this.win.isFullScreen()))
-    if (key === 'f5') return run(() => this.reload(mod))
-    if (key === 'f12') return run(() => this.active?.view?.webContents.toggleDevTools())
+
+    // Secondary hardware / browser keys (active if not claimed by a custom binding above)
+    if (mod && !input.alt && !input.shift) {
+      if (key === 'pagedown') return run(() => this.cycle(1))
+      if (key === 'pageup') return run(() => this.cycle(-1))
+    }
+    if (key === 'f5' && !input.alt) return run(() => this.reload(mod))
     if (key === 'browserback') return run(() => this.back())
     if (key === 'browserforward') return run(() => this.forward())
     return false
@@ -2033,9 +2100,10 @@ export class Tabs {
       )
       gap()
     }
+    const resolvedKeys = resolveShortcuts(this.hooks.shortcuts?.())
     const extMenuItems = this.hooks.extensionContextMenuItems?.(wc, p) ?? []
     if (!p.linkURL && !p.isEditable && !p.selectionText.trim() && p.mediaType === 'none') {
-      items.push({ label: 'Print…', accelerator: 'CmdOrCtrl+P', click: () => wc.print({}, () => {}) })
+      items.push({ label: 'Print…', accelerator: toElectronAccelerator(resolvedKeys.print), click: () => wc.print({}, () => {}) })
       gap()
     }
     items.push({ label: 'Inspect', click: () => wc.inspectElement(p.x, p.y) })

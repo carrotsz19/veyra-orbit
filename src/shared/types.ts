@@ -123,6 +123,7 @@ export type {
   Settings,
   SettingsPatch,
   SettingsView,
+  ShortcutOverrides,
   SleepMinutes,
   StartPagePatch,
   StartPageSettings,
@@ -131,6 +132,7 @@ export type {
   UpdateMode,
   WindowButtonsStyle
 } from './settings'
+export type { ResolvedShortcuts, ShortcutCategory, ShortcutDef, ShortcutId } from './shortcuts'
 export type {
   ClockFormat,
   DailyQuote,
@@ -348,6 +350,7 @@ export interface VeyraApi {
   clearFinishedDownloads(): void
   getSettings(): Promise<import('./settings').SettingsView | null>
   updateSettings(patch: import('./settings').SettingsPatch): Promise<import('./settings').SettingsView | null>
+  setShortcutRecording(active: boolean): void
   chooseDownloadsDir(): Promise<import('./settings').SettingsView | null>
   exportAppearanceTheme(): Promise<{ ok: boolean; canceled?: boolean; error?: string }>
   importAppearanceTheme(): Promise<{ ok: boolean; canceled?: boolean; settings?: import('./settings').SettingsView; error?: string }>

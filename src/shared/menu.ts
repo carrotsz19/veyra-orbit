@@ -6,6 +6,7 @@
 import type { WindowButtonsStyle } from './settings.ts'
 import type { SplitOrientation } from './split.ts'
 import { displayUrl, isInternalUrl } from './url.ts'
+import { formatShortcutLabel, resolveShortcuts, type ShortcutId, type ShortcutOverrides } from './shortcuts.ts'
 
 export type MenuId = 'file' | 'edit' | 'view' | 'history' | 'bookmarks' | 'workspaces' | 'help'
 
@@ -99,6 +100,7 @@ export interface MenuBuildContext {
   appVersion: string
   isDev: boolean
   updateReadyVersion?: string | null
+  shortcuts?: ShortcutOverrides
 }
 
 const SEP: MenuSeparatorEntry = { kind: 'separator' }
@@ -140,18 +142,20 @@ export function buildMenus(ctx: MenuBuildContext): MenuSection[] {
   const recent = recentHistoryItems(ctx.history, MAX_HISTORY_MENU_ITEMS)
   const marks = ctx.bookmarks.slice(0, MAX_BOOKMARK_MENU_ITEMS)
   const appLabel = ctx.isDev ? 'Veyra Orbit Dev' : 'Veyra Orbit'
+  const resolved = resolveShortcuts(ctx.shortcuts)
+  const k = (id: ShortcutId): string | undefined => formatShortcutLabel(resolved[id])
 
   const fileItems: MenuEntry[] = [
-    { kind: 'item', id: 'file:new-tab', label: 'New tab', keys: 'Ctrl+T' },
+    { kind: 'item', id: 'file:new-tab', label: 'New tab', keys: k('new-tab') },
     { kind: 'item', id: 'file:new-workspace', label: 'New workspace' },
-    { kind: 'item', id: 'file:new-private-workspace', label: 'New private workspace', keys: 'Ctrl+Shift+N' },
-    { kind: 'item', id: 'file:reopen-closed', label: 'Reopen closed tab', keys: 'Ctrl+Shift+T', disabled: !ctx.canReopenClosed },
+    { kind: 'item', id: 'file:new-private-workspace', label: 'New private workspace', keys: k('new-private-workspace') },
+    { kind: 'item', id: 'file:reopen-closed', label: 'Reopen closed tab', keys: k('reopen-closed-tab'), disabled: !ctx.canReopenClosed },
     SEP,
-    { kind: 'item', id: 'file:print', label: 'Print…', keys: 'Ctrl+P', disabled: !webPage },
-    { kind: 'item', id: 'file:settings', label: 'Settings', keys: 'Ctrl+,' },
+    { kind: 'item', id: 'file:print', label: 'Print…', keys: k('print'), disabled: !webPage },
+    { kind: 'item', id: 'file:settings', label: 'Settings', keys: k('settings') },
     SEP,
-    { kind: 'item', id: 'file:close-tab', label: 'Close tab', keys: 'Ctrl+W', disabled: !tab },
-    { kind: 'item', id: 'file:quit', label: 'Quit', keys: 'Ctrl+Q' }
+    { kind: 'item', id: 'file:close-tab', label: 'Close tab', keys: k('close-tab'), disabled: !tab },
+    { kind: 'item', id: 'file:quit', label: 'Quit', keys: k('quit') }
   ]
 
   const editItems: MenuEntry[] = [
@@ -163,18 +167,18 @@ export function buildMenus(ctx: MenuBuildContext): MenuSection[] {
     { kind: 'item', id: 'edit:paste', label: 'Paste', keys: 'Ctrl+V' },
     { kind: 'item', id: 'edit:select-all', label: 'Select all', keys: 'Ctrl+A' },
     SEP,
-    { kind: 'item', id: 'edit:find', label: 'Find in page…', keys: 'Ctrl+F', disabled: !webPage }
+    { kind: 'item', id: 'edit:find', label: 'Find in page…', keys: k('find'), disabled: !webPage }
   ]
 
   const viewItems: MenuEntry[] = [
-    { kind: 'item', id: 'view:palette', label: 'Command bar', keys: 'Ctrl+K' },
-    { kind: 'item', id: 'view:compact', label: 'Compact mode', keys: 'Ctrl+Shift+S', checked: ctx.compactMode },
-    { kind: 'item', id: 'view:bookmark-bar', label: 'Bookmark bar', keys: 'Ctrl+Shift+B', checked: !!ctx.bookmarkBarVisible },
+    { kind: 'item', id: 'view:palette', label: 'Command bar', keys: k('command-palette') },
+    { kind: 'item', id: 'view:compact', label: 'Compact mode', keys: k('compact-mode'), checked: ctx.compactMode },
+    { kind: 'item', id: 'view:bookmark-bar', label: 'Bookmark bar', keys: k('bookmark-bar'), checked: !!ctx.bookmarkBarVisible },
     {
       kind: 'item',
       id: 'view:split',
       label: ctx.isSplit ? 'Unsplit view' : 'Split with next tab',
-      keys: 'Ctrl+Shift+\\',
+      keys: k('split-view'),
       checked: ctx.isSplit ? true : undefined,
       disabled: !tab
     },
@@ -185,21 +189,21 @@ export function buildMenus(ctx: MenuBuildContext): MenuSection[] {
       disabled: !tab || (!!ctx.isSplit && (ctx.splitPaneCount ?? 2) !== 2)
     },
     SEP,
-    { kind: 'item', id: 'view:zoom-in', label: 'Zoom in', keys: 'Ctrl+=', disabled: !webPage },
-    { kind: 'item', id: 'view:zoom-out', label: 'Zoom out', keys: 'Ctrl+−', disabled: !webPage },
-    { kind: 'item', id: 'view:zoom-reset', label: 'Reset zoom', keys: 'Ctrl+0', disabled: !webPage || (tab?.zoom ?? 100) === 100 },
+    { kind: 'item', id: 'view:zoom-in', label: 'Zoom in', keys: k('zoom-in'), disabled: !webPage },
+    { kind: 'item', id: 'view:zoom-out', label: 'Zoom out', keys: k('zoom-out'), disabled: !webPage },
+    { kind: 'item', id: 'view:zoom-reset', label: 'Reset zoom', keys: k('zoom-reset'), disabled: !webPage || (tab?.zoom ?? 100) === 100 },
     SEP,
-    { kind: 'item', id: 'view:fullscreen', label: 'Full screen', keys: 'F11', checked: ctx.isFullscreen },
-    { kind: 'item', id: 'view:reload', label: 'Reload', keys: 'Ctrl+R', disabled: !tab?.url || isInternalUrl(tab.url) },
+    { kind: 'item', id: 'view:fullscreen', label: 'Full screen', keys: k('fullscreen'), checked: ctx.isFullscreen },
+    { kind: 'item', id: 'view:reload', label: 'Reload', keys: k('reload'), disabled: !tab?.url || isInternalUrl(tab.url) },
     SEP,
-    { kind: 'item', id: 'view:devtools', label: 'Developer tools', keys: 'F12', disabled: !webPage },
-    { kind: 'item', id: 'view:downloads', label: 'Show downloads', keys: 'Ctrl+J' }
+    { kind: 'item', id: 'view:devtools', label: 'Developer tools', keys: k('devtools'), disabled: !webPage },
+    { kind: 'item', id: 'view:downloads', label: 'Show downloads', keys: k('downloads') }
   ]
 
   const historyItems: MenuEntry[] = [
-    { kind: 'item', id: 'history:back', label: 'Back', keys: 'Alt+Left', disabled: !tab?.canGoBack },
-    { kind: 'item', id: 'history:forward', label: 'Forward', keys: 'Alt+Right', disabled: !tab?.canGoForward },
-    { kind: 'item', id: 'history:all', label: 'Show all history', keys: 'Ctrl+H' },
+    { kind: 'item', id: 'history:back', label: 'Back', keys: k('back'), disabled: !tab?.canGoBack },
+    { kind: 'item', id: 'history:forward', label: 'Forward', keys: k('forward'), disabled: !tab?.canGoForward },
+    { kind: 'item', id: 'history:all', label: 'Show all history', keys: k('history') },
     SEP,
     ...(recent.length > 0
       ? recent.map(
@@ -217,11 +221,11 @@ export function buildMenus(ctx: MenuBuildContext): MenuSection[] {
       kind: 'item',
       id: 'bookmarks:toggle',
       label: tab?.bookmarked ? 'Remove bookmark' : 'Bookmark this page',
-      keys: 'Ctrl+D',
+      keys: k('bookmark-toggle'),
       checked: canBookmark ? !!tab?.bookmarked : undefined,
       disabled: !canBookmark
     },
-    { kind: 'item', id: 'bookmarks:all', label: 'Show all bookmarks', keys: 'Ctrl+Shift+O' },
+    { kind: 'item', id: 'bookmarks:all', label: 'Show all bookmarks', keys: k('bookmarks') },
     SEP,
     ...(marks.length > 0
       ? marks.map(
@@ -247,7 +251,7 @@ export function buildMenus(ctx: MenuBuildContext): MenuSection[] {
     ),
     ...(ctx.workspaces.length > 0 ? [SEP] : []),
     { kind: 'item', id: 'workspaces:new', label: 'New workspace' },
-    { kind: 'item', id: 'workspaces:new-private', label: 'New private workspace', keys: 'Ctrl+Shift+N' },
+    { kind: 'item', id: 'workspaces:new-private', label: 'New private workspace', keys: k('new-private-workspace') },
     ...(activeIsPrivate ? [{ kind: 'item', id: 'workspaces:close-private', label: 'Close private workspace' } as MenuItemEntry] : [])
   ]
 

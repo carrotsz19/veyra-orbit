@@ -20,6 +20,7 @@ import { SegmentedControl, type SegmentedOption } from './SegmentedControl'
 import { SettingsAppearance } from './SettingsAppearance'
 import { SettingsExtensions } from './SettingsExtensions'
 import { SettingsPerformanceMemory } from './SettingsPerformance'
+import { SettingsShortcuts } from './SettingsShortcuts'
 
 const api = window.veyra
 
@@ -72,6 +73,7 @@ const SETTING_SECTIONS = [
   { id: 'set-general', label: 'General' },
   { id: 'set-import', label: 'Import data' },
   { id: 'set-appearance', label: 'Appearance' },
+  { id: 'set-shortcuts', label: 'Keyboard shortcuts' },
   { id: 'set-performance', label: 'Performance' },
   { id: 'set-downloads', label: 'Downloads' },
   { id: 'set-privacy', label: 'Privacy & data' },
@@ -339,6 +341,8 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
           <ImportSection />
 
           <SettingsAppearance settings={settings} onPatch={patch} onSettingsReplaced={setSettings} />
+
+          <SettingsShortcuts settings={settings} onPatch={patch} />
 
           <section className="set-section" id="set-performance" aria-labelledby="set-performance-h">
             <h2 id="set-performance-h">Performance</h2>
