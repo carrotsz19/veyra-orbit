@@ -123,9 +123,9 @@
 }
 .lib-head h1 {
   margin: 0 var(--sp-2) 0 0;
-  font-family: var(--serif);
-  font-weight: 400;
-  font-size: 32px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 26px;
   letter-spacing: -0.02em;
 }
 .lib-search {

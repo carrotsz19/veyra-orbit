@@ -29,7 +29,7 @@
   --tint-hover: #9f3f23;
   --tint-text: #b3492b;
   --tint-soft: rgba(179, 73, 43, 0.12);
-  --tint-ring: rgba(179, 73, 43, 0.24);
+  --tint-ring: rgba(179, 73, 43, 0.35);
   --ws-accent: var(--tint);
   --ws-accent-soft: var(--tint-soft);
   --positive: #356341;
@@ -41,11 +41,13 @@
   --scrollbar-thumb: rgba(27, 26, 24, 0.14);
   --scrollbar-thumb-hover: rgba(27, 26, 24, 0.30);
 
-  /* Motion (<= 200ms, transform/opacity only) */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --t-fast: 110ms;
-  --t-base: 150ms;
-  --t-pop: 140ms;
+  /* Motion (Apple curves: 150–250ms sheets/popovers, subtle state transitions) */
+  --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-state: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-out: var(--ease-sheet);
+  --t-fast: 150ms;
+  --t-base: 180ms;
+  --t-pop: 220ms;
   --spring-snappy: linear(0, 0.036, 0.123, 0.237, 0.36, 0.481, 0.593, 0.692, 0.775, 0.843, 0.897, 0.938, 0.968, 0.99, 1.004, 1.013, 1.018, 1.02, 1.02, 1.018, 1.016, 1.014, 1.011, 1.009, 1.007, 1.005, 1.004, 1.002, 1);
   --spring-snappy-ms: 180ms;
   --spring-bouncy: linear(0, 0.054, 0.184, 0.349, 0.521, 0.68, 0.815, 0.92, 0.996, 1.046, 1.073, 1.083, 1.081, 1.072, 1.059, 1.044, 1.031, 1.019, 1.009, 1.002, 0.997, 0.994, 0.993, 0.993, 0.994, 0.995, 0.996, 0.997, 1);
@@ -89,11 +91,10 @@
   --ui-scale: 1;
   --ui-font-size: 13px;
 
-  /* Typography */
-  --font-sans: 'Segoe UI Variable Text', 'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --font-display: 'Segoe UI Variable Display', 'Segoe UI Variable Text', 'Segoe UI', -apple-system, system-ui, sans-serif;
+  /* Typography (system UI everywhere) */
+  --font-sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', Consolas, monospace;
-  --serif: 'Iowan Old Style', 'Charter', 'Georgia', serif;
 
   color-scheme: light;
 }
@@ -1802,45 +1803,45 @@ html.peek-window #root {
 }
 .start-date {
   margin: 0 0 var(--sp-2);
-  color: var(--label-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-size: 10.5px;
-  font-weight: 600;
+  color: var(--label-secondary);
+  font-size: 13px;
+  font-weight: 450;
 }
 .start-hello {
-  margin: 0 0 28px;
-  font-family: var(--serif);
-  font-weight: 400;
-  font-size: 48px;
-  line-height: 1.08;
-  letter-spacing: -0.025em;
+  margin: 0 0 20px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 30px;
+  line-height: 1.18;
+  letter-spacing: -0.022em;
 }
 .start-search {
   width: min(560px, 100%);
-  height: 50px;
+  height: 42px;
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  padding: 0 18px;
-  border-radius: var(--r-lg);
-  background: var(--bg-surface-raised);
+  gap: 10px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: var(--fill-tertiary);
+  border: 1px solid transparent;
   color: var(--label-tertiary);
-  box-shadow: inset 0 1px 0 var(--hairline-inset), 0 0 0 1px var(--hairline-strong), var(--shadow-2);
-  transition: box-shadow var(--t-base) var(--ease-out), background-color var(--t-fast) ease;
+  transition: background-color var(--t-fast) var(--ease-state), box-shadow var(--t-base) var(--ease-state), border-color var(--t-fast) var(--ease-state);
 }
 .start-search:hover {
-  box-shadow: inset 0 1px 0 var(--hairline-inset), 0 0 0 1px color-mix(in srgb, var(--label-primary) 18%, transparent), var(--shadow-2);
+  background: var(--fill-hover);
 }
 .start-search:focus-within {
-  box-shadow: inset 0 1px 0 var(--hairline-inset), 0 0 0 1px color-mix(in srgb, var(--tint) 60%, transparent), 0 0 0 4px var(--tint-soft), var(--shadow-2);
+  background: var(--bg-surface-raised);
+  border-color: color-mix(in srgb, var(--tint) 55%, transparent);
+  box-shadow: 0 0 0 3px var(--tint-ring);
 }
 .start-search input {
   flex: 1;
   border: 0;
   outline: 0;
   background: none;
-  font-size: 14.5px;
+  font-size: 14px;
   color: var(--label-primary);
   user-select: text;
 }
@@ -1848,7 +1849,7 @@ html.peek-window #root {
   color: var(--label-tertiary);
 }
 .start-hint {
-  margin: 24px 0 0;
+  margin: 20px 0 0;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -1867,9 +1868,9 @@ html.peek-window #root {
 
 .error h1 {
   margin: 14px 0 6px;
-  font-family: var(--serif);
-  font-weight: 400;
-  font-size: 28px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 24px;
   letter-spacing: -0.02em;
 }
 .error p {

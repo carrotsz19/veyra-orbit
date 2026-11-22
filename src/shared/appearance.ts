@@ -835,7 +835,7 @@ export function deriveAccentTokens(
 
   const rgb = hexToRgb(base)
   const tintSoft = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${isDark ? 0.16 : 0.12})`
-  const tintRing = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${isDark ? 0.30 : 0.24})`
+  const tintRing = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.35)`
 
   return {
     tint: base,

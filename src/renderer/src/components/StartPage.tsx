@@ -2,19 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
-  Bookmark as BookmarkIcon,
-  Clock,
   EyeOff,
-  History,
-  NotebookPen,
   Pencil,
   Plus,
-  Quote,
-  RotateCcw,
   Search,
   SlidersHorizontal,
-  Trash2,
-  X
+  Trash2
 } from 'lucide-react'
 import type {
   QuickLink,
@@ -79,7 +72,7 @@ function formatClock(now: Date, format: '12h' | '24h', showSeconds: boolean): { 
   }
 }
 
-/** Displays a browser-cached favicon or falls back to a crisp typographic monogram (never makes new requests). */
+/** Displays a browser-cached favicon or falls back to a neutral letter monogram (zero extra network requests). */
 function SiteGlyph({ favicon, label }: { favicon?: string; label: string }): React.JSX.Element {
   const [broken, setBroken] = useState(false)
   useEffect(() => {
@@ -126,12 +119,13 @@ const EMPTY_DATA: StartPageData = {
   bookmarks: []
 }
 
-/** Rich, customizable, local-first start page. Renders in < 100 ms with zero external widget network calls. */
+/** Calm, Safari-style local-first start page. Renders instantly with zero external widget network calls. */
 export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance }: Props): React.JSX.Element {
   const config: StartPageSettings = settings?.startPage ?? DEFAULT_START_PAGE
   const [text, setText] = useState('')
   const [now, setNow] = useState(() => new Date())
   const [data, setData] = useState<StartPageData>(EMPTY_DATA)
+  const [dataLoaded, setDataLoaded] = useState(false)
   const [bgDataUrl, setBgDataUrl] = useState<string | null>(null)
   const [bgError, setBgError] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -184,7 +178,10 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
     let alive = true
     const load = (): void => {
       void api.getStartPageData().then((next) => {
-        if (alive && next) setData(next)
+        if (alive && next) {
+          setData(next)
+          setDataLoaded(true)
+        }
       })
     }
     load()
@@ -332,11 +329,11 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
     return (
       <div className="start private-start">
         <div className="start-private-emblem" aria-hidden>
-          <EyeOff size={22} strokeWidth={1.8} />
+          <EyeOff size={22} strokeWidth={1.75} />
         </div>
-        <h1 className="start-hello">Private browsing.</h1>
+        <h1 className="start-hello">Private browsing</h1>
         <p className="start-private-note">
-          Private: Orbit won&apos;t save your history, cookies or site data from this workspace.
+          Orbit won&apos;t save your history, cookies, or site data from this workspace.
         </p>
         <form
           className="start-search"
@@ -345,12 +342,12 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
             if (text.trim()) api.navigate(tabId, text)
           }}
         >
-          <Search size={18} />
+          <Search size={16} aria-hidden />
           <input
             autoFocus
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Search or type a web address"
+            placeholder="Search or enter website name"
             aria-label="Search or type a web address"
           />
         </form>
@@ -377,15 +374,18 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
     switch (id) {
       case 'clock': {
         const greet = greetingForHour(now.getHours())
-        const heading = config.userName ? `${greet}, ${config.userName}.` : `${greet}.`
+        const heading = config.userName ? `${greet}, ${config.userName}` : greet
         return (
-          <section className="sp-widget sp-clock-widget" aria-label="Clock and greeting">
-            <div className="sp-clock-time" aria-live="off">
-              <span>{clock.time}</span>
-              {clock.period && <span className="sp-clock-period">{clock.period}</span>}
-            </div>
-            <p className="start-date">{today}</p>
+          <section className="sp-widget sp-clock-widget" aria-label="Greeting and time">
             <h1 className="start-hello">{heading}</h1>
+            <p className="sp-clock-meta" aria-live="off">
+              <span className="sp-clock-time">
+                {clock.time}
+                {clock.period ? ` ${clock.period}` : ''}
+              </span>
+              <span aria-hidden>·</span>
+              <span>{today}</span>
+            </p>
           </section>
         )
       }
@@ -400,12 +400,12 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
                 if (text.trim()) api.navigate(tabId, text)
               }}
             >
-              <Search size={18} aria-hidden />
+              <Search size={16} aria-hidden />
               <input
                 autoFocus
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder="Search or type a web address"
+                placeholder="Search or enter website name"
                 aria-label="Search or type a web address"
               />
             </form>
@@ -414,18 +414,18 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
 
       case 'quick-links':
         return (
-          <section className="sp-widget sp-card-section sp-quick-widget" aria-label="Quick links">
+          <section className="sp-widget sp-section sp-quick-widget" aria-label="Quick links">
             <div className="sp-section-head">
-              <span className="sp-section-title">
+              <h2 className="sp-section-title">
                 {usingTopSiteDefaults && displayQuickLinks.length > 0 ? 'Top sites' : 'Quick links'}
-              </span>
+              </h2>
               <button
                 type="button"
                 className="sp-head-action"
                 onClick={() => setLinkEditor({ mode: 'add', title: '', url: '', error: null })}
               >
                 <Plus size={13} aria-hidden />
-                <span>Add link</span>
+                <span>Add</span>
               </button>
             </div>
 
@@ -466,9 +466,7 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
             )}
 
             {displayQuickLinks.length === 0 ? (
-              <div className="sp-empty-inline">
-                <span>Sites you visit often show up here, or add your own quick links.</span>
-              </div>
+              <p className="sp-empty-inline">Add your favourite sites, or browse to fill this row automatically.</p>
             ) : (
               <div
                 className={`sp-ql-grid size-${config.quickLinkSize}`}
@@ -559,18 +557,15 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
           ...data.recentlyClosed.map((c) => ({ ...c, closed: true })),
           ...data.recentHistory.map((h) => ({ ...h, closed: false }))
         ].slice(0, 6)
+        if (items.length === 0) return null
         return (
-          <section className="sp-widget sp-surface-card sp-recent-widget" aria-label="Continue where you left off">
+          <section className="sp-widget sp-section sp-recent-widget" aria-label="Continue where you left off">
             <div className="sp-section-head">
-              <span className="sp-section-title">
-                <History size={13} aria-hidden />
-                <span>Continue where you left off</span>
-              </span>
+              <h2 className="sp-section-title">Continue where you left off</h2>
               <div className="sp-head-group">
                 {data.recentlyClosed.length > 0 && (
                   <button type="button" className="sp-head-action" onClick={() => api.reopenClosedTab()}>
-                    <RotateCcw size={12} aria-hidden />
-                    <span>Reopen closed</span>
+                    Reopen closed
                   </button>
                 )}
                 <button type="button" className="sp-head-action" onClick={() => api.navigate(tabId, 'orbit://history')}>
@@ -578,68 +573,62 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
                 </button>
               </div>
             </div>
-            {items.length === 0 ? (
-              <div className="sp-empty-inline">
-                <Clock size={14} aria-hidden />
-                <span>Recently closed tabs and visited pages appear here.</span>
-              </div>
-            ) : (
-              <ul className="sp-recent-list">
-                {items.map((item) => (
-                  <li key={`${item.closed ? 'c' : 'h'}:${item.url}`}>
-                    <button
-                      type="button"
-                      className="sp-recent-row"
-                      title={item.url}
-                      onClick={(e) => openUrl(item.url, e)}
-                      onAuxClick={(e) => e.button === 1 && openUrl(item.url, e)}
-                    >
-                      <span className="sp-recent-icon">
-                        <SiteGlyph favicon={item.favicon} label={item.title || hostOf(item.url)} />
-                      </span>
-                      <span className="sp-recent-title">{item.title || hostOf(item.url)}</span>
-                      <span className="sp-recent-host">{hostOf(item.url)}</span>
-                      {item.closed ? (
-                        <span className="sp-recent-tag">Closed</span>
-                      ) : (
-                        item.time && <span className="sp-recent-time">{relativeTime(item.time)}</span>
-                      )}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <ul className="sp-recent-list">
+              {items.map((item) => (
+                <li key={`${item.closed ? 'c' : 'h'}:${item.url}`}>
+                  <button
+                    type="button"
+                    className="sp-recent-row"
+                    title={item.url}
+                    onClick={(e) => openUrl(item.url, e)}
+                    onAuxClick={(e) => e.button === 1 && openUrl(item.url, e)}
+                  >
+                    <span className="sp-recent-icon">
+                      <SiteGlyph favicon={item.favicon} label={item.title || hostOf(item.url)} />
+                    </span>
+                    <span className="sp-recent-title">{item.title || hostOf(item.url)}</span>
+                    <span className="sp-recent-host">{hostOf(item.url)}</span>
+                    {item.closed ? (
+                      <span className="sp-recent-tag">Closed</span>
+                    ) : (
+                      item.time && <span className="sp-recent-time">{relativeTime(item.time)}</span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
           </section>
         )
       }
 
       case 'bookmarks':
         return (
-          <section className="sp-widget sp-surface-card sp-bookmarks-widget" aria-label="Bookmarks">
+          <section className="sp-widget sp-section sp-bookmarks-widget" aria-label="Bookmarks">
             <div className="sp-section-head">
-              <span className="sp-section-title">
-                <BookmarkIcon size={13} aria-hidden />
-                <span>Bookmarks</span>
-              </span>
+              <h2 className="sp-section-title">Bookmarks</h2>
               <button type="button" className="sp-head-action" onClick={() => api.navigate(tabId, 'orbit://bookmarks')}>
                 Manage
               </button>
             </div>
             {data.bookmarks.length === 0 ? (
-              <div className="sp-empty-inline">
-                <span>
-                  Press <kbd>Ctrl D</kbd> on any page to pin a bookmark here.
-                </span>
-              </div>
+              dataLoaded ? (
+                <p className="sp-empty-inline">
+                  Press <kbd>Ctrl D</kbd> on any page to save a bookmark here.
+                </p>
+              ) : (
+                <p className="sp-empty-inline sp-empty-placeholder" aria-hidden>
+                  &nbsp;
+                </p>
+              )
             ) : (
               <nav className="sp-bm-row" aria-label="Saved bookmarks">
-                {data.bookmarks.slice(0, 10).map((b) => {
+                {data.bookmarks.slice(0, 12).map((b) => {
                   const name = b.title || hostOf(b.url)
                   return (
                     <button
                       key={b.url}
                       type="button"
-                      className="sp-bm-pill"
+                      className="sp-bm-item"
                       title={b.url}
                       onClick={(e) => openUrl(b.url, e)}
                       onAuxClick={(e) => e.button === 1 && openUrl(b.url, e)}
@@ -658,12 +647,9 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
 
       case 'focus-note':
         return (
-          <section className="sp-widget sp-surface-card sp-note-widget" aria-label="Focus note">
+          <section className="sp-widget sp-section sp-note-widget" aria-label="Focus note">
             <div className="sp-section-head">
-              <span className="sp-section-title">
-                <NotebookPen size={13} aria-hidden />
-                <span>What are you studying today?</span>
-              </span>
+              <h2 className="sp-section-title">What are you studying today?</h2>
               {noteDraft && (
                 <button
                   type="button"
@@ -674,14 +660,13 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
                     patchStart({ focusNote: '' })
                   }}
                 >
-                  <X size={12} aria-hidden />
-                  <span>Clear</span>
+                  Clear
                 </button>
               )}
             </div>
             <textarea
               className="sp-note-input"
-              rows={3}
+              rows={2}
               maxLength={START_PAGE_LIMITS.maxFocusNote}
               placeholder="Write your main goal, chapter, or next step…"
               aria-label="What are you studying today?"
@@ -695,7 +680,6 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
       case 'quote':
         return (
           <section className="sp-widget sp-quote-widget" aria-label="Daily quote">
-            <Quote size={14} className="sp-quote-mark" aria-hidden />
             <blockquote className="sp-quote-text">“{quote.text}”</blockquote>
             <cite className="sp-quote-author">— {quote.author}</cite>
           </section>
@@ -728,6 +712,8 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
         <div className="sp-container">
           <div className={`sp-widgets ${config.layout === 'wide' ? 'wide' : 'centered'}`}>
             {enabledWidgets.map((w) => {
+              const content = renderWidget(w.id)
+              if (!content) return null
               const fullIdx = config.widgets.findIndex((item) => item.id === w.id)
               const isHero = w.id === 'clock' || w.id === 'search' || w.id === 'quick-links' || w.id === 'quote'
               return (
@@ -742,7 +728,7 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
                   onDrop={() => drawerOpen && handleWidgetDrop(w.id)}
                   onDragEnd={() => setDragWidgetIdx(null)}
                 >
-                  {renderWidget(w.id)}
+                  {content}
                 </div>
               )
             })}
@@ -751,10 +737,6 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
           <FirstRunImportBanner />
 
           <footer className="sp-footer">
-            <p className="start-hint">
-              <kbd>Ctrl L</kbd> address bar · <kbd>Ctrl K</kbd> command bar · <kbd>Ctrl T</kbd> new tab ·{' '}
-              <kbd>Ctrl Shift T</kbd> reopen closed
-            </p>
             <p className="start-links">
               <button type="button" onClick={() => api.navigate(tabId, 'orbit://history')}>
                 History
@@ -768,26 +750,30 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
                 Settings
               </button>
             </p>
+            <p className="start-hint">
+              <kbd>Ctrl L</kbd> address bar · <kbd>Ctrl K</kbd> command bar · <kbd>Ctrl T</kbd> new tab ·{' '}
+              <kbd>Ctrl Shift T</kbd> reopen closed
+            </p>
           </footer>
         </div>
       </div>
 
-      {/* Subtle bottom-right Customize button */}
+      {/* Quiet bottom-right icon button */}
       <button
         type="button"
         className={`sp-customize-btn ${drawerOpen ? 'on' : ''}`}
         aria-label="Customize start page"
+        title="Customize start page"
         aria-expanded={drawerOpen}
         onClick={() => setDrawerOpen((v) => !v)}
       >
-        <SlidersHorizontal size={14} aria-hidden />
-        <span>Customize</span>
+        <SlidersHorizontal size={15} strokeWidth={1.75} aria-hidden />
       </button>
 
       <StartCustomizeDrawer
         open={drawerOpen}
         config={config}
-        hasCustomImage={!!config.backgroundImage}
+        hasCustomImage={!!config.backgroundImage && !!bgDataUrl}
         bgError={bgError}
         onClose={() => setDrawerOpen(false)}
         onPatch={patchStart}
@@ -795,7 +781,7 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
         onRemoveImage={() => void handleRemoveImage()}
         onOpenAppearance={() => {
           if (onOpenAppearance) onOpenAppearance()
-          else api.navigate(tabId, 'orbit://settings')
+          else api.openInternal('orbit://settings')
         }}
       />
     </div>
