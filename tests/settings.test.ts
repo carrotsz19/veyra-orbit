@@ -24,6 +24,7 @@ test('sanitizeSettings returns safe defaults for non-objects and drops unknown k
     sleepAfterMinutes: 60,
     sleepPinnedTabs: true,
     windowButtons: 'dots',
+    updateMode: 'notify',
     extra: 'drop me',
     __proto__: { polluted: true }
   })
@@ -38,6 +39,7 @@ test('sanitizeSettings returns safe defaults for non-objects and drops unknown k
     sleepAfterMinutes: 60,
     sleepPinnedTabs: true,
     windowButtons: 'dots',
+    updateMode: 'notify',
     appearance: DEFAULT_APPEARANCE,
     startPage: DEFAULT_START_PAGE
   })
@@ -55,7 +57,8 @@ test('sanitizeSettings rejects invalid field values and falls back to defaults',
     compactMode: 'on',
     sleepAfterMinutes: 45,
     sleepPinnedTabs: 1,
-    windowButtons: 'macos'
+    windowButtons: 'macos',
+    updateMode: 'manual'
   })
   assert.deepEqual(cleaned, DEFAULT_SETTINGS)
 })
@@ -73,6 +76,7 @@ test('mergeSettings applies valid fields and ignores invalid or unknown ones', (
     sleepAfterMinutes: 15,
     sleepPinnedTabs: true,
     windowButtons: 'dots',
+    updateMode: 'notify',
     unknown: 123
   })
   assert.deepEqual(next, {
@@ -86,6 +90,7 @@ test('mergeSettings applies valid fields and ignores invalid or unknown ones', (
     sleepAfterMinutes: 15,
     sleepPinnedTabs: true,
     windowButtons: 'dots',
+    updateMode: 'notify',
     appearance: DEFAULT_APPEARANCE,
     startPage: DEFAULT_START_PAGE
   })

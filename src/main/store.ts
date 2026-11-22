@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import type { Bookmark, HistoryEntry, SitePermission } from '../shared/types'
 import type { Candidate } from '../shared/suggest'
 import { isAskablePermission, normalizePermissionOrigin } from '../shared/permissions.ts'
+import { normalizeBookmarkFolder } from '../shared/bookmarks.ts'
 import { isAllowedUrl } from '../shared/url.ts'
 
 const MAX_URL = 4096
@@ -39,7 +40,9 @@ export class Store {
       CREATE TABLE IF NOT EXISTS bookmarks (
         url TEXT PRIMARY KEY,
         title TEXT NOT NULL DEFAULT '',
-        created INTEGER NOT NULL
+        created INTEGER NOT NULL,
+        folder TEXT NOT NULL DEFAULT '',
+        position INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS permissions (
         origin TEXT NOT NULL,
@@ -49,6 +52,28 @@ export class Store {
         PRIMARY KEY (origin, permission)
       );
     `)
+    this.migrateBookmarks()
+  }
+
+  /**
+   * Additive migration for profiles created before bookmark folders & bar ordering existed.
+   * Keeps every existing bookmark safely at the top level (folder = '') in newest-first order.
+   */
+  private migrateBookmarks(): void {
+    const cols = new Set(
+      (this.db.prepare('PRAGMA table_info(bookmarks)').all() as { name: string }[]).map((c) => c.name)
+    )
+    if (!cols.has('folder')) {
+      this.db.exec(`ALTER TABLE bookmarks ADD COLUMN folder TEXT NOT NULL DEFAULT ''`)
+    }
+    if (!cols.has('position')) {
+      this.db.exec(`ALTER TABLE bookmarks ADD COLUMN position INTEGER NOT NULL DEFAULT 0`)
+      const existing = this.db.prepare('SELECT url FROM bookmarks ORDER BY created DESC').all() as { url: string }[]
+      const setPos = this.db.prepare('UPDATE bookmarks SET position = ? WHERE url = ?')
+      for (let i = 0; i < existing.length; i++) {
+        setPos.run(i, existing[i].url)
+      }
+    }
   }
 
   close(): void {
@@ -151,8 +176,15 @@ export class Store {
 
   // ---- bookmarks ---------------------------------------------------------------
 
+  private nextBookmarkPosition(): number {
+    const row = this.db.prepare('SELECT MAX(position) AS maxPos FROM bookmarks').get() as { maxPos: number | null } | undefined
+    return row && typeof row.maxPos === 'number' ? row.maxPos + 1 : 0
+  }
+
   bookmarks(): Bookmark[] {
-    return this.db.prepare('SELECT url, title, created FROM bookmarks ORDER BY created DESC').all() as unknown as Bookmark[]
+    return this.db
+      .prepare('SELECT url, title, created, folder, position FROM bookmarks ORDER BY position ASC, created DESC')
+      .all() as unknown as Bookmark[]
   }
 
   isBookmarked(url: string): boolean {
@@ -160,13 +192,32 @@ export class Store {
   }
 
   /** Adds or removes the bookmark. Returns whether it's bookmarked now. */
-  toggleBookmark(url: string, title: string): boolean {
+  toggleBookmark(url: string, title: string, folder = ''): boolean {
     if (!recordable(url)) return false
     if (this.isBookmarked(url)) {
       this.removeBookmark(url)
       return false
     }
-    this.db.prepare('INSERT INTO bookmarks (url, title, created) VALUES (?, ?, ?)').run(url, clip(title, MAX_TITLE), Date.now())
+    this.db
+      .prepare('INSERT INTO bookmarks (url, title, created, folder, position) VALUES (?, ?, ?, ?, ?)')
+      .run(url, clip(title, MAX_TITLE), Date.now(), normalizeBookmarkFolder(folder), this.nextBookmarkPosition())
+    return true
+  }
+
+  /** Adds a bookmark (or updates its title/folder if already saved). Rejects non-http(s) URLs. */
+  addBookmark(url: string, title: string, folder = ''): boolean {
+    if (!recordable(url)) return false
+    const cleanTitle = clip(title.trim(), MAX_TITLE)
+    const cleanFolder = normalizeBookmarkFolder(folder)
+    if (this.isBookmarked(url)) {
+      this.db
+        .prepare('UPDATE bookmarks SET title = CASE WHEN ? <> \'\' THEN ? ELSE title END, folder = ? WHERE url = ?')
+        .run(cleanTitle, cleanTitle, cleanFolder, url)
+      return true
+    }
+    this.db
+      .prepare('INSERT INTO bookmarks (url, title, created, folder, position) VALUES (?, ?, ?, ?, ?)')
+      .run(url, cleanTitle, Date.now(), cleanFolder, this.nextBookmarkPosition())
     return true
   }
 
@@ -174,8 +225,30 @@ export class Store {
     this.db.prepare('DELETE FROM bookmarks WHERE url = ?').run(url)
   }
 
-  renameBookmark(url: string, title: string): void {
+  renameBookmark(url: string, title: string, folder?: string): void {
+    if (folder !== undefined) {
+      this.db
+        .prepare('UPDATE bookmarks SET title = ?, folder = ? WHERE url = ?')
+        .run(clip(title.trim(), MAX_TITLE), normalizeBookmarkFolder(folder), url)
+      return
+    }
     this.db.prepare('UPDATE bookmarks SET title = ? WHERE url = ?').run(clip(title.trim(), MAX_TITLE), url)
+  }
+
+  reorderBookmarks(order: readonly { url: string; position: number }[]): void {
+    if (!order.length) return
+    const stmt = this.db.prepare('UPDATE bookmarks SET position = ? WHERE url = ?')
+    this.db.exec('BEGIN')
+    try {
+      for (const entry of order) {
+        if (!Number.isFinite(entry.position)) continue
+        stmt.run(Math.max(0, Math.floor(entry.position)), entry.url)
+      }
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
   }
 
   // ---- bulk import (transactional) ---------------------------------------------
@@ -185,7 +258,8 @@ export class Store {
     if (!items.length) return { imported: 0, skipped: 0 }
     let imported = 0
     let skipped = 0
-    const insert = this.db.prepare('INSERT OR IGNORE INTO bookmarks (url, title, created) VALUES (?, ?, ?)')
+    let pos = this.nextBookmarkPosition()
+    const insert = this.db.prepare('INSERT OR IGNORE INTO bookmarks (url, title, created, folder, position) VALUES (?, ?, ?, ?, ?)')
     this.db.exec('BEGIN')
     try {
       for (const item of items) {
@@ -194,9 +268,13 @@ export class Store {
           continue
         }
         const created = Number.isFinite(item.created) && item.created > 0 ? Math.floor(item.created) : Date.now()
-        const res = insert.run(item.url, clip(item.title, MAX_TITLE), created)
-        if (res.changes > 0) imported++
-        else skipped++
+        const res = insert.run(item.url, clip(item.title, MAX_TITLE), created, '', pos)
+        if (res.changes > 0) {
+          imported++
+          pos++
+        } else {
+          skipped++
+        }
       }
       this.db.exec('COMMIT')
     } catch (err) {

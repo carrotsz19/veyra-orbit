@@ -6,6 +6,7 @@ import {
   Clock,
   Code,
   Compass,
+  Download,
   EyeOff,
   FlaskConical,
   Globe,
@@ -27,10 +28,10 @@ import {
   VolumeX,
   X
 } from 'lucide-react'
-import type { BrowserState, DownloadInfo, SplitGroup, TabInfo, UpdateState, WorkspaceAccentId, WorkspaceIconId, WorkspaceInfo } from '@shared/types'
+import type { BrowserState, DownloadInfo, SplitGroup, TabInfo, WorkspaceAccentId, WorkspaceIconId, WorkspaceInfo } from '@shared/types'
 import { WORKSPACE_ACCENTS, WORKSPACE_ICONS, isBuiltInWorkspaceIcon } from '@shared/workspaces'
 import { displayUrl } from '@shared/url'
-import { Downloads } from './Downloads'
+import { DownloadTriggerButton, Downloads } from './Downloads'
 
 const api = window.veyra
 
@@ -76,6 +77,7 @@ function Favicon({ tab }: { tab: TabInfo }): React.JSX.Element {
   if (tab.loading) return <LoaderCircle className="fav spin" size={16} strokeWidth={2} />
   if (tab.url === 'orbit://history') return <Clock className="fav fav-glyph" size={15} strokeWidth={1.75} />
   if (tab.url === 'orbit://bookmarks') return <Bookmark className="fav fav-glyph" size={15} strokeWidth={1.75} />
+  if (tab.url === 'orbit://downloads') return <Download className="fav fav-glyph" size={15} strokeWidth={1.75} />
   if (tab.url === 'orbit://settings') return <Settings className="fav fav-glyph" size={15} strokeWidth={1.75} />
   if (tab.favicon && broken !== tab.favicon) return <img className="fav" src={tab.favicon} alt="" onError={() => setBroken(tab.favicon!)} />
   return <Globe className="fav fav-glyph" size={15} strokeWidth={1.65} />
@@ -95,9 +97,10 @@ interface Props {
   state: BrowserState
   downloads: DownloadInfo[]
   downloadsOpen: boolean
+  hasUnseenDownloads?: boolean
+  downloadPulseTick?: number
+  onToggleDownloads: () => void
   onCloseDownloads: () => void
-  update: UpdateState | null
-  onDismissUpdate: () => void
   onEditorOpenChange?: (open: boolean) => void
   onPointerEdge?: (inside: boolean) => void
   onDragTabChange?: (tabId: number | null) => void
@@ -108,9 +111,10 @@ export function Sidebar({
   state,
   downloads,
   downloadsOpen,
+  hasUnseenDownloads = false,
+  downloadPulseTick = 0,
+  onToggleDownloads,
   onCloseDownloads,
-  update,
-  onDismissUpdate,
   onEditorOpenChange,
   onPointerEdge,
   onDragTabChange,
@@ -332,10 +336,11 @@ export function Sidebar({
           {openRows.map((row) => {
             if (row.kind === 'split') {
               const groupActive = row.tabs.some((t) => t.id === state.activeId)
+              const isStacked = row.tabs.length === 2 && row.group.orientation === 'stacked'
               return (
                 <div
                   key={row.group.id}
-                  className={`split-row ${groupActive ? 'on' : ''} ${row.tabs.length > 2 ? 'grid' : ''}`}
+                  className={`split-row ${groupActive ? 'on' : ''} ${row.tabs.length > 2 ? 'grid' : ''} ${isStacked ? 'stacked' : ''}`}
                   role="group"
                   aria-label="Split tabs"
                 >
@@ -470,23 +475,6 @@ export function Sidebar({
       </div>
 
       {downloadsOpen && <Downloads items={downloads} onClose={onCloseDownloads} />}
-      {update?.status === 'ready' && (
-        <div className="update-note" role="status" aria-live="polite">
-          <div className="update-note-top">
-            <span className="update-note-dot" aria-hidden />
-            <span className="update-note-text">Update ready — restart to update</span>
-            <button type="button" className="dl-btn" aria-label="Dismiss update notice" title="Dismiss" onClick={onDismissUpdate}>
-              <X size={13} />
-            </button>
-          </div>
-          <div className="update-note-actions">
-            {update.availableVersion && <span className="update-note-ver">v{update.availableVersion}</span>}
-            <button type="button" className="btn primary update-note-btn" onClick={() => api.installUpdate()}>
-              Restart
-            </button>
-          </div>
-        </div>
-      )}
 
       {editor && (
         <form
@@ -618,6 +606,14 @@ export function Sidebar({
       )}
 
       <div className="ws-bar" role="tablist" aria-label="Workspaces">
+        <DownloadTriggerButton
+          items={downloads}
+          open={downloadsOpen}
+          hasUnseen={hasUnseenDownloads}
+          pulseTick={downloadPulseTick}
+          onToggle={onToggleDownloads}
+        />
+        <span className="ws-bar-sep" aria-hidden />
         <div className="ws-dots">
           {state.workspaces.map((ws, idx) => {
             const isActive = ws.id === state.activeWorkspaceId

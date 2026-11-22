@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Sparkles, X } from 'lucide-react'
 import type {
   BrowserState,
   CompactRevealState,
@@ -11,8 +12,16 @@ import type {
   UpdateState,
   WindowState
 } from '@shared/types'
-import { DEFAULT_SPLIT_RATIO, computeSplitLayout, findSplitGroup, ratioFromPointer } from '@shared/split'
+import {
+  DEFAULT_SPLIT_RATIO,
+  computeSplitLayout,
+  dropPlacementFromPoint,
+  findSplitGroup,
+  ratioFromPointer,
+  type SplitPlacement
+} from '@shared/split'
 import { APPEARANCE_LIMITS, DEFAULT_APPEARANCE } from '@shared/appearance'
+import { shouldShowBookmarkBar } from '@shared/bookmarks'
 import './library.css'
 import './settings.css'
 import './startpage.css'
@@ -21,12 +30,13 @@ import './extensions.css'
 import { applyResolvedAppearance } from './applyAppearance'
 import { Sidebar } from './components/Sidebar'
 import { TitleBar } from './components/TitleBar'
+import { BookmarkBar } from './components/BookmarkBar'
 import { StartPage } from './components/StartPage'
 import { ErrorPage } from './components/ErrorPage'
 import { ExternalAppBar, PermissionBar } from './components/PermissionBar'
 import { ExtensionInstallBar } from './components/ExtensionInstallBar'
 import { FindBar } from './components/FindBar'
-import { BookmarksPage, HistoryPage } from './components/Library'
+import { BookmarksPage, DownloadsPage, HistoryPage } from './components/Library'
 import { SettingsPage } from './components/SettingsPage'
 
 const api = window.veyra
@@ -46,6 +56,7 @@ function renderTabSurface(
   tab: TabInfo,
   settings: SettingsView | null,
   update: UpdateState | null,
+  downloads: DownloadInfo[],
   onOpenAppearance: () => void,
   shot?: string,
   isPrivate = false
@@ -53,6 +64,7 @@ function renderTabSurface(
   if (!tab.url) return <StartPage tabId={tab.id} settings={settings} isPrivate={isPrivate} onOpenAppearance={onOpenAppearance} />
   if (tab.url === 'orbit://history') return <HistoryPage key={tab.id} tabId={tab.id} />
   if (tab.url === 'orbit://bookmarks') return <BookmarksPage key={tab.id} tabId={tab.id} />
+  if (tab.url === 'orbit://downloads') return <DownloadsPage key={tab.id} items={downloads} />
   if (tab.url === 'orbit://settings') return <SettingsPage key={tab.id} settings={settings} update={update} />
   if (tab.error) return <ErrorPage tab={tab} />
   if (shot) return <img className="page-shot" src={shot} alt="" />
@@ -66,9 +78,11 @@ export function App(): React.JSX.Element {
   const [extInstallAsks, setExtInstallAsks] = useState<ExtensionInstallAsk[]>([])
   const [settings, setSettings] = useState<SettingsView | null>(null)
   const [update, setUpdate] = useState<UpdateState | null>(null)
-  const [dismissedUpdateVer, setDismissedUpdateVer] = useState<string | null>(null)
   const [downloads, setDownloads] = useState<DownloadInfo[]>([])
   const [downloadsOpen, setDownloadsOpen] = useState(false)
+  const [hasUnseenDownloads, setHasUnseenDownloads] = useState(false)
+  const [downloadPulseTick, setDownloadPulseTick] = useState(0)
+  const [dlFly, setDlFly] = useState<{ key: number; fromX: number; fromY: number; toX: number; toY: number } | null>(null)
   const [sidebarEditing, setSidebarEditing] = useState(false)
   const [omniboxEditing, setOmniboxEditing] = useState(false)
   const [compact, setCompact] = useState<CompactRevealState>({ enabled: false, sidebar: false, toolbar: false })
@@ -81,16 +95,22 @@ export function App(): React.JSX.Element {
   const [shots, setShots] = useState<Record<number, string> | null>(null)
   const [pageSize, setPageSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 })
   const [dragTabId, setDragTabId] = useState<number | null>(null)
-  const [dropSide, setDropSide] = useState<'left' | 'right' | null>(null)
+  const [dropSide, setDropSide] = useState<SplitPlacement | null>(null)
+  const [compactDragTabId, setCompactDragTabId] = useState<number | null>(null)
+  const [compactDropSide, setCompactDropSide] = useState<SplitPlacement | null>(null)
   const [resizingKind, setResizingKind] = useState<'col' | 'row' | null>(null)
   const [resizingSidebar, setResizingSidebar] = useState(false)
   const pageRef = useRef<HTMLDivElement>(null)
   const pageFullscreenRef = useRef(false)
   const maxDownloadId = useRef(0)
+  const downloadsOpenRef = useRef(false)
+  downloadsOpenRef.current = downloadsOpen
   const dragOverlayActive = useRef(false)
   const dragTabRef = useRef<number | null>(null)
+  const compactDragRef = useRef<number | null>(null)
   const lastTokensRef = useRef<import('@shared/types').ResolvedAppearance | null>(null)
   dragTabRef.current = dragTabId
+  compactDragRef.current = compactDragTabId
 
   useEffect(() => {
     const mqMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -116,18 +136,57 @@ export function App(): React.JSX.Element {
         const newest = items.reduce((m, d) => Math.max(m, d.id), 0)
         if (newest > maxDownloadId.current) {
           maxDownloadId.current = newest
-          setDownloadsOpen(true)
+          setDownloadPulseTick((n) => n + 1)
+          if (!downloadsOpenRef.current) setHasUnseenDownloads(true)
+          const pageEl = pageRef.current
+          if (pageEl) {
+            const pr = pageEl.getBoundingClientRect()
+            const trigEl = document.querySelector<HTMLElement>('.dl-trigger')
+            const tr = trigEl && trigEl.offsetParent !== null ? trigEl.getBoundingClientRect() : null
+            const sideRight = document.documentElement.dataset.sidebarSide === 'right'
+            const fromX = Math.round(pr.left + pr.width * 0.5)
+            const fromY = Math.round(pr.top + Math.min(120, pr.height * 0.28))
+            const toX = tr ? Math.round(tr.left + tr.width / 2) : sideRight ? window.innerWidth - 24 : 24
+            const toY = tr ? Math.round(tr.top + tr.height / 2) : window.innerHeight - 24
+            setDlFly({ key: newest, fromX, fromY, toX, toY })
+          }
         } else if (items.length === 0) {
           setDownloadsOpen(false)
+          setHasUnseenDownloads(false)
         }
       }),
-      api.onToggleDownloads(() => setDownloadsOpen((v) => !v)),
+      api.onToggleDownloads(() => {
+        setDownloadsOpen((v) => {
+          if (!v) setHasUnseenDownloads(false)
+          return !v
+        })
+      }),
       api.onFindOpen(() => {
         setFindOpen(true)
         setFindFocusTick((n) => n + 1)
       }),
       api.onFindClose(() => setFindOpen(false)),
       api.onPageFullscreen(setPageFullscreen),
+      api.onCompactTabDrag((drag) => {
+        if (drag.active && drag.tabId !== null) {
+          compactDragRef.current = drag.tabId
+          setCompactDragTabId(drag.tabId)
+          setCompactDropSide(drag.placement)
+          if (drag.shots !== undefined) {
+            setShots(drag.shots)
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => {
+                if (compactDragRef.current !== null) api.hidePageForOverlay()
+              })
+            )
+          }
+        } else {
+          compactDragRef.current = null
+          setCompactDragTabId(null)
+          setCompactDropSide(null)
+          setShots(null)
+        }
+      }),
       api.onNewWorkspaceRequest(() => setNewWorkspaceTick((n) => n + 1)),
       api.onOpenSettingsSection((sectionId) => {
         sessionStorage.setItem('orbit.settingsSection', sectionId)
@@ -140,6 +199,13 @@ export function App(): React.JSX.Element {
       offs.forEach((off) => off())
     }
   }, [])
+
+  // Clear the download-start fly animation after it finishes.
+  useEffect(() => {
+    if (!dlFly) return
+    const timer = setTimeout(() => setDlFly(null), 540)
+    return () => clearTimeout(timer)
+  }, [dlFly])
 
   // Keep revealed compact panels pinned while interactive UI inside them is open.
   useEffect(() => {
@@ -191,6 +257,10 @@ export function App(): React.JSX.Element {
   }, [sendBounds])
 
   const appearance = settings?.appearance ?? DEFAULT_APPEARANCE
+  const active: TabInfo | undefined = state.tabs.find((t) => t.id === state.activeId)
+  const showBookmarkBar =
+    !compact.enabled &&
+    shouldShowBookmarkBar(appearance.bookmarkBar, !!active && !active.url && !active.error, pageFullscreen || winState.fullscreen)
 
   useLayoutEffect(() => {
     pageFullscreenRef.current = pageFullscreen
@@ -201,9 +271,11 @@ export function App(): React.JSX.Element {
   }, [
     pageFullscreen,
     compact.enabled,
+    showBookmarkBar,
     asks.length,
     externalAsks.length,
     extInstallAsks.length,
+    !!update?.justUpdated,
     findOpen,
     appearance.sidebarSide,
     appearance.sidebarWidth,
@@ -213,7 +285,6 @@ export function App(): React.JSX.Element {
     sendBounds
   ])
 
-  const active: TabInfo | undefined = state.tabs.find((t) => t.id === state.activeId)
   const activeSplit = useMemo(() => findSplitGroup(state.splits, state.activeId), [state.splits, state.activeId])
   const visiblePanes: TabInfo[] = useMemo(() => {
     if (!active) return []
@@ -229,7 +300,7 @@ export function App(): React.JSX.Element {
     return computeSplitLayout(
       { x: 0, y: 0, width: pageSize.width, height: pageSize.height },
       visiblePanes.length,
-      { colRatio: activeSplit.colRatio, rowRatio: activeSplit.rowRatio }
+      { colRatio: activeSplit.colRatio, rowRatio: activeSplit.rowRatio, orientation: activeSplit.orientation }
     )
   }, [isSplitView, activeSplit, pageSize.width, pageSize.height, visiblePanes.length])
 
@@ -237,9 +308,6 @@ export function App(): React.JSX.Element {
   const activeWorkspace = state.workspaces.find((w) => w.id === state.activeWorkspaceId)
   const tabAsks = asks.filter((a) => a.tabId === null || a.tabId === -1 || visibleTabIds.has(a.tabId))
   const tabExternalAsks = externalAsks.filter((a) => a.tabId === null || a.tabId === -1 || visibleTabIds.has(a.tabId))
-
-  const updateKey = update?.availableVersion ?? (update?.status === 'ready' ? '__ready__' : null)
-  const showUpdateNote = update?.status === 'ready' && dismissedUpdateVer !== updateKey
 
   const handleNewWorkspace = useCallback((): void => {
     setNewWorkspaceTick((n) => n + 1)
@@ -276,30 +344,57 @@ export function App(): React.JSX.Element {
     window.addEventListener('pointercancel', onUp)
   }
 
+  const hasOtherUnpinnedTab = useMemo(
+    () => state.tabs.some((t) => !t.pinned && t.id !== state.activeId),
+    [state.tabs, state.activeId]
+  )
+
   const handlePageDragOver = (e: React.DragEvent<HTMLDivElement>): void => {
-    if (dragTabId === null || state.activeId === null) return
-    if (dragTabId === state.activeId && !activeSplit) return
+    const effectiveDragId = dragTabId ?? compactDragTabId
+    if (effectiveDragId === null || state.activeId === null) return
+    if (effectiveDragId === state.activeId && !activeSplit && !hasOtherUnpinnedTab) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
     const rect = e.currentTarget.getBoundingClientRect()
-    const side: 'left' | 'right' = e.clientX - rect.left < rect.width / 2 ? 'left' : 'right'
-    if (side !== dropSide) setDropSide(side)
+    const side = dropPlacementFromPoint(e.clientX, e.clientY, {
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height
+    })
+    if (dragTabId !== null && side !== dropSide) setDropSide(side)
+    if (compactDragTabId !== null && side !== compactDropSide) setCompactDropSide(side)
   }
 
   const handlePageDrop = (e: React.DragEvent<HTMLDivElement>): void => {
     e.preventDefault()
     const raw = e.dataTransfer.getData('text/x-orbit-tab')
-    const droppedId = dragTabId ?? (raw ? Number(raw) : null)
-    const side = dropSide ?? 'right'
+    const droppedId = dragTabId ?? compactDragTabId ?? (raw ? Number(raw) : null)
+    const rect = e.currentTarget.getBoundingClientRect()
+    const fallbackSide = dropPlacementFromPoint(e.clientX, e.clientY, {
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height
+    })
+    const side: SplitPlacement = dropSide ?? compactDropSide ?? fallbackSide ?? 'right'
     setDropSide(null)
     setDragTabId(null)
+    setCompactDropSide(null)
+    setCompactDragTabId(null)
     if (droppedId === null || !Number.isFinite(droppedId) || state.activeId === null) return
-    if (droppedId === state.activeId) {
-      if (activeSplit) api.swapSplit(activeSplit.id)
-      return
-    }
-    api.splitWith(state.activeId, droppedId, side)
+    api.splitDrop(droppedId, side)
   }
+
+  const activeDropSide = dragTabId !== null ? dropSide : compactDragTabId !== null ? compactDropSide : null
+  const dropZoneLabel =
+    activeDropSide === 'left'
+      ? 'Split left'
+      : activeDropSide === 'right'
+        ? 'Split right'
+        : activeDropSide === 'top'
+          ? 'Split top'
+          : 'Split bottom'
 
   const startSidebarResize = (e: React.PointerEvent<HTMLDivElement>): void => {
     if (e.button !== 0) return
@@ -390,6 +485,7 @@ export function App(): React.JSX.Element {
         state={state}
         tab={active}
         settings={settings}
+        update={update}
         winState={winState}
         onPageShot={setShots}
         onEditingChange={setOmniboxEditing}
@@ -401,9 +497,15 @@ export function App(): React.JSX.Element {
         state={state}
         downloads={downloads}
         downloadsOpen={downloadsOpen}
+        hasUnseenDownloads={hasUnseenDownloads}
+        downloadPulseTick={downloadPulseTick}
+        onToggleDownloads={() => {
+          setDownloadsOpen((v) => {
+            if (!v) setHasUnseenDownloads(false)
+            return !v
+          })
+        }}
         onCloseDownloads={() => setDownloadsOpen(false)}
-        update={showUpdateNote ? update : null}
-        onDismissUpdate={() => setDismissedUpdateVer(updateKey)}
         onEditorOpenChange={setSidebarEditing}
         onPointerEdge={compact.enabled ? (inside) => api.setCompactHover('sidebar', inside) : undefined}
         onDragTabChange={setDragTabId}
@@ -426,9 +528,45 @@ export function App(): React.JSX.Element {
         />
       )}
       <main className="main">
+        {showBookmarkBar && <BookmarkBar tab={active} />}
         {tabAsks.length > 0 && <PermissionBar ask={tabAsks[0]} />}
         {tabExternalAsks.length > 0 && <ExternalAppBar ask={tabExternalAsks[0]} />}
         {extInstallAsks.length > 0 && <ExtensionInstallBar ask={extInstallAsks[0]} />}
+        {update?.justUpdated && (
+          <div className="updated-toast" role="status" aria-live="polite">
+            <span className="updated-toast-text">
+              <Sparkles size={13} strokeWidth={2} className="updated-toast-icon" aria-hidden />
+              <span>Updated to {update.justUpdated.version}</span>
+              {update.justUpdated.releaseNotesUrl && (
+                <>
+                  <span className="updated-toast-sep" aria-hidden>
+                    —
+                  </span>
+                  <button
+                    type="button"
+                    className="updated-toast-link"
+                    onClick={() => {
+                      const url = update.justUpdated?.releaseNotesUrl
+                      api.dismissJustUpdated()
+                      if (url) api.newTab(url)
+                    }}
+                  >
+                    What&apos;s new
+                  </button>
+                </>
+              )}
+            </span>
+            <button
+              type="button"
+              className="dl-btn"
+              aria-label="Dismiss update notification"
+              title="Dismiss"
+              onClick={() => api.dismissJustUpdated()}
+            >
+              <X size={13} />
+            </button>
+          </div>
+        )}
         <FindBar open={findOpen} focusTick={findFocusTick} onClose={() => setFindOpen(false)} />
         <div
           className={`page ${isSplitView ? 'split' : ''}`}
@@ -465,7 +603,7 @@ export function App(): React.JSX.Element {
                     }}
                   >
                     <div className="split-pane-inner">
-                      {renderTabSurface(pane, settings, update, () => handleOpenSettingsSection('set-appearance'), shots?.[pane.id], !!activeWorkspace?.private)}
+                      {renderTabSurface(pane, settings, update, downloads, () => handleOpenSettingsSection('set-appearance'), shots?.[pane.id], !!activeWorkspace?.private)}
                     </div>
                   </div>
                 )
@@ -492,18 +630,33 @@ export function App(): React.JSX.Element {
               ))}
             </>
           ) : (
-            active && renderTabSurface(active, settings, update, () => handleOpenSettingsSection('set-appearance'), shots?.[active.id], !!activeWorkspace?.private)
+            active && renderTabSurface(active, settings, update, downloads, () => handleOpenSettingsSection('set-appearance'), shots?.[active.id], !!activeWorkspace?.private)
           )}
 
-          {dragTabId !== null && dropSide && (
-            <div className={`split-drop-zone ${dropSide}`} aria-hidden>
+          {activeDropSide && (
+            <div className={`split-drop-zone ${activeDropSide}`} aria-hidden>
               <div className="split-drop-card">
-                <span>{dropSide === 'left' ? 'Split left' : 'Split right'}</span>
+                <span>{dropZoneLabel}</span>
               </div>
             </div>
           )}
         </div>
       </main>
+      {dlFly && (
+        <div
+          key={dlFly.key}
+          className="dl-fly-chip"
+          aria-hidden
+          style={
+            {
+              '--dl-from-x': `${dlFly.fromX}px`,
+              '--dl-from-y': `${dlFly.fromY}px`,
+              '--dl-to-x': `${dlFly.toX}px`,
+              '--dl-to-y': `${dlFly.toY}px`
+            } as React.CSSProperties
+          }
+        />
+      )}
     </div>
   )
 }

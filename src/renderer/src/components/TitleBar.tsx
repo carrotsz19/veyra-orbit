@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Copy, EyeOff, Menu as MenuIcon, Minus, RotateCw, Square, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ArrowUpCircle, Copy, EyeOff, Menu as MenuIcon, Minus, RotateCw, Square, X } from 'lucide-react'
 import type {
   Bookmark,
   BrowserState,
@@ -9,6 +9,7 @@ import type {
   MenuId,
   SettingsView,
   TabInfo,
+  UpdateState,
   WindowButtonsStyle,
   WindowState
 } from '@shared/types'
@@ -22,6 +23,7 @@ import {
   shouldCollapseMenus
 } from '@shared/menu'
 import { isInternalUrl } from '@shared/url'
+import { shouldShowBookmarkBar } from '@shared/bookmarks'
 import { Omnibox } from './Omnibox'
 import { ExtensionToolbar } from './ExtensionToolbar'
 
@@ -121,6 +123,7 @@ interface TitleBarProps {
   state: BrowserState
   tab?: TabInfo
   settings: SettingsView | null
+  update?: UpdateState | null
   winState: WindowState
   onPageShot: (shots: Record<number, string> | null) => void
   onEditingChange?: (editing: boolean) => void
@@ -139,6 +142,7 @@ export function TitleBar({
   state,
   tab,
   settings,
+  update = null,
   winState,
   onPageShot,
   onEditingChange,
@@ -212,6 +216,11 @@ export function TitleBar({
     }
   }, [collapsed, openTarget])
 
+  const activeSplitGroup = useMemo(
+    () => (tab ? state.splits.find((g) => g.tabIds.includes(tab.id)) : undefined),
+    [tab, state.splits]
+  )
+
   const sections = useMemo(
     () =>
       buildMenus({
@@ -229,15 +238,23 @@ export function TitleBar({
         workspaces: state.workspaces.map((w) => ({ id: w.id, name: w.name, private: w.private })),
         activeWorkspaceId: state.activeWorkspaceId,
         compactMode: !!settings?.compactMode,
-        isSplit: !!tab && state.splits.some((g) => g.tabIds.includes(tab.id)),
+        bookmarkBarVisible: shouldShowBookmarkBar(
+          settings?.appearance.bookmarkBar ?? 'start-page',
+          !!tab && !tab.url && !tab.error,
+          winState.fullscreen
+        ),
+        isSplit: !!activeSplitGroup,
+        splitPaneCount: activeSplitGroup?.tabIds.length,
+        splitOrientation: activeSplitGroup?.orientation,
         isFullscreen: winState.fullscreen,
         canReopenClosed: state.canReopenClosed,
         history: history.map((h) => ({ url: h.url, title: h.title })),
         bookmarks: bookmarks.map((b) => ({ url: b.url, title: b.title })),
         appVersion: INITIAL_VERSION,
-        isDev: __CHANNEL__ === 'dev'
+        isDev: __CHANNEL__ === 'dev',
+        updateReadyVersion: update?.status === 'ready' ? (update.availableVersion ?? '') : null
       }),
-    [tab, state.workspaces, state.activeWorkspaceId, state.splits, state.canReopenClosed, settings?.compactMode, winState.fullscreen, history, bookmarks]
+    [tab, activeSplitGroup, state.workspaces, state.activeWorkspaceId, state.canReopenClosed, settings?.compactMode, settings?.appearance.bookmarkBar, winState.fullscreen, history, bookmarks, update?.status, update?.availableVersion]
   )
 
   const recentUrls = useMemo(() => recentHistoryItems(history.map((h) => ({ url: h.url, title: h.title }))), [history])
@@ -252,6 +269,8 @@ export function TitleBar({
 
   const runAction = useCallback(
     (id: string): void => {
+      if (id.startsWith('bmbar:') || id.startsWith('submenu:bmbar-folder:')) return
+      if (!liveRef.current.openTarget && (id.startsWith('submenu:') || id === 'submenu-back')) return
       if (id.startsWith('submenu:')) {
         const subId = id.slice('submenu:'.length) as MenuId
         if (subId === 'history' || subId === 'bookmarks') refreshLibraryData()
@@ -364,8 +383,14 @@ export function TitleBar({
         case 'view:compact':
           api.toggleCompactMode()
           return
+        case 'view:bookmark-bar':
+          api.toggleBookmarkBar()
+          return
         case 'view:split':
           api.splitWithNext()
+          return
+        case 'view:split-rotate':
+          api.rotateSplit()
           return
         case 'view:zoom-in':
           api.zoomIn()
@@ -402,6 +427,9 @@ export function TitleBar({
           return
         case 'bookmarks:all':
           api.openInternal('orbit://bookmarks')
+          return
+        case 'help:install-update':
+          api.installUpdate()
           return
         case 'help:check-updates':
           onOpenSettingsSection('set-updates')
@@ -733,6 +761,18 @@ export function TitleBar({
             <EyeOff size={12} aria-hidden />
             <span>Private</span>
           </span>
+        )}
+        {update?.status === 'ready' && (
+          <button
+            type="button"
+            className="update-pill"
+            aria-label={update.availableVersion ? `Restart to update to version ${update.availableVersion}` : 'Restart to update'}
+            title={update.availableVersion ? `Restart to update to v${update.availableVersion}` : 'Restart to update'}
+            onClick={() => api.installUpdate()}
+          >
+            <ArrowUpCircle size={13} strokeWidth={2} aria-hidden />
+            <span>Restart to update</span>
+          </button>
         )}
         {tab && tab.zoom !== 100 && (
           <button

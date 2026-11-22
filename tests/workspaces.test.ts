@@ -184,7 +184,7 @@ test('parseSavedSession preserves valid per-workspace split groups and drops inv
         ],
         active: 1,
         splits: [
-          { tabs: [1, 2], colRatio: 0.62, rowRatio: 0.5 },
+          { tabs: [1, 2], colRatio: 0.62, rowRatio: 0.5, orientation: 'stacked' },
           // Overlaps tab 2 and includes pinned tab 0 and out-of-range 99 -> leaves <2 valid tabs -> dropped
           { tabs: [0, 2, 99], colRatio: 0.5, rowRatio: 0.5 },
           // Out-of-bounds ratio clamps
@@ -194,7 +194,7 @@ test('parseSavedSession preserves valid per-workspace split groups and drops inv
     ]
   }
   const parsed = parseSavedSession(v2)
-  assert.deepEqual(parsed.workspaces[0].splits, [{ tabs: [1, 2], colRatio: 0.62, rowRatio: 0.5 }])
+  assert.deepEqual(parsed.workspaces[0].splits, [{ tabs: [1, 2], colRatio: 0.62, rowRatio: 0.5, orientation: 'stacked' }])
 })
 
 test('private workspaces use unique non-persistent partitions and are excluded from session save and restore', () => {

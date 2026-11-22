@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BrowserState, DownloadInfo, SettingsView, TabInfo, UpdateState, WindowState } from '@shared/types'
 import '../extensions.css'
 import { applyResolvedAppearance } from '../applyAppearance'
+import { shouldShowBookmarkBar } from '@shared/bookmarks'
+import { BookmarkBar } from './BookmarkBar'
 import { Sidebar } from './Sidebar'
 import { TitleBar } from './TitleBar'
 
@@ -26,13 +28,15 @@ export function CompactSidebarWindow(): React.JSX.Element {
   const [state, setState] = useState<BrowserState>(INITIAL_STATE)
   const [downloads, setDownloads] = useState<DownloadInfo[]>([])
   const [downloadsOpen, setDownloadsOpen] = useState(false)
-  const [update, setUpdate] = useState<UpdateState | null>(null)
-  const [dismissedUpdateVer, setDismissedUpdateVer] = useState<string | null>(null)
+  const [hasUnseenDownloads, setHasUnseenDownloads] = useState(false)
+  const [downloadPulseTick, setDownloadPulseTick] = useState(0)
   const [sidebarEditing, setSidebarEditing] = useState(false)
   const [draggingTab, setDraggingTab] = useState(false)
   const [newWorkspaceTick, setNewWorkspaceTick] = useState(0)
   const [visible, setVisible] = useState(false)
   const maxDownloadId = useRef(0)
+  const downloadsOpenRef = useRef(false)
+  downloadsOpenRef.current = downloadsOpen
   const panel = window.veyraCompactPanel!
 
   useEffect(() => {
@@ -40,18 +44,24 @@ export function CompactSidebarWindow(): React.JSX.Element {
     const offs = [
       api.onState(setState),
       api.onAppearance(applyResolvedAppearance),
-      api.onUpdateState(setUpdate),
       api.onDownloads((items) => {
         setDownloads(items)
         const newest = items.reduce((m, d) => Math.max(m, d.id), 0)
         if (newest > maxDownloadId.current) {
           maxDownloadId.current = newest
-          setDownloadsOpen(true)
+          setDownloadPulseTick((n) => n + 1)
+          if (!downloadsOpenRef.current) setHasUnseenDownloads(true)
         } else if (items.length === 0) {
           setDownloadsOpen(false)
+          setHasUnseenDownloads(false)
         }
       }),
-      api.onToggleDownloads(() => setDownloadsOpen((v) => !v)),
+      api.onToggleDownloads(() => {
+        setDownloadsOpen((v) => {
+          if (!v) setHasUnseenDownloads(false)
+          return !v
+        })
+      }),
       panel.onVisible(setVisible),
       panel.onNewWorkspace(() => setNewWorkspaceTick((n) => n + 1))
     ]
@@ -67,8 +77,6 @@ export function CompactSidebarWindow(): React.JSX.Element {
   }, [downloadsOpen, sidebarEditing, draggingTab])
 
   const activeWorkspace = state.workspaces.find((w) => w.id === state.activeWorkspaceId)
-  const updateKey = update?.availableVersion ?? (update?.status === 'ready' ? '__ready__' : null)
-  const showUpdateNote = update?.status === 'ready' && dismissedUpdateVer !== updateKey
 
   return (
     <div
@@ -80,12 +88,22 @@ export function CompactSidebarWindow(): React.JSX.Element {
           state={state}
           downloads={downloads}
           downloadsOpen={downloadsOpen}
+          hasUnseenDownloads={hasUnseenDownloads}
+          downloadPulseTick={downloadPulseTick}
+          onToggleDownloads={() => {
+            setDownloadsOpen((v) => {
+              if (!v) setHasUnseenDownloads(false)
+              return !v
+            })
+          }}
           onCloseDownloads={() => setDownloadsOpen(false)}
-          update={showUpdateNote ? update : null}
-          onDismissUpdate={() => setDismissedUpdateVer(updateKey)}
           onEditorOpenChange={setSidebarEditing}
           onPointerEdge={(inside) => api.setCompactHover('sidebar', inside)}
-          onDragTabChange={(id) => setDraggingTab(id !== null)}
+          onDragTabChange={(id) => {
+            setDraggingTab(id !== null)
+            if (id !== null) panel.startTabDrag(id)
+            else panel.endTabDrag()
+          }}
           openNewWorkspaceTick={newWorkspaceTick}
         />
       </div>
@@ -100,8 +118,10 @@ export function CompactSidebarWindow(): React.JSX.Element {
 export function CompactTitlebarWindow(): React.JSX.Element {
   const [state, setState] = useState<BrowserState>(INITIAL_STATE)
   const [settings, setSettings] = useState<SettingsView | null>(null)
+  const [update, setUpdate] = useState<UpdateState | null>(null)
   const [winState, setWinState] = useState<WindowState>({ focused: true, maximized: false, fullscreen: false })
   const [omniboxEditing, setOmniboxEditing] = useState(false)
+  const [bmEditing, setBmEditing] = useState(false)
   const [visible, setVisible] = useState(false)
   const panel = window.veyraCompactPanel!
 
@@ -110,6 +130,7 @@ export function CompactTitlebarWindow(): React.JSX.Element {
     const offs = [
       api.onState(setState),
       api.onSettings(setSettings),
+      api.onUpdateState(setUpdate),
       api.onAppearance(applyResolvedAppearance),
       api.onWinState(setWinState),
       panel.onVisible(setVisible)
@@ -122,10 +143,15 @@ export function CompactTitlebarWindow(): React.JSX.Element {
   }, [panel])
 
   useEffect(() => {
-    api.setCompactPin('omnibox', omniboxEditing)
-  }, [omniboxEditing])
+    api.setCompactPin('omnibox', omniboxEditing || bmEditing)
+  }, [omniboxEditing, bmEditing])
 
   const active: TabInfo | undefined = state.tabs.find((t) => t.id === state.activeId)
+  const showBookmarkBar = shouldShowBookmarkBar(
+    settings?.appearance.bookmarkBar ?? 'start-page',
+    !!active && !active.url && !active.error,
+    winState.fullscreen
+  )
   const activeWorkspace = state.workspaces.find((w) => w.id === state.activeWorkspaceId)
   const noopShot = useCallback((): void => {}, [])
   const draggingRef = useRef(false)
@@ -187,6 +213,7 @@ export function CompactTitlebarWindow(): React.JSX.Element {
           state={state}
           tab={active}
           settings={settings}
+          update={update}
           winState={winState}
           onPageShot={noopShot}
           onEditingChange={setOmniboxEditing}
@@ -199,6 +226,14 @@ export function CompactTitlebarWindow(): React.JSX.Element {
           onCompactDragStart={handleCompactDragStart}
           onCompactDragDoubleClick={() => api.winCmd('maximize')}
         />
+        {showBookmarkBar && (
+          <BookmarkBar
+            tab={active}
+            inCompactPanel
+            onPointerEdge={(inside) => api.setCompactHover('toolbar', inside)}
+            onEditingChange={setBmEditing}
+          />
+        )}
       </div>
     </div>
   )

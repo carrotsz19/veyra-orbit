@@ -3,7 +3,7 @@
  * Pure, so it can be shared between main, renderer and unit tests.
  */
 import { isAllowedUrl, isInternalUrl } from './url.ts'
-import { DEFAULT_SPLIT_RATIO, MAX_SPLIT_PANES, clampSplitRatio } from './split.ts'
+import { DEFAULT_SPLIT_RATIO, MAX_SPLIT_PANES, clampSplitRatio, isSplitOrientation, type SplitOrientation } from './split.ts'
 
 export const DEFAULT_WEB_PARTITION = 'persist:web'
 export const PRIVATE_WORKSPACE_ICON = 'eye-off'
@@ -71,6 +71,7 @@ export interface SavedSplitGroup {
   tabs: number[]
   colRatio: number
   rowRatio: number
+  orientation?: SplitOrientation
 }
 
 export interface SavedWorkspace extends WorkspaceInfo {
@@ -313,7 +314,8 @@ function sanitizeSavedSplits(raw: unknown, tabs: readonly SavedTab[]): SavedSpli
     out.push({
       tabs: indices,
       colRatio: typeof entry.colRatio === 'number' ? clampSplitRatio(entry.colRatio) : DEFAULT_SPLIT_RATIO,
-      rowRatio: typeof entry.rowRatio === 'number' ? clampSplitRatio(entry.rowRatio) : DEFAULT_SPLIT_RATIO
+      rowRatio: typeof entry.rowRatio === 'number' ? clampSplitRatio(entry.rowRatio) : DEFAULT_SPLIT_RATIO,
+      ...(isSplitOrientation(entry.orientation) ? { orientation: entry.orientation } : {})
     })
   }
   return out

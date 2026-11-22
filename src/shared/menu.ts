@@ -4,6 +4,7 @@
  */
 
 import type { WindowButtonsStyle } from './settings.ts'
+import type { SplitOrientation } from './split.ts'
 import { displayUrl, isInternalUrl } from './url.ts'
 
 export type MenuId = 'file' | 'edit' | 'view' | 'history' | 'bookmarks' | 'workspaces' | 'help'
@@ -87,13 +88,17 @@ export interface MenuBuildContext {
   workspaces: readonly MenuWorkspaceContext[]
   activeWorkspaceId: string
   compactMode: boolean
+  bookmarkBarVisible?: boolean
   isSplit?: boolean
+  splitPaneCount?: number
+  splitOrientation?: SplitOrientation
   isFullscreen: boolean
   canReopenClosed: boolean
   history: readonly MenuHistoryContext[]
   bookmarks: readonly MenuBookmarkContext[]
   appVersion: string
   isDev: boolean
+  updateReadyVersion?: string | null
 }
 
 const SEP: MenuSeparatorEntry = { kind: 'separator' }
@@ -164,6 +169,7 @@ export function buildMenus(ctx: MenuBuildContext): MenuSection[] {
   const viewItems: MenuEntry[] = [
     { kind: 'item', id: 'view:palette', label: 'Command bar', keys: 'Ctrl+K' },
     { kind: 'item', id: 'view:compact', label: 'Compact mode', keys: 'Ctrl+Shift+S', checked: ctx.compactMode },
+    { kind: 'item', id: 'view:bookmark-bar', label: 'Bookmark bar', keys: 'Ctrl+Shift+B', checked: !!ctx.bookmarkBarVisible },
     {
       kind: 'item',
       id: 'view:split',
@@ -171,6 +177,12 @@ export function buildMenus(ctx: MenuBuildContext): MenuSection[] {
       keys: 'Ctrl+Shift+\\',
       checked: ctx.isSplit ? true : undefined,
       disabled: !tab
+    },
+    {
+      kind: 'item',
+      id: 'view:split-rotate',
+      label: ctx.isSplit && ctx.splitOrientation === 'stacked' ? 'Split left/right' : 'Split top/bottom',
+      disabled: !tab || (!!ctx.isSplit && (ctx.splitPaneCount ?? 2) !== 2)
     },
     SEP,
     { kind: 'item', id: 'view:zoom-in', label: 'Zoom in', keys: 'Ctrl+=', disabled: !webPage },
@@ -240,6 +252,16 @@ export function buildMenus(ctx: MenuBuildContext): MenuSection[] {
   ]
 
   const helpItems: MenuEntry[] = [
+    ...(ctx.updateReadyVersion !== undefined && ctx.updateReadyVersion !== null
+      ? [
+          {
+            kind: 'item' as const,
+            id: 'help:install-update',
+            label: ctx.updateReadyVersion ? `Restart to update (v${ctx.updateReadyVersion})` : 'Restart to update'
+          },
+          SEP
+        ]
+      : []),
     { kind: 'item', id: 'help:check-updates', label: 'Check for updates' },
     { kind: 'item', id: 'help:whats-new', label: 'What’s new' },
     { kind: 'item', id: 'help:report-bug', label: 'Report a bug' },

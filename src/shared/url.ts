@@ -30,6 +30,7 @@ export function isAllowedUrl(url: string): boolean {
 export const INTERNAL_PAGES = {
   'orbit://history': 'History',
   'orbit://bookmarks': 'Bookmarks',
+  'orbit://downloads': 'Downloads',
   'orbit://settings': 'Settings'
 } as const
 export type InternalUrl = keyof typeof INTERNAL_PAGES

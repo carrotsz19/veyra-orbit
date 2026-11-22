@@ -1,6 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatBytes, formatSpeed, isRunnable, pickUniqueFilename, sanitizeFilename, splitFilename } from '../src/shared/downloads.ts'
+import {
+  downloadFileCategory,
+  formatBytes,
+  formatSpeed,
+  isRunnable,
+  pickUniqueFilename,
+  sanitizeFilename,
+  splitFilename,
+  summarizeDownloads
+} from '../src/shared/downloads.ts'
 
 test('splitFilename separates stem and extension cleanly', () => {
   assert.deepEqual(splitFilename('report.pdf'), { stem: 'report', ext: '.pdf' })
@@ -60,4 +69,44 @@ test('formatBytes and formatSpeed format sizes cleanly', () => {
 test('programs and scripts are recognised so they are never opened from the downloads list', () => {
   for (const f of ['setup.exe', 'Installer.MSI', 'run.bat', 'x.cmd', 'script.ps1', 'a.vbs', 'shortcut.lnk', 'page.hta', 'tool.jar', 'evil.exe. ']) assert.equal(isRunnable(f), true, f)
   for (const f of ['notes.pdf', 'essay.docx', 'photo.jpg', 'data.csv', 'README', 'archive.zip']) assert.equal(isRunnable(f), false, f)
+})
+
+test('downloadFileCategory maps common extensions to icon categories', () => {
+  assert.equal(downloadFileCategory('slides.pdf'), 'pdf')
+  assert.equal(downloadFileCategory('photo.PNG'), 'image')
+  assert.equal(downloadFileCategory('lecture.mp4'), 'video')
+  assert.equal(downloadFileCategory('podcast.mp3'), 'audio')
+  assert.equal(downloadFileCategory('backup.tar.gz'), 'archive')
+  assert.equal(downloadFileCategory('setup.msi'), 'installer')
+  assert.equal(downloadFileCategory('app.tsx'), 'code')
+  assert.equal(downloadFileCategory('notes.docx'), 'document')
+  assert.equal(downloadFileCategory('README'), 'file')
+})
+
+test('summarizeDownloads computes aggregate progress, active count, and finished status', () => {
+  assert.deepEqual(summarizeDownloads([]), {
+    activeCount: 0,
+    pausedCount: 0,
+    inProgressCount: 0,
+    progress: null,
+    hasIndeterminate: false,
+    hasFinished: false
+  })
+
+  const s1 = summarizeDownloads([
+    { state: 'progressing', receivedBytes: 500, totalBytes: 1000, canResume: false },
+    { state: 'paused', receivedBytes: 250, totalBytes: 1000, canResume: true },
+    { state: 'completed', receivedBytes: 400, totalBytes: 400, canResume: false }
+  ])
+  assert.equal(s1.activeCount, 1)
+  assert.equal(s1.pausedCount, 1)
+  assert.equal(s1.inProgressCount, 2)
+  assert.equal(s1.progress, 0.375)
+  assert.equal(s1.hasIndeterminate, false)
+  assert.equal(s1.hasFinished, true)
+
+  const s2 = summarizeDownloads([{ state: 'progressing', receivedBytes: 120, totalBytes: 0, canResume: false }])
+  assert.equal(s2.progress, null)
+  assert.equal(s2.hasIndeterminate, true)
+  assert.equal(s2.hasFinished, false)
 })

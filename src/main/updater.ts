@@ -1,18 +1,38 @@
 /*
  * Quiet background auto-updater.
- * Checks 10 seconds after launch and every 4 hours while running, downloads updates in the
- * background, and notifies the UI once an update is ready to install on restart.
+ * Checks 10 seconds after launch, every 4 hours while running, and on system resume / window focus
+ * when the last check is over 4 hours old. Downloads in the background in 'automatic' mode (or waits
+ * for explicit user confirmation in 'notify' mode), and notifies the UI once ready to install.
  * Never forces a restart, never runs unpackaged (npm run dev), and keeps errors quiet.
  */
 import { app } from 'electron'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 import { autoUpdater } from 'electron-updater'
-import { classifyUpdateError, redactSecrets, selectUpdateFeed, type UpdateFeedSelection, type UpdateState } from '../shared/updates'
+import type { UpdateMode } from '../shared/settings'
+import {
+  UPDATE_CHECK_INTERVAL_MS,
+  classifyUpdateError,
+  detectJustUpdated,
+  redactSecrets,
+  selectUpdateFeed,
+  shouldAutoDownloadUpdate,
+  shouldCheckOnWakeOrFocus,
+  type UpdateFeedSelection,
+  type UpdateState
+} from '../shared/updates'
 
 const START_DELAY_MS = 10_000
-const POLL_INTERVAL_MS = 4 * 60 * 60 * 1000
+const POLL_INTERVAL_MS = UPDATE_CHECK_INTERVAL_MS
 
 function embeddedDevToken(): string {
   return __CHANNEL__ === 'dev' && typeof __DEV_FEED_TOKEN__ === 'string' ? __DEV_FEED_TOKEN__ : ''
+}
+
+export interface UpdaterOptions {
+  getMode?: () => UpdateMode
+  onBeforeInstall?: () => void
+  metaFile?: string
 }
 
 export class Updater {
@@ -22,8 +42,15 @@ export class Updater {
   private startTimer: NodeJS.Timeout | null = null
   private pollTimer: NodeJS.Timeout | null = null
   private activeCheck: Promise<UpdateState> | null = null
+  private readonly getMode: () => UpdateMode
+  private readonly onBeforeInstall?: () => void
 
-  constructor(private publish: (state: UpdateState) => void) {
+  constructor(
+    private publish: (state: UpdateState) => void,
+    opts: UpdaterOptions = {}
+  ) {
+    this.getMode = opts.getMode ?? (() => 'automatic')
+    this.onBeforeInstall = opts.onBeforeInstall
     const token = embeddedDevToken()
     this.selection = selectUpdateFeed({
       channel: __CHANNEL__,
@@ -32,12 +59,33 @@ export class Updater {
       testFeedUrl: process.env.VEYRA_ORBIT_UPDATE_URL,
       disableUpdates: !!process.env.VEYRA_NO_UPDATE
     })
+    const currentVersion = app.getVersion()
+    const justUpdated = opts.metaFile ? this.detectAndRecordVersion(opts.metaFile, currentVersion) : null
     this.current = {
       status: this.selection.enabled ? 'idle' : 'unavailable',
       channel: __CHANNEL__,
-      currentVersion: app.getVersion(),
-      note: this.unavailableNote()
+      currentVersion,
+      note: this.unavailableNote(),
+      ...(justUpdated ? { justUpdated } : {})
     }
+  }
+
+  private detectAndRecordVersion(metaFile: string, currentVersion: string) {
+    let previousVersion: string | null = null
+    try {
+      const raw = JSON.parse(readFileSync(metaFile, 'utf8')) as { lastVersion?: unknown }
+      if (typeof raw?.lastVersion === 'string') previousVersion = raw.lastVersion
+    } catch {
+      previousVersion = null
+    }
+    const notice = detectJustUpdated(previousVersion, currentVersion, __CHANNEL__)
+    try {
+      mkdirSync(dirname(metaFile), { recursive: true })
+      writeFileSync(metaFile, JSON.stringify({ lastVersion: currentVersion }, null, 2) + '\n', 'utf8')
+    } catch {
+      /* not fatal */
+    }
+    return notice
   }
 
   private unavailableNote(): string | undefined {
@@ -58,11 +106,19 @@ export class Updater {
     this.configured = true
     autoUpdater.logger = null
     autoUpdater.autoDownload = false
-    autoUpdater.autoInstallOnAppQuit = true
+    autoUpdater.autoInstallOnAppQuit = this.getMode() === 'automatic'
     autoUpdater.allowDowngrade = false
     autoUpdater.allowPrerelease = false
     if (this.selection.forceDevUpdateConfig) autoUpdater.forceDevUpdateConfig = true
     autoUpdater.setFeedURL(this.selection.feed)
+  }
+
+  syncMode(mode: UpdateMode): void {
+    if (!this.configured) return
+    autoUpdater.autoInstallOnAppQuit = mode === 'automatic' || this.current.status === 'ready'
+    if (mode === 'automatic' && this.current.status === 'available' && this.current.availableVersion) {
+      void this.download(this.current.availableVersion, false)
+    }
   }
 
   private logError(context: string, err: unknown): void {
@@ -104,6 +160,15 @@ export class Updater {
     }
   }
 
+  /** Triggers a quiet background check on system resume or window focus if the last check is > 4 h old. */
+  checkIfStale(now = Date.now()): void {
+    if (!this.selection.enabled) return
+    if (this.current.status === 'checking' || this.current.status === 'downloading' || this.current.status === 'ready') return
+    if (this.activeCheck) return
+    if (!shouldCheckOnWakeOrFocus(this.current.checkedAt, now)) return
+    void this.check(false)
+  }
+
   check(manual = false): Promise<UpdateState> {
     if (!this.selection.enabled) return Promise.resolve(this.state())
     if (this.current.status === 'downloading' || this.current.status === 'ready') return Promise.resolve(this.state())
@@ -112,6 +177,18 @@ export class Updater {
       this.activeCheck = null
     })
     return this.activeCheck
+  }
+
+  /** Explicitly starts downloading an update discovered in 'notify' mode. */
+  downloadAvailable(): Promise<UpdateState> {
+    if (!this.selection.enabled) return Promise.resolve(this.state())
+    if (this.current.status !== 'available' || !this.current.availableVersion) return Promise.resolve(this.state())
+    return this.download(this.current.availableVersion, true).then(() => this.state())
+  }
+
+  dismissJustUpdated(): void {
+    if (!this.current.justUpdated) return
+    this.emit({ justUpdated: null })
   }
 
   private async runCheck(manual: boolean): Promise<UpdateState> {
@@ -126,6 +203,15 @@ export class Updater {
         return this.emit({
           status: 'up-to-date',
           availableVersion: undefined,
+          progress: undefined,
+          checkedAt: Date.now(),
+          note: undefined
+        })
+      }
+      if (!shouldAutoDownloadUpdate(this.getMode())) {
+        return this.emit({
+          status: 'available',
+          availableVersion: info.version,
           progress: undefined,
           checkedAt: Date.now(),
           note: undefined
@@ -153,7 +239,7 @@ export class Updater {
         })
       }
       return this.emit({
-        status: prevStatus === 'up-to-date' ? 'up-to-date' : 'idle',
+        status: prevStatus === 'up-to-date' || prevStatus === 'available' ? prevStatus : 'idle',
         checkedAt: prevCheckedAt,
         note: undefined
       })
@@ -176,6 +262,7 @@ export class Updater {
     autoUpdater.on('download-progress', onProgress)
     try {
       await autoUpdater.downloadUpdate()
+      autoUpdater.autoInstallOnAppQuit = true
       this.emit({
         status: 'ready',
         availableVersion: version,
@@ -206,6 +293,11 @@ export class Updater {
 
   install(): void {
     if (this.current.status !== 'ready') return
+    try {
+      this.onBeforeInstall?.()
+    } catch {
+      /* proceed with install even if session save fails */
+    }
     if (process.env.VEYRA_ORBIT_UPDATE_DRYRUN) return
     setImmediate(() => autoUpdater.quitAndInstall(true, true))
   }

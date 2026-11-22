@@ -22,6 +22,7 @@ export type SidebarSide = 'left' | 'right'
 export type TabCloseButtonsMode = 'hover' | 'always'
 export type AddressBarAlign = 'center' | 'left'
 export type MenuBarStyle = 'full' | 'hamburger'
+export type BookmarkBarMode = 'always' | 'start-page' | 'never'
 export type MotionMode = 'full' | 'reduced' | 'off'
 
 export interface AppearanceSettings {
@@ -53,6 +54,8 @@ export interface AppearanceSettings {
   showExtensions: boolean
   /** Full title-bar menus (File/Edit/...) or single hamburger menu. */
   menuBarStyle: MenuBarStyle
+  /** Bookmark bar visibility: always, only on start page (default), or never. */
+  bookmarkBar: BookmarkBarMode
   /** Gap around the web page card in CSS pixels (0..16). */
   pageGap: number
   /** Corner radius of the web page card and native WebContentsView (0..24). */
@@ -88,6 +91,7 @@ export const DEFAULT_APPEARANCE: Readonly<AppearanceSettings> = Object.freeze({
   showBookmarkStar: true,
   showExtensions: true,
   menuBarStyle: 'full',
+  bookmarkBar: 'start-page',
   pageGap: 8,
   pageRadius: 10,
   pageShadow: true,
@@ -540,6 +544,7 @@ const SIDEBAR_SIDES = new Set<string>(['left', 'right'])
 const TAB_CLOSE_MODES = new Set<string>(['hover', 'always'])
 const ADDR_ALIGNS = new Set<string>(['center', 'left'])
 const MENU_STYLES = new Set<string>(['full', 'hamburger'])
+const BOOKMARK_BAR_MODES = new Set<string>(['always', 'start-page', 'never'])
 const MOTIONS = new Set<string>(['full', 'reduced', 'off'])
 
 const HEX_COLOR_RE = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/
@@ -566,6 +571,10 @@ export function isAddressBarAlign(v: unknown): v is AddressBarAlign {
 
 export function isMenuBarStyle(v: unknown): v is MenuBarStyle {
   return typeof v === 'string' && MENU_STYLES.has(v)
+}
+
+export function isBookmarkBarMode(v: unknown): v is BookmarkBarMode {
+  return typeof v === 'string' && BOOKMARK_BAR_MODES.has(v)
 }
 
 export function isMotionMode(v: unknown): v is MotionMode {
@@ -622,6 +631,7 @@ export function sanitizeAppearance(raw: unknown): AppearanceSettings {
     showBookmarkStar: typeof raw.showBookmarkStar === 'boolean' ? raw.showBookmarkStar : DEFAULT_APPEARANCE.showBookmarkStar,
     showExtensions: typeof raw.showExtensions === 'boolean' ? raw.showExtensions : DEFAULT_APPEARANCE.showExtensions,
     menuBarStyle: isMenuBarStyle(raw.menuBarStyle) ? raw.menuBarStyle : DEFAULT_APPEARANCE.menuBarStyle,
+    bookmarkBar: isBookmarkBarMode(raw.bookmarkBar) ? raw.bookmarkBar : DEFAULT_APPEARANCE.bookmarkBar,
     pageGap: clampInt(raw.pageGap, APPEARANCE_LIMITS.pageGap.min, APPEARANCE_LIMITS.pageGap.max, DEFAULT_APPEARANCE.pageGap),
     pageRadius: clampInt(raw.pageRadius, APPEARANCE_LIMITS.pageRadius.min, APPEARANCE_LIMITS.pageRadius.max, DEFAULT_APPEARANCE.pageRadius),
     pageShadow: typeof raw.pageShadow === 'boolean' ? raw.pageShadow : DEFAULT_APPEARANCE.pageShadow,
@@ -657,6 +667,7 @@ export function mergeAppearance(current: AppearanceSettings, patch: unknown): Ap
   if (own('showBookmarkStar') && typeof patch.showBookmarkStar === 'boolean') next.showBookmarkStar = patch.showBookmarkStar
   if (own('showExtensions') && typeof patch.showExtensions === 'boolean') next.showExtensions = patch.showExtensions
   if (own('menuBarStyle') && isMenuBarStyle(patch.menuBarStyle)) next.menuBarStyle = patch.menuBarStyle
+  if (own('bookmarkBar') && isBookmarkBarMode(patch.bookmarkBar)) next.bookmarkBar = patch.bookmarkBar
   if (own('pageGap') && typeof patch.pageGap === 'number' && Number.isFinite(patch.pageGap)) {
     next.pageGap = clampInt(patch.pageGap, APPEARANCE_LIMITS.pageGap.min, APPEARANCE_LIMITS.pageGap.max, next.pageGap)
   }

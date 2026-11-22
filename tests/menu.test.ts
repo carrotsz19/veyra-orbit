@@ -84,7 +84,9 @@ test('buildMenus produces all seven Orbit menus with shortcuts and checked/disab
   const view = byId.get('view')!
   assert.equal(view.find((i) => i.id === 'view:palette')?.keys, 'Ctrl+K')
   assert.equal(view.find((i) => i.id === 'view:compact')?.checked, true)
+  assert.equal(view.find((i) => i.id === 'view:bookmark-bar')?.keys, 'Ctrl+Shift+B')
   assert.equal(view.find((i) => i.id === 'view:split')?.keys, 'Ctrl+Shift+\\')
+  assert.ok(view.some((i) => i.id === 'view:split-rotate'))
   assert.equal(view.find((i) => i.id === 'view:zoom-reset')?.disabled, false)
   assert.equal(view.find((i) => i.id === 'view:fullscreen')?.checked, false)
   assert.equal(view.find((i) => i.id === 'view:devtools')?.keys, 'F12')
@@ -139,6 +141,12 @@ test('buildMenus produces all seven Orbit menus with shortcuts and checked/disab
     ['help:check-updates', 'help:whats-new', 'help:report-bug', 'help:about']
   )
   assert.equal(help.find((i) => i.id === 'help:about')?.label, 'About Veyra Orbit 26.11.2')
+
+  // Help menu shows "Restart to update" entry when an update is downloaded
+  const readySections = buildMenus(baseCtx({ updateReadyVersion: '26.11.9' }))
+  const readyHelp = itemsOnly(readySections.find((s) => s.id === 'help')!.items)
+  assert.equal(readyHelp[0]?.id, 'help:install-update')
+  assert.equal(readyHelp[0]?.label, 'Restart to update (v26.11.9)')
 })
 
 test('buildMenus disables page-only commands on internal pages and caps recent history/bookmarks', () => {

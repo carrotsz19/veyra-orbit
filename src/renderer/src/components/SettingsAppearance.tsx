@@ -3,6 +3,7 @@ import { Check } from 'lucide-react'
 import type {
   AddressBarAlign,
   AppearancePatch,
+  BookmarkBarMode,
   MenuBarStyle,
   MotionMode,
   SettingsPatch,
@@ -61,6 +62,12 @@ const ADDR_ALIGNS: readonly SegmentedOption<AddressBarAlign>[] = [
 const MENU_STYLES: readonly SegmentedOption<MenuBarStyle>[] = [
   { value: 'full', label: 'Full menus' },
   { value: 'hamburger', label: 'Compact menu' }
+]
+
+const BOOKMARK_BAR_OPTIONS: readonly SegmentedOption<BookmarkBarMode>[] = [
+  { value: 'always', label: 'Always' },
+  { value: 'start-page', label: 'Only on start page' },
+  { value: 'never', label: 'Never' }
 ]
 
 const WINDOW_BUTTON_OPTIONS: readonly SegmentedOption<'windows' | 'dots'>[] = [
@@ -486,6 +493,19 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
             value={app.menuBarStyle}
             onChange={(style) => patchApp({ menuBarStyle: style })}
             ariaLabel="Menu bar style"
+          />
+        </div>
+
+        <div className="set-row">
+          <div className="set-row-info">
+            <div className="set-label">Bookmark bar</div>
+            <div className="set-desc">Show saved bookmarks below the toolbar (<kbd>Ctrl+Shift+B</kbd>).</div>
+          </div>
+          <SegmentedControl
+            options={BOOKMARK_BAR_OPTIONS}
+            value={app.bookmarkBar}
+            onChange={(mode) => patchApp({ bookmarkBar: mode })}
+            ariaLabel="Bookmark bar"
           />
         </div>
 

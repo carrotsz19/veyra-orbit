@@ -3,7 +3,7 @@
  * with unique names ("file (1).pdf"), or prompt via a save dialog when "Ask where to save each file"
  * is enabled. Progress is pushed to the sidebar UI, and files are never opened automatically.
  */
-import { shell, type DownloadItem, type Event, type Session } from 'electron'
+import { app, nativeImage, shell, type DownloadItem, type Event, type NativeImage, type Session, type WebContents } from 'electron'
 import { existsSync, mkdirSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import type { DownloadInfo, DownloadState } from '../shared/types'
@@ -17,9 +17,22 @@ export interface DownloadConfig {
 interface TrackedDownload {
   info: DownloadInfo
   item: DownloadItem | null
+  fileIcon: NativeImage | null
 }
 
 const PROGRESS_THROTTLE_MS = 120
+
+/** 16x16 subtle file glyph PNG fallback for native drag-out when an OS file icon isn't cached yet. */
+const FALLBACK_DRAG_ICON_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAWElEQVR4nGNgGAWjgP6A8T8DAwMDExMTEzMUMDAw/P//H6IJJMD4//9/mAYkA0A24DMg4P///2A2PjUwA5ANIGQArAEwGxC6gI2NjQlFMRMTExMjIyMpBgAA4/8P9W5m4zYAAAAASUVORK5CYII='
+
+let cachedFallbackDragIcon: NativeImage | null = null
+function fallbackDragIcon(): NativeImage {
+  if (!cachedFallbackDragIcon) {
+    cachedFallbackDragIcon = nativeImage.createFromDataURL(FALLBACK_DRAG_ICON_DATA_URL)
+  }
+  return cachedFallbackDragIcon
+}
 
 export class Downloads {
   private nextId = 1
@@ -91,6 +104,7 @@ export class Downloads {
 
     const entry: TrackedDownload = {
       item,
+      fileIcon: null,
       info: {
         id: this.nextId++,
         filename,
@@ -142,6 +156,16 @@ export class Downloads {
       entry.info.speed = 0
       entry.info.canResume = false
       entry.item = null
+      if (state === 'completed' && entry.info.savePath) {
+        void app
+          .getFileIcon(entry.info.savePath, { size: 'normal' })
+          .then((img) => {
+            if (!img.isEmpty()) entry.fileIcon = img
+          })
+          .catch(() => {
+            /* fallback icon will be used */
+          })
+      }
       this.emitNow()
     })
   }
@@ -186,6 +210,33 @@ export class Downloads {
     const entry = this.get(id)
     if (!entry || !entry.info.savePath || !existsSync(entry.info.savePath)) return
     shell.showItemInFolder(entry.info.savePath)
+  }
+
+  /** Removes one finished download from the list without touching the file on disk. */
+  remove(id: number): void {
+    const entry = this.get(id)
+    if (!entry || entry.item !== null) return
+    this.items = this.items.filter((e) => e.info.id !== id)
+    this.emitNow()
+  }
+
+  /**
+   * Starts a native OS file drag for a completed download tracked by Orbit.
+   * Only files Orbit actually downloaded (looked up by ID in main) are permitted.
+   */
+  startDrag(id: number, sender: WebContents): boolean {
+    if (sender.isDestroyed()) return false
+    const entry = this.get(id)
+    if (!entry || entry.info.state !== 'completed' || !entry.info.savePath || !existsSync(entry.info.savePath)) {
+      return false
+    }
+    const icon = entry.fileIcon && !entry.fileIcon.isEmpty() ? entry.fileIcon : fallbackDragIcon()
+    try {
+      sender.startDrag({ file: entry.info.savePath, icon })
+      return true
+    } catch {
+      return false
+    }
   }
 
   clearFinished(): void {

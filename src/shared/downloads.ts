@@ -90,3 +90,92 @@ export function formatSpeed(bytesPerSec: number): string {
   if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return ''
   return `${formatBytes(bytesPerSec)}/s`
 }
+
+/** Maximum recent items shown in the compact sidebar downloads drawer. */
+export const RECENT_DOWNLOADS_LIMIT = 6
+
+export type DownloadFileCategory = 'archive' | 'audio' | 'code' | 'document' | 'image' | 'installer' | 'pdf' | 'video' | 'file'
+
+const CATEGORY_EXTS: Record<Exclude<DownloadFileCategory, 'file'>, ReadonlySet<string>> = {
+  pdf: new Set(['pdf']),
+  image: new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif', 'heic', 'tif', 'tiff']),
+  video: new Set(['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'wmv']),
+  audio: new Set(['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus']),
+  archive: new Set(['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'zst', 'tgz']),
+  installer: new Set(['exe', 'msi', 'msix', 'msixbundle', 'dmg', 'pkg', 'deb', 'rpm', 'appimage', 'apk']),
+  code: new Set(['js', 'ts', 'tsx', 'jsx', 'mjs', 'cjs', 'py', 'json', 'yaml', 'yml', 'toml', 'xml', 'html', 'css', 'scss', 'sql', 'sh', 'ps1', 'c', 'cpp', 'h', 'rs', 'go', 'java', 'md']),
+  document: new Set(['txt', 'doc', 'docx', 'rtf', 'odt', 'xls', 'xlsx', 'csv', 'ods', 'ppt', 'pptx', 'odp', 'epub'])
+}
+
+/** Classifies a filename into a broad visual icon category for the downloads UI. */
+export function downloadFileCategory(filename: string): DownloadFileCategory {
+  const clean = filename.replace(/[. ]+$/, '').toLowerCase()
+  const { ext } = splitFilename(clean)
+  if (!ext) return 'file'
+  const raw = ext.startsWith('.') ? ext.slice(1) : ext
+  const last = raw.includes('.') ? raw.slice(raw.lastIndexOf('.') + 1) : raw
+  for (const [cat, set] of Object.entries(CATEGORY_EXTS) as [Exclude<DownloadFileCategory, 'file'>, ReadonlySet<string>][]) {
+    if (set.has(raw) || set.has(last)) return cat
+  }
+  return 'file'
+}
+
+export interface DownloadsSummaryInput {
+  state: 'progressing' | 'paused' | 'completed' | 'cancelled' | 'interrupted'
+  receivedBytes: number
+  totalBytes: number
+  canResume: boolean
+}
+
+export interface DownloadsSummary {
+  /** Number of items currently transferring (progressing). */
+  activeCount: number
+  /** Number of paused items. */
+  pausedCount: number
+  /** Active + paused count shown on the sidebar downloads button badge. */
+  inProgressCount: number
+  /** Aggregate 0..1 progress across active/paused items with known size, or null when indeterminate. */
+  progress: number | null
+  /** True if at least one active/paused download has an unknown total size. */
+  hasIndeterminate: boolean
+  /** True if any item can be cleared via "Clear". */
+  hasFinished: boolean
+}
+
+/** Computes aggregate progress ring and badge metadata for the sidebar downloads button. */
+export function summarizeDownloads(items: readonly DownloadsSummaryInput[]): DownloadsSummary {
+  let activeCount = 0
+  let pausedCount = 0
+  let receivedKnown = 0
+  let totalKnown = 0
+  let hasIndeterminate = false
+  let hasFinished = false
+
+  for (const d of items) {
+    if (d.state === 'progressing') activeCount++
+    else if (d.state === 'paused') pausedCount++
+    else if (d.state === 'completed' || d.state === 'cancelled' || (d.state === 'interrupted' && !d.canResume)) {
+      hasFinished = true
+    }
+
+    if (d.state === 'progressing' || d.state === 'paused') {
+      if (d.totalBytes > 0) {
+        receivedKnown += Math.min(Math.max(0, d.receivedBytes), d.totalBytes)
+        totalKnown += d.totalBytes
+      } else {
+        hasIndeterminate = true
+      }
+    }
+  }
+
+  const inProgressCount = activeCount + pausedCount
+  const progress = totalKnown > 0 ? Math.min(1, Math.max(0, receivedKnown / totalKnown)) : null
+  return {
+    activeCount,
+    pausedCount,
+    inProgressCount,
+    progress,
+    hasIndeterminate,
+    hasFinished
+  }
+}

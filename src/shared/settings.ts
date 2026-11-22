@@ -32,6 +32,7 @@ export type ThemeSource = 'system' | 'light' | 'dark'
 export type StartupBehavior = 'restore' | 'new-tab'
 export type NewTabBehavior = 'start-page' | 'command-bar'
 export type WindowButtonsStyle = 'windows' | 'dots'
+export type UpdateMode = 'automatic' | 'notify'
 export type { SleepMinutes, AppearanceSettings, AppearancePatch, StartPageSettings, StartPagePatch }
 
 export interface Settings {
@@ -51,6 +52,8 @@ export interface Settings {
   sleepPinnedTabs: boolean
   /** Window control button style on Windows: native titleBarOverlay or Mac-style Veyra dots. */
   windowButtons: WindowButtonsStyle
+  /** Automatic background download + install on quit, or notify only until the user clicks Download. */
+  updateMode: UpdateMode
   /** Theme preset, accent colour, layout, sidebar, toolbar, page card and motion preferences. */
   appearance: AppearanceSettings
   /** Rich start page background, layout, clock, quick links, focus note and widget preferences. */
@@ -86,6 +89,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   sleepAfterMinutes: 30,
   sleepPinnedTabs: false,
   windowButtons: 'windows',
+  updateMode: 'automatic',
   appearance: DEFAULT_APPEARANCE,
   startPage: DEFAULT_START_PAGE
 })
@@ -96,6 +100,7 @@ const STARTUPS = new Set<string>(['restore', 'new-tab'])
 const NEW_TAB_BEHAVIORS = new Set<string>(['start-page', 'command-bar'])
 const SLEEP_SET = new Set<number>(SLEEP_MINUTES_OPTIONS)
 const WINDOW_BUTTONS = new Set<string>(['windows', 'dots'])
+const UPDATE_MODES = new Set<string>(['automatic', 'notify'])
 
 export function isSearchEngineId(v: unknown): v is SearchEngineId {
   return typeof v === 'string' && ENGINE_MAP.has(v)
@@ -119,6 +124,10 @@ export function isSleepMinutes(v: unknown): v is SleepMinutes {
 
 export function isWindowButtonsStyle(v: unknown): v is WindowButtonsStyle {
   return typeof v === 'string' && WINDOW_BUTTONS.has(v)
+}
+
+export function isUpdateMode(v: unknown): v is UpdateMode {
+  return typeof v === 'string' && UPDATE_MODES.has(v)
 }
 
 /** Returns the search URL prefix for an engine, falling back to Google. */
@@ -154,6 +163,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     sleepAfterMinutes: isSleepMinutes(raw.sleepAfterMinutes) ? raw.sleepAfterMinutes : DEFAULT_SETTINGS.sleepAfterMinutes,
     sleepPinnedTabs: typeof raw.sleepPinnedTabs === 'boolean' ? raw.sleepPinnedTabs : DEFAULT_SETTINGS.sleepPinnedTabs,
     windowButtons: isWindowButtonsStyle(raw.windowButtons) ? raw.windowButtons : DEFAULT_SETTINGS.windowButtons,
+    updateMode: isUpdateMode(raw.updateMode) ? raw.updateMode : DEFAULT_SETTINGS.updateMode,
     appearance: sanitizeAppearance(raw.appearance),
     startPage: sanitizeStartPage(raw.startPage)
   }
@@ -178,6 +188,7 @@ export function mergeSettings(current: Settings, patch: unknown): Settings {
   if (own('sleepAfterMinutes') && isSleepMinutes(patch.sleepAfterMinutes)) next.sleepAfterMinutes = patch.sleepAfterMinutes
   if (own('sleepPinnedTabs') && typeof patch.sleepPinnedTabs === 'boolean') next.sleepPinnedTabs = patch.sleepPinnedTabs
   if (own('windowButtons') && isWindowButtonsStyle(patch.windowButtons)) next.windowButtons = patch.windowButtons
+  if (own('updateMode') && isUpdateMode(patch.updateMode)) next.updateMode = patch.updateMode
   if (own('appearance')) next.appearance = mergeAppearance(next.appearance, patch.appearance)
   if (own('startPage')) next.startPage = mergeStartPage(next.startPage, patch.startPage)
   return next

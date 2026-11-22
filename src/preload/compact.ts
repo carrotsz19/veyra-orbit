@@ -12,6 +12,8 @@ import type {
   Rect,
   ResolvedAppearance,
   SettingsView,
+  SplitOrientation,
+  SplitPlacement,
   UpdateState,
   VeyraCompactPanelApi,
   WindowState,
@@ -52,10 +54,14 @@ const uiSubset = {
   toggleMute: (id: number) => ipcRenderer.send('tab:mute', id),
   sleepTab: (id: number) => ipcRenderer.send('tab:sleep', id),
   tabMenu: (id: number) => ipcRenderer.send('tab:menu', id),
-  splitWith: (anchorId: number, otherId: number, placement?: 'left' | 'right') =>
+  splitWith: (anchorId: number, otherId: number, placement?: SplitPlacement) =>
     ipcRenderer.send('split:with', anchorId, otherId, placement),
-  splitWithNext: () => ipcRenderer.send('split:next'),
+  splitDrop: (draggedTabId: number, placement: SplitPlacement) =>
+    ipcRenderer.send('split:drop', draggedTabId, placement),
+  splitWithNext: (orientation?: SplitOrientation) => ipcRenderer.send('split:next', orientation),
+  rotateSplit: (groupId?: string) => ipcRenderer.send('split:rotate', groupId),
   unsplit: (tabId?: number) => ipcRenderer.send('split:unsplit', tabId),
+  swapSplit: (groupId: string) => ipcRenderer.send('split:swap', groupId),
   switchWorkspace: (id: string) => ipcRenderer.send('workspace:switch', id),
   createWorkspace: (input: WorkspaceCreateInput) => ipcRenderer.invoke('workspace:create', input),
   updateWorkspace: (id: string, patch: WorkspaceUpdateInput) => ipcRenderer.invoke('workspace:update', id, patch),
@@ -68,13 +74,22 @@ const uiSubset = {
   cancelDownload: (id: number) => ipcRenderer.send('download:cancel', id),
   openDownload: (id: number) => ipcRenderer.send('download:open', id),
   showDownload: (id: number) => ipcRenderer.send('download:show', id),
+  removeDownload: (id: number) => ipcRenderer.send('download:remove', id),
+  dragDownload: (id: number) => ipcRenderer.send('download:drag', id),
   clearFinishedDownloads: () => ipcRenderer.send('download:clear'),
   suggest: (input: string) => ipcRenderer.invoke('suggest', input),
   history: (query: string, before: number | null) => ipcRenderer.invoke('history:list', query, before),
   bookmarks: () => ipcRenderer.invoke('bookmarks:list'),
   toggleBookmark: () => ipcRenderer.send('bookmark:toggle'),
+  toggleBookmarkBar: () => ipcRenderer.send('bookmark-bar:toggle'),
+  addBookmark: (url: string, title: string, folder?: string) => ipcRenderer.invoke('bookmark:add', url, title, folder),
+  removeBookmark: (url: string) => ipcRenderer.invoke('bookmark:remove', url),
+  renameBookmark: (url: string, title: string, folder?: string) => ipcRenderer.invoke('bookmark:rename', url, title, folder),
+  reorderBookmarks: (order: { url: string; position: number }[]) => ipcRenderer.invoke('bookmark:reorder', order),
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
   installUpdate: () => ipcRenderer.send('update:install'),
+  dismissJustUpdated: () => ipcRenderer.send('update:dismiss-just-updated'),
   reopenClosedTab: () => ipcRenderer.send('tab:reopen'),
   print: () => ipcRenderer.send('tab:print'),
   zoomIn: () => ipcRenderer.send('nav:zoom-in'),
@@ -110,7 +125,9 @@ const panelApi: VeyraCompactPanelApi = {
   setOmniboxOpen: (open) => ipcRenderer.send('compact-panel:omnibox-open', open),
   startWindowDrag: () => ipcRenderer.send('compact-panel:drag-start'),
   moveWindowDrag: () => ipcRenderer.send('compact-panel:drag-move'),
-  endWindowDrag: () => ipcRenderer.send('compact-panel:drag-end')
+  endWindowDrag: () => ipcRenderer.send('compact-panel:drag-end'),
+  startTabDrag: (tabId: number) => ipcRenderer.send('compact-panel:tab-drag-start', tabId),
+  endTabDrag: () => ipcRenderer.send('compact-panel:tab-drag-end')
 }
 
 contextBridge.exposeInMainWorld('veyra', uiSubset)
