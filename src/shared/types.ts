@@ -152,6 +152,7 @@ export type { SplitGroup } from './split'
 export type { PaletteItem, PaletteMode, PaletteOpenState, PaletteResultsPayload } from './palette'
 export type { PeekAction, PeekState } from './peek'
 export type { InternalUrl } from './url'
+export type { MemoryTabItem, MemoryUsageSnapshot } from './memory'
 export type { ImportBrowserId, ImportProfile, ImportRequest, ImportResult, ImportStatus } from './importer'
 export type {
   ExtensionActionView,
@@ -375,6 +376,7 @@ export interface VeyraApi {
   getImportStatus(): Promise<import('./importer').ImportStatus>
   runImport(req: import('./importer').ImportRequest): Promise<import('./importer').ImportResult>
   dismissImportPrompt(): Promise<void>
+  getMemoryUsage(): Promise<import('./memory').MemoryUsageSnapshot>
   extensions: ExtensionsApi
 }
 

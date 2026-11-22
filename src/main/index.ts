@@ -25,6 +25,7 @@ import {
   type WindowBounds
 } from '../shared/compact'
 import { resolveSleepTimeoutMs } from '../shared/sleep'
+import { computeMemorySnapshot } from '../shared/memory'
 import { WORKSPACE_ACCENTS } from '../shared/workspaces'
 import {
   buildPaletteResults,
@@ -1943,6 +1944,19 @@ onSurface('update:install', () => updater?.install())
 
 handle('import:status', () => importer?.status() ?? { profiles: [], showFirstRunPrompt: false })
 handle('import:dismiss-prompt', () => importer?.dismissPrompt())
+
+// Sender-checked live memory readout for Settings -> Performance (exposes only what is shown).
+handle('performance:memory', () => {
+  const rawMetrics = app.getAppMetrics()
+  const metrics = rawMetrics.map((m) => ({
+    pid: m.pid,
+    workingSetKB: m.memory.workingSetSize ?? 0,
+    privateKB: m.memory.privateBytes ?? 0
+  }))
+  const tabEntries = tabs?.memoryTabEntries() ?? []
+  const extInfo = extManager?.getExtensionMemoryPids(rawMetrics) ?? { pids: new Set<number>(), enabledCount: 0 }
+  return computeMemorySnapshot(metrics, tabEntries, extInfo.pids, extInfo.enabledCount)
+})
 
 // Chrome extensions IPC: strictly gated to Orbit's own UI / compact titlebar.
 handle('extensions:get-state', () => extManager?.getState() ?? { extensions: [], developerMode: false })

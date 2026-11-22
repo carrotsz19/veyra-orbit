@@ -17,6 +17,7 @@ import { permissionName } from '@shared/permissions'
 import { ImportSection } from './ImportCard'
 import { SettingsAppearance } from './SettingsAppearance'
 import { SettingsExtensions } from './SettingsExtensions'
+import { SettingsPerformanceMemory } from './SettingsPerformance'
 
 const api = window.veyra
 
@@ -361,6 +362,7 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
                 </button>
               </div>
             </div>
+            <SettingsPerformanceMemory />
           </section>
 
           <section className="set-section" id="set-downloads" aria-labelledby="set-downloads-h">

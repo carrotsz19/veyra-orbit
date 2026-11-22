@@ -7,7 +7,7 @@ import { BrowserWindow, Menu, MenuItem, WebContentsView, clipboard, type Input, 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { BrowserState, Rect, TabInfo, WorkspaceCreateInput, WorkspaceInfo, WorkspaceUpdateInput } from '../shared/types'
-import { INTERNAL_PAGES, buildSearchUrl, isAllowedUrl, isInternalUrl, shouldFocusOmniboxOnActivate, toUrl } from '../shared/url'
+import { INTERNAL_PAGES, buildSearchUrl, displayUrl, isAllowedUrl, isInternalUrl, shouldFocusOmniboxOnActivate, toUrl } from '../shared/url'
 import { isSafeSubframeUrl, parseExternalAppUrl } from '../shared/external'
 import { clampZoomLevel, zoomPercent } from '../shared/format'
 import {
@@ -249,6 +249,20 @@ export class Tabs {
   /** All tabs across all workspaces, for omnibox "Switch to tab" suggestions. */
   allTabs(): TabInfo[] {
     return this.tabs.map((t) => ({ ...t.info, bookmarked: !!t.info.url && this.hooks.isBookmarked(t.info.url) }))
+  }
+
+  /** Minimal per-tab process info for Settings -> Performance memory attribution. */
+  memoryTabEntries(): { id: number; title: string; pid: number | null; sleeping: boolean; canSleep: boolean }[] {
+    return this.tabs.map((t) => {
+      const wc = t.view && !t.view.webContents.isDestroyed() ? t.view.webContents : null
+      return {
+        id: t.info.id,
+        title: t.info.title || displayUrl(t.info.url) || 'New tab',
+        pid: wc ? wc.getOSProcessId() : null,
+        sleeping: t.info.sleeping,
+        canSleep: this.canSleep(t, true)
+      }
+    })
   }
 
   /**

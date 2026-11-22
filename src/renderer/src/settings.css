@@ -353,6 +353,89 @@
   color: var(--positive);
 }
 
+/* ---- Performance memory view (SettingsPerformance.tsx) --------------------- */
+.perf-mem-card {
+  margin-top: 10px;
+}
+.perf-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.perf-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--bg-surface-raised);
+  border: 1px solid var(--hairline);
+}
+.perf-stat-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--label-secondary);
+}
+.perf-stat-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--label-primary);
+  font-variant-numeric: tabular-nums;
+}
+.perf-tabs {
+  border-top: 1px solid var(--hairline);
+}
+.perf-tab-row {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.perf-tab-row.sleeping .perf-tab-title {
+  color: var(--label-tertiary);
+}
+.perf-tab-info {
+  min-width: 0;
+}
+.perf-tab-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.perf-tab-title {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.perf-sleeping-tag {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--fill-tertiary);
+  color: var(--label-secondary);
+  font-size: 10.5px;
+  font-weight: 550;
+}
+.perf-tab-actions {
+  gap: 10px;
+}
+.perf-mem-val {
+  min-width: 64px;
+  text-align: right;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--label-secondary);
+}
+.perf-sleep-btn {
+  height: 26px;
+  padding: 0 9px;
+  font-size: 11.5px;
+}
+.perf-sleep-btn:disabled {
+  opacity: 0.42;
+}
+
 /* ---- Appearance customization page (SettingsAppearance.tsx) ---------------- */
 .set-section-head {
   display: flex;

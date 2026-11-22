@@ -983,7 +983,7 @@ export class ExtensionManager {
 
   // ---- Memory reporting -----------------------------------------------------
 
-  private collectMemoryByExtension(): Map<string, number> {
+  private collectExtensionPids(metrics: Electron.ProcessMetric[]): Map<string, Set<number>> {
     const pidsByExt = new Map<string, Set<number>>()
     const addPid = (extId: string, pid: number): void => {
       if (!pid || this.isCompatExtension(extId)) return
@@ -1014,7 +1014,6 @@ export class ExtensionManager {
     }
 
     // 2. Running MV3 service workers per session.
-    const metrics = app.getAppMetrics()
     const metricByPid = new Map<number, Electron.ProcessMetric>()
     for (const m of metrics) metricByPid.set(m.pid, m)
 
@@ -1059,6 +1058,28 @@ export class ExtensionManager {
         }
       }
     }
+
+    return pidsByExt
+  }
+
+  /** Returns the set of OS PIDs owned by enabled user extensions (excluding internal orbit-compat). */
+  getExtensionMemoryPids(metrics: Electron.ProcessMetric[]): { pids: Set<number>; enabledCount: number } {
+    const pidsByExt = this.collectExtensionPids(metrics)
+    const pids = new Set<number>()
+    for (const set of pidsByExt.values()) {
+      for (const pid of set) pids.add(pid)
+    }
+    const enabledCount = this.registry.extensions.filter(
+      (e) => e.enabled && (e.source !== 'unpacked' || this.registry.developerMode)
+    ).length
+    return { pids, enabledCount }
+  }
+
+  private collectMemoryByExtension(): Map<string, number> {
+    const metrics = app.getAppMetrics()
+    const metricByPid = new Map<number, Electron.ProcessMetric>()
+    for (const m of metrics) metricByPid.set(m.pid, m)
+    const pidsByExt = this.collectExtensionPids(metrics)
 
     const mbByExt = new Map<string, number>()
     for (const [extId, pids] of pidsByExt) {
