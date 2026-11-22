@@ -1,14 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import {
-  Check,
-  Download,
-  Monitor,
-  Moon,
-  RotateCcw,
-  Sparkles,
-  Sun,
-  Upload
-} from 'lucide-react'
+import { Check } from 'lucide-react'
 import type {
   AddressBarAlign,
   AppearancePatch,
@@ -30,25 +21,51 @@ import {
   getThemePreset,
   normalizeHexColor
 } from '@shared/appearance'
+import { SegmentedControl, type SegmentedOption } from './SegmentedControl'
 
 const api = window.veyra
 
-const THEMES: { id: ThemeSource; label: string; icon: typeof Monitor }[] = [
-  { id: 'system', label: 'System', icon: Monitor },
-  { id: 'light', label: 'Light', icon: Sun },
-  { id: 'dark', label: 'Dark', icon: Moon }
+const THEMES: readonly SegmentedOption<ThemeSource>[] = [
+  { value: 'system', label: 'System' },
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' }
 ]
 
-const DENSITIES: { id: UiDensity; label: string }[] = [
-  { id: 'compact', label: 'Compact' },
-  { id: 'comfortable', label: 'Comfortable' },
-  { id: 'spacious', label: 'Spacious' }
+const DENSITIES: readonly SegmentedOption<UiDensity>[] = [
+  { value: 'compact', label: 'Compact' },
+  { value: 'comfortable', label: 'Comfortable' },
+  { value: 'spacious', label: 'Spacious' }
 ]
 
-const MOTIONS: { id: MotionMode; label: string }[] = [
-  { id: 'full', label: 'Full' },
-  { id: 'reduced', label: 'Reduced' },
-  { id: 'off', label: 'Off' }
+const MOTIONS: readonly SegmentedOption<MotionMode>[] = [
+  { value: 'full', label: 'Full' },
+  { value: 'reduced', label: 'Reduced' },
+  { value: 'off', label: 'Off' }
+]
+
+const SIDEBAR_SIDES: readonly SegmentedOption<SidebarSide>[] = [
+  { value: 'left', label: 'Left' },
+  { value: 'right', label: 'Right' }
+]
+
+const TAB_CLOSE_OPTIONS: readonly SegmentedOption<TabCloseButtonsMode>[] = [
+  { value: 'hover', label: 'On hover' },
+  { value: 'always', label: 'Always' }
+]
+
+const ADDR_ALIGNS: readonly SegmentedOption<AddressBarAlign>[] = [
+  { value: 'center', label: 'Centred' },
+  { value: 'left', label: 'Left' }
+]
+
+const MENU_STYLES: readonly SegmentedOption<MenuBarStyle>[] = [
+  { value: 'full', label: 'Full menus' },
+  { value: 'hamburger', label: 'Compact menu' }
+]
+
+const WINDOW_BUTTON_OPTIONS: readonly SegmentedOption<'windows' | 'dots'>[] = [
+  { value: 'windows', label: 'Windows' },
+  { value: 'dots', label: 'Veyra dots' }
 ]
 
 interface Props {
@@ -146,22 +163,19 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
       <div className="set-section-head">
         <h2 id="set-appearance-h">Appearance</h2>
         <div className="set-section-tools">
-          <button type="button" className="btn sm set-icon-btn" onClick={() => void handleExport()}>
-            <Download size={13} aria-hidden />
-            <span>Export JSON</span>
+          <button type="button" className="btn sm" onClick={() => void handleExport()}>
+            Export
           </button>
-          <button type="button" className="btn sm set-icon-btn" onClick={() => void handleImport()}>
-            <Upload size={13} aria-hidden />
-            <span>Import JSON</span>
+          <button type="button" className="btn sm" onClick={() => void handleImport()}>
+            Import
           </button>
           <button
             type="button"
-            className="btn sm ghost set-icon-btn"
+            className="btn sm ghost"
             disabled={isDefaultAppearance}
             onClick={handleReset}
           >
-            <RotateCcw size={13} aria-hidden />
-            <span>Reset appearance</span>
+            Reset
           </button>
         </div>
       </div>
@@ -179,21 +193,12 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
             <div className="set-label">Colour mode</div>
             <div className="set-desc">Follow your system theme or stay in light or dark mode.</div>
           </div>
-          <div className="set-seg" role="radiogroup" aria-label="Colour mode">
-            {THEMES.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                type="button"
-                role="radio"
-                aria-checked={settings.theme === id}
-                className={`set-seg-btn ${settings.theme === id ? 'on' : ''}`}
-                onClick={() => onPatch({ theme: id })}
-              >
-                <Icon size={14} aria-hidden />
-                <span>{label}</span>
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            options={THEMES}
+            value={settings.theme}
+            onChange={(id) => onPatch({ theme: id })}
+            ariaLabel="Colour mode"
+          />
         </div>
 
         <div className="set-row stack">
@@ -274,8 +279,7 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
               </div>
             </div>
             <span className="app-contrast-badge" title="WCAG AA contrast ratio for text on accent controls">
-              <Sparkles size={12} aria-hidden />
-              <span>{derivedAccent.onTintContrast.toFixed(1)}:1 AA</span>
+              Contrast {derivedAccent.onTintContrast.toFixed(1)}:1
             </span>
           </div>
           <div className="accent-controls">
@@ -297,8 +301,6 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
                   >
                     {selected ? (
                       <Check size={12} strokeWidth={2.6} style={{ color: deriveAccentTokens(swatchColor, previewDark, activePal.bgElevated).onTint }} aria-hidden />
-                    ) : sw.hex === '' ? (
-                      <Sparkles size={11} strokeWidth={2.2} style={{ color: deriveAccentTokens(swatchColor, previewDark, activePal.bgElevated).onTint }} aria-hidden />
                     ) : null}
                   </button>
                 )
@@ -338,20 +340,12 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
             <div className="set-label">Density</div>
             <div className="set-desc">Controls tab height, toolbar height, and breathing room across panels.</div>
           </div>
-          <div className="set-seg" role="radiogroup" aria-label="Density">
-            {DENSITIES.map((d) => (
-              <button
-                key={d.id}
-                type="button"
-                role="radio"
-                aria-checked={app.density === d.id}
-                className={`set-seg-btn ${app.density === d.id ? 'on' : ''}`}
-                onClick={() => patchApp({ density: d.id })}
-              >
-                {d.label}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            options={DENSITIES}
+            value={app.density}
+            onChange={(id) => patchApp({ density: id })}
+            ariaLabel="Density"
+          />
         </div>
 
         <div className="set-row">
@@ -403,20 +397,12 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
             <div className="set-label">Sidebar position</div>
             <div className="set-desc">Place vertical tabs on the left or right edge of the window.</div>
           </div>
-          <div className="set-seg" role="radiogroup" aria-label="Sidebar position">
-            {(['left', 'right'] as SidebarSide[]).map((side) => (
-              <button
-                key={side}
-                type="button"
-                role="radio"
-                aria-checked={app.sidebarSide === side}
-                className={`set-seg-btn ${app.sidebarSide === side ? 'on' : ''}`}
-                onClick={() => patchApp({ sidebarSide: side })}
-              >
-                {side === 'left' ? 'Left' : 'Right'}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            options={SIDEBAR_SIDES}
+            value={app.sidebarSide}
+            onChange={(side) => patchApp({ sidebarSide: side })}
+            ariaLabel="Sidebar position"
+          />
         </div>
 
         <div className="set-row">
@@ -465,20 +451,12 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
             <div className="set-label">Tab close buttons</div>
             <div className="set-desc">Show the close button only on hover and active tabs, or on every tab.</div>
           </div>
-          <div className="set-seg" role="radiogroup" aria-label="Tab close buttons">
-            {(['hover', 'always'] as TabCloseButtonsMode[]).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                role="radio"
-                aria-checked={app.tabCloseButtons === mode}
-                className={`set-seg-btn ${app.tabCloseButtons === mode ? 'on' : ''}`}
-                onClick={() => patchApp({ tabCloseButtons: mode })}
-              >
-                {mode === 'hover' ? 'On hover' : 'Always'}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            options={TAB_CLOSE_OPTIONS}
+            value={app.tabCloseButtons}
+            onChange={(mode) => patchApp({ tabCloseButtons: mode })}
+            ariaLabel="Tab close buttons"
+          />
         </div>
       </div>
 
@@ -488,43 +466,27 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
         <div className="set-row">
           <div className="set-row-info">
             <div className="set-label">Address bar alignment</div>
-            <div className="set-desc">Keep the pill address bar centred in the title bar or aligned to the left.</div>
+            <div className="set-desc">Keep the address bar centred in the title bar or aligned to the left.</div>
           </div>
-          <div className="set-seg" role="radiogroup" aria-label="Address bar alignment">
-            {(['center', 'left'] as AddressBarAlign[]).map((align) => (
-              <button
-                key={align}
-                type="button"
-                role="radio"
-                aria-checked={app.addressBarAlign === align}
-                className={`set-seg-btn ${app.addressBarAlign === align ? 'on' : ''}`}
-                onClick={() => patchApp({ addressBarAlign: align })}
-              >
-                {align === 'center' ? 'Centred' : 'Left'}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            options={ADDR_ALIGNS}
+            value={app.addressBarAlign}
+            onChange={(align) => patchApp({ addressBarAlign: align })}
+            ariaLabel="Address bar alignment"
+          />
         </div>
 
         <div className="set-row">
           <div className="set-row-info">
             <div className="set-label">Menu bar</div>
-            <div className="set-desc">Display full top-level menus or tuck them into a single ☰ menu button.</div>
+            <div className="set-desc">Display full top-level menus or tuck them into a single menu button.</div>
           </div>
-          <div className="set-seg" role="radiogroup" aria-label="Menu bar style">
-            {(['full', 'hamburger'] as MenuBarStyle[]).map((style) => (
-              <button
-                key={style}
-                type="button"
-                role="radio"
-                aria-checked={app.menuBarStyle === style}
-                className={`set-seg-btn ${app.menuBarStyle === style ? 'on' : ''}`}
-                onClick={() => patchApp({ menuBarStyle: style })}
-              >
-                {style === 'full' ? 'Full menus' : 'Single ☰ menu'}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            options={MENU_STYLES}
+            value={app.menuBarStyle}
+            onChange={(style) => patchApp({ menuBarStyle: style })}
+            ariaLabel="Menu bar style"
+          />
         </div>
 
         <div className="set-row stack">
@@ -593,26 +555,12 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
               )}
             </div>
             <div className="set-row-actions">
-              <div className="set-seg" role="radiogroup" aria-label="Window buttons">
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={settings.windowButtons === 'windows'}
-                  className={`set-seg-btn ${settings.windowButtons === 'windows' ? 'on' : ''}`}
-                  onClick={() => onPatch({ windowButtons: 'windows' })}
-                >
-                  Windows
-                </button>
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={settings.windowButtons === 'dots'}
-                  className={`set-seg-btn ${settings.windowButtons === 'dots' ? 'on' : ''}`}
-                  onClick={() => onPatch({ windowButtons: 'dots' })}
-                >
-                  Veyra dots
-                </button>
-              </div>
+              <SegmentedControl
+                options={WINDOW_BUTTON_OPTIONS}
+                value={settings.windowButtons}
+                onChange={(val) => onPatch({ windowButtons: val })}
+                ariaLabel="Window buttons"
+              />
               {settings.windowButtons !== settings.activeWindowButtons && (
                 <button type="button" className="btn primary" onClick={() => api.relaunch()}>
                   Restart now
@@ -689,23 +637,15 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
             <div className="set-desc">
               {systemReducedMotion && app.motion === 'full'
                 ? 'Reduced automatically because your OS prefers reduced motion.'
-                : 'Controls micro-transitions and ambient start-page animation.'}
+                : 'Controls interface transitions and animations.'}
             </div>
           </div>
-          <div className="set-seg" role="radiogroup" aria-label="Motion">
-            {MOTIONS.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                role="radio"
-                aria-checked={app.motion === m.id}
-                className={`set-seg-btn ${app.motion === m.id ? 'on' : ''}`}
-                onClick={() => patchApp({ motion: m.id })}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            options={MOTIONS}
+            value={app.motion}
+            onChange={(m) => patchApp({ motion: m })}
+            ariaLabel="Motion"
+          />
         </div>
       </div>
     </section>

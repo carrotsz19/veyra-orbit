@@ -36,10 +36,10 @@ export function applyResolvedAppearance(tokens: ResolvedAppearance): void {
     root.style.setProperty('--spring-snappy-ms', '0ms')
     root.style.setProperty('--spring-bouncy-ms', '0ms')
   } else if (effectiveMotion === 'reduced') {
-    root.style.setProperty('--t-fast', '60ms')
-    root.style.setProperty('--t-base', '90ms')
-    root.style.setProperty('--t-pop', '80ms')
-    root.style.setProperty('--spring-snappy-ms', '90ms')
+    root.style.setProperty('--t-fast', '80ms')
+    root.style.setProperty('--t-base', '100ms')
+    root.style.setProperty('--t-pop', '100ms')
+    root.style.setProperty('--spring-snappy-ms', '100ms')
     root.style.setProperty('--spring-bouncy-ms', '100ms')
   }
 }

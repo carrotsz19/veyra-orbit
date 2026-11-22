@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Moon } from 'lucide-react'
 import type { MemoryUsageSnapshot } from '@shared/types'
 
 const api = window.veyra
@@ -137,7 +136,7 @@ export function SettingsPerformanceMemory(): React.JSX.Element {
                 </span>
                 <button
                   type="button"
-                  className="btn set-icon-btn perf-sleep-btn"
+                  className="btn perf-sleep-btn"
                   disabled={!tab.canSleep}
                   title={
                     tab.sleeping
@@ -148,8 +147,7 @@ export function SettingsPerformanceMemory(): React.JSX.Element {
                   }
                   onClick={() => handleSleep(tab.id)}
                 >
-                  <Moon size={12} aria-hidden />
-                  <span>Sleep</span>
+                  Sleep
                 </button>
               </div>
             </li>

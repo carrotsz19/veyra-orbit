@@ -1,4 +1,4 @@
-import { Download, ExternalLink, FolderOpen, Pause, Play, X } from 'lucide-react'
+import { ExternalLink, FolderOpen, Pause, Play, X } from 'lucide-react'
 import type { DownloadInfo } from '@shared/types'
 import { formatBytes, formatSpeed } from '@shared/downloads'
 
@@ -34,7 +34,6 @@ export function Downloads({ items, onClose }: Props): React.JSX.Element {
     <section className="downloads" aria-label="Downloads">
       <div className="downloads-head">
         <span className="downloads-title">
-          <Download size={13} />
           Downloads
           {activeCount > 0 && <span className="downloads-badge">{activeCount}</span>}
         </span>

@@ -1,15 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import {
-  ArrowDown,
-  ArrowUp,
-  GripVertical,
-  Image as ImageIcon,
-  Palette,
-  Sparkles,
-  Square,
-  Trash2,
-  X
-} from 'lucide-react'
+import { ArrowDown, ArrowUp, GripVertical, Image as ImageIcon, Trash2, X } from 'lucide-react'
 import type {
   ClockFormat,
   QuickLinkSize,
@@ -21,6 +11,7 @@ import type {
   UiDensity
 } from '@shared/types'
 import { START_PAGE_LIMITS, WIDGET_LABELS, reorderList } from '@shared/startpage'
+import { SegmentedControl, type SegmentedOption } from './SegmentedControl'
 
 interface Props {
   open: boolean
@@ -34,22 +25,32 @@ interface Props {
   onOpenAppearance: () => void
 }
 
-const BG_OPTIONS: { id: StartBackgroundMode; label: string; icon: typeof Sparkles }[] = [
-  { id: 'ambient', label: 'Ambient', icon: Sparkles },
-  { id: 'solid', label: 'Solid', icon: Square },
-  { id: 'image', label: 'Image', icon: ImageIcon }
+const BG_OPTIONS: readonly SegmentedOption<StartBackgroundMode>[] = [
+  { value: 'solid', label: 'Default' },
+  { value: 'tinted', label: 'Tinted' },
+  { value: 'image', label: 'Image' }
 ]
 
-const DENSITY_OPTIONS: { id: UiDensity; label: string }[] = [
-  { id: 'compact', label: 'Compact' },
-  { id: 'comfortable', label: 'Comfortable' },
-  { id: 'spacious', label: 'Spacious' }
+const LAYOUT_OPTIONS: readonly SegmentedOption<StartLayout>[] = [
+  { value: 'centered', label: 'Centred' },
+  { value: 'wide', label: 'Wide' }
 ]
 
-const LINK_SIZE_OPTIONS: { id: QuickLinkSize; label: string }[] = [
-  { id: 'sm', label: 'S' },
-  { id: 'md', label: 'M' },
-  { id: 'lg', label: 'L' }
+const DENSITY_OPTIONS: readonly SegmentedOption<UiDensity>[] = [
+  { value: 'compact', label: 'Compact' },
+  { value: 'comfortable', label: 'Default' },
+  { value: 'spacious', label: 'Spacious' }
+]
+
+const CLOCK_OPTIONS: readonly SegmentedOption<ClockFormat>[] = [
+  { value: '12h', label: '12-hour' },
+  { value: '24h', label: '24-hour' }
+]
+
+const LINK_SIZE_OPTIONS: readonly SegmentedOption<QuickLinkSize>[] = [
+  { value: 'sm', label: 'S' },
+  { value: 'md', label: 'M' },
+  { value: 'lg', label: 'L' }
 ]
 
 export function StartCustomizeDrawer({
@@ -65,7 +66,7 @@ export function StartCustomizeDrawer({
 }: Props): React.JSX.Element {
   const [nameDraft, setNameDraft] = useState(config.userName)
   const [dragIdx, setDragIdx] = useState<number | null>(null)
-  const closeBtnRef = useRef<HTMLButtonElement>(null)
+  const drawerRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     setNameDraft(config.userName)
@@ -73,7 +74,7 @@ export function StartCustomizeDrawer({
 
   useEffect(() => {
     if (!open) return
-    requestAnimationFrame(() => closeBtnRef.current?.focus({ preventScroll: true }))
+    requestAnimationFrame(() => drawerRef.current?.focus({ preventScroll: true }))
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
         e.preventDefault()
@@ -99,6 +100,8 @@ export function StartCustomizeDrawer({
     <>
       {open && <div className="sp-drawer-backdrop" aria-hidden onClick={onClose} />}
       <aside
+        ref={drawerRef}
+        tabIndex={-1}
         className={`sp-drawer ${open ? 'open' : ''}`}
         role="dialog"
         aria-modal="false"
@@ -106,19 +109,16 @@ export function StartCustomizeDrawer({
         aria-hidden={!open}
       >
         <header className="sp-drawer-head">
-          <div>
-            <h2>Customize start page</h2>
-            <p>Changes apply instantly.</p>
-          </div>
+          <h2>Customize start page</h2>
           <button
-            ref={closeBtnRef}
             type="button"
-            className="icon-btn"
-            aria-label="Close customize drawer"
+            className="icon-btn small"
+            aria-label="Close"
+            title="Close (Esc)"
             tabIndex={open ? 0 : -1}
             onClick={onClose}
           >
-            <X size={16} />
+            <X size={15} />
           </button>
         </header>
 
@@ -126,229 +126,204 @@ export function StartCustomizeDrawer({
           {/* Background */}
           <section className="sp-dsec">
             <h3>Background</h3>
-            <div className="set-seg sp-seg-full" role="radiogroup" aria-label="Start page background">
-              {BG_OPTIONS.map(({ id, label, icon: Icon }) => (
-                <button
-                  key={id}
-                  type="button"
-                  role="radio"
-                  aria-checked={config.background === id}
+            <div className="sp-sheet-group">
+              <div className="sp-sheet-row stack">
+                <SegmentedControl
+                  fullWidth
+                  options={BG_OPTIONS}
+                  value={config.background}
+                  onChange={(id) => onPatch({ background: id })}
+                  ariaLabel="Start page background"
                   tabIndex={open ? 0 : -1}
-                  className={`set-seg-btn ${config.background === id ? 'on' : ''}`}
-                  onClick={() => onPatch({ background: id })}
+                />
+              </div>
+
+              {config.background === 'image' && (
+                <>
+                  <div className="sp-sheet-row stack">
+                    <div className="sp-bg-actions">
+                      <button type="button" className="btn sm primary set-icon-btn" tabIndex={open ? 0 : -1} onClick={onChooseImage}>
+                        <ImageIcon size={13} aria-hidden />
+                        <span>{hasCustomImage ? 'Change image…' : 'Choose image…'}</span>
+                      </button>
+                      {hasCustomImage && (
+                        <button
+                          type="button"
+                          className="btn sm ghost set-icon-btn"
+                          tabIndex={open ? 0 : -1}
+                          onClick={onRemoveImage}
+                        >
+                          <Trash2 size={13} aria-hidden />
+                          <span>Remove</span>
+                        </button>
+                      )}
+                    </div>
+                    <p className="sp-dsec-hint">PNG, JPEG, or WebP up to 20 MB, stored locally.</p>
+                    {bgError && (
+                      <p className="sp-dsec-error" role="alert">
+                        {bgError}
+                      </p>
+                    )}
+                  </div>
+
+                  <label className="sp-sheet-row">
+                    <span>Dim overlay</span>
+                    <div className="sp-slider-ctrl">
+                      <input
+                        type="range"
+                        className="set-slider"
+                        tabIndex={open ? 0 : -1}
+                        min={START_PAGE_LIMITS.backgroundDim.min}
+                        max={START_PAGE_LIMITS.backgroundDim.max}
+                        step={2}
+                        value={config.backgroundDim}
+                        onChange={(e) => onPatch({ backgroundDim: Number(e.target.value) })}
+                      />
+                      <span>{config.backgroundDim}%</span>
+                    </div>
+                  </label>
+
+                  <label className="sp-sheet-row">
+                    <span>Blur</span>
+                    <div className="sp-slider-ctrl">
+                      <input
+                        type="range"
+                        className="set-slider"
+                        tabIndex={open ? 0 : -1}
+                        min={START_PAGE_LIMITS.backgroundBlur.min}
+                        max={START_PAGE_LIMITS.backgroundBlur.max}
+                        step={1}
+                        value={config.backgroundBlur}
+                        onChange={(e) => onPatch({ backgroundBlur: Number(e.target.value) })}
+                      />
+                      <span>{config.backgroundBlur} px</span>
+                    </div>
+                  </label>
+                </>
+              )}
+            </div>
+          </section>
+
+          {/* Layout */}
+          <section className="sp-dsec">
+            <h3>Layout</h3>
+            <div className="sp-sheet-group">
+              <div className="sp-sheet-row">
+                <span>Width</span>
+                <SegmentedControl
+                  compact
+                  options={LAYOUT_OPTIONS}
+                  value={config.layout}
+                  onChange={(id) => onPatch({ layout: id })}
+                  ariaLabel="Start page layout"
+                  tabIndex={open ? 0 : -1}
+                />
+              </div>
+              <div className="sp-sheet-row">
+                <span>Density</span>
+                <SegmentedControl
+                  compact
+                  options={DENSITY_OPTIONS}
+                  value={config.density}
+                  onChange={(id) => onPatch({ density: id })}
+                  ariaLabel="Start page density"
+                  tabIndex={open ? 0 : -1}
+                />
+              </div>
+            </div>
+          </section>
+
+          {/* Greeting & clock */}
+          <section className="sp-dsec">
+            <h3>Greeting &amp; clock</h3>
+            <div className="sp-sheet-group">
+              <label className="sp-sheet-row">
+                <span>Your name</span>
+                <input
+                  type="text"
+                  className="sp-text-input sp-inline-input"
+                  tabIndex={open ? 0 : -1}
+                  maxLength={START_PAGE_LIMITS.maxUserName}
+                  placeholder="Optional"
+                  value={nameDraft}
+                  onChange={(e) => {
+                    setNameDraft(e.target.value)
+                    onPatch({ userName: e.target.value })
+                  }}
+                />
+              </label>
+              <div className="sp-sheet-row">
+                <span>Time format</span>
+                <SegmentedControl
+                  compact
+                  options={CLOCK_OPTIONS}
+                  value={config.clockFormat}
+                  onChange={(fmt) => onPatch({ clockFormat: fmt })}
+                  ariaLabel="Clock format"
+                  tabIndex={open ? 0 : -1}
+                />
+              </div>
+              <div className="sp-sheet-row">
+                <span>Show seconds</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.showSeconds}
+                  aria-label="Show seconds on clock"
+                  tabIndex={open ? 0 : -1}
+                  className={`set-switch ${config.showSeconds ? 'on' : ''}`}
+                  onClick={() => onPatch({ showSeconds: !config.showSeconds })}
                 >
-                  <Icon size={13} aria-hidden />
-                  <span>{label}</span>
+                  <span className="set-switch-thumb" />
                 </button>
-              ))}
-            </div>
-
-            {config.background === 'image' && (
-              <div className="sp-bg-controls">
-                <div className="sp-bg-actions">
-                  <button type="button" className="btn sm primary set-icon-btn" tabIndex={open ? 0 : -1} onClick={onChooseImage}>
-                    <ImageIcon size={13} aria-hidden />
-                    <span>{hasCustomImage ? 'Change image…' : 'Choose image…'}</span>
-                  </button>
-                  {hasCustomImage && (
-                    <button
-                      type="button"
-                      className="btn sm ghost set-icon-btn"
-                      tabIndex={open ? 0 : -1}
-                      onClick={onRemoveImage}
-                    >
-                      <Trash2 size={13} aria-hidden />
-                      <span>Remove</span>
-                    </button>
-                  )}
-                </div>
-                <p className="sp-dsec-hint">PNG, JPEG, or WebP up to 20 MB. Stored locally inside Orbit.</p>
-                {bgError && (
-                  <p className="sp-dsec-error" role="alert">
-                    {bgError}
-                  </p>
-                )}
-
-                <label className="sp-slider-row">
-                  <span>Dim overlay</span>
-                  <div className="sp-slider-ctrl">
-                    <input
-                      type="range"
-                      className="set-slider"
-                      tabIndex={open ? 0 : -1}
-                      min={START_PAGE_LIMITS.backgroundDim.min}
-                      max={START_PAGE_LIMITS.backgroundDim.max}
-                      step={2}
-                      value={config.backgroundDim}
-                      onChange={(e) => onPatch({ backgroundDim: Number(e.target.value) })}
-                    />
-                    <span>{config.backgroundDim}%</span>
-                  </div>
-                </label>
-
-                <label className="sp-slider-row">
-                  <span>Blur</span>
-                  <div className="sp-slider-ctrl">
-                    <input
-                      type="range"
-                      className="set-slider"
-                      tabIndex={open ? 0 : -1}
-                      min={START_PAGE_LIMITS.backgroundBlur.min}
-                      max={START_PAGE_LIMITS.backgroundBlur.max}
-                      step={1}
-                      value={config.backgroundBlur}
-                      onChange={(e) => onPatch({ backgroundBlur: Number(e.target.value) })}
-                    />
-                    <span>{config.backgroundBlur} px</span>
-                  </div>
-                </label>
               </div>
-            )}
-          </section>
-
-          {/* Layout & density */}
-          <section className="sp-dsec">
-            <h3>Layout &amp; density</h3>
-            <div className="sp-drow">
-              <span>Layout</span>
-              <div className="set-seg compact" role="radiogroup" aria-label="Start page layout">
-                {(['centered', 'wide'] as StartLayout[]).map((id) => (
-                  <button
-                    key={id}
-                    type="button"
-                    role="radio"
-                    aria-checked={config.layout === id}
-                    tabIndex={open ? 0 : -1}
-                    className={`set-seg-btn ${config.layout === id ? 'on' : ''}`}
-                    onClick={() => onPatch({ layout: id })}
-                  >
-                    {id === 'centered' ? 'Centred' : 'Wide grid'}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="sp-drow">
-              <span>Density</span>
-              <div className="set-seg compact" role="radiogroup" aria-label="Start page density">
-                {DENSITY_OPTIONS.map((d) => (
-                  <button
-                    key={d.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={config.density === d.id}
-                    tabIndex={open ? 0 : -1}
-                    className={`set-seg-btn ${config.density === d.id ? 'on' : ''}`}
-                    onClick={() => onPatch({ density: d.id })}
-                  >
-                    {d.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          {/* Clock & greeting */}
-          <section className="sp-dsec">
-            <h3>Clock &amp; greeting</h3>
-            <label className="sp-input-row">
-              <span>Your name</span>
-              <input
-                type="text"
-                className="sp-text-input"
-                tabIndex={open ? 0 : -1}
-                maxLength={START_PAGE_LIMITS.maxUserName}
-                placeholder="Optional (e.g. Alex)"
-                value={nameDraft}
-                onChange={(e) => {
-                  setNameDraft(e.target.value)
-                  onPatch({ userName: e.target.value })
-                }}
-              />
-            </label>
-            <div className="sp-drow">
-              <span>Clock format</span>
-              <div className="set-seg compact" role="radiogroup" aria-label="Clock format">
-                {(['12h', '24h'] as ClockFormat[]).map((fmt) => (
-                  <button
-                    key={fmt}
-                    type="button"
-                    role="radio"
-                    aria-checked={config.clockFormat === fmt}
-                    tabIndex={open ? 0 : -1}
-                    className={`set-seg-btn ${config.clockFormat === fmt ? 'on' : ''}`}
-                    onClick={() => onPatch({ clockFormat: fmt })}
-                  >
-                    {fmt === '12h' ? '12-hour' : '24-hour'}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="sp-drow">
-              <span>Show seconds</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={config.showSeconds}
-                aria-label="Show seconds on clock"
-                tabIndex={open ? 0 : -1}
-                className={`set-switch ${config.showSeconds ? 'on' : ''}`}
-                onClick={() => onPatch({ showSeconds: !config.showSeconds })}
-              >
-                <span className="set-switch-thumb" />
-              </button>
             </div>
           </section>
 
           {/* Quick links */}
           <section className="sp-dsec">
             <h3>Quick links</h3>
-            <div className="sp-drow">
-              <span>Tile size</span>
-              <div className="set-seg compact" role="radiogroup" aria-label="Quick link tile size">
-                {LINK_SIZE_OPTIONS.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={config.quickLinkSize === s.id}
-                    tabIndex={open ? 0 : -1}
-                    className={`set-seg-btn ${config.quickLinkSize === s.id ? 'on' : ''}`}
-                    onClick={() => onPatch({ quickLinkSize: s.id })}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <label className="sp-slider-row">
-              <span>Tiles per row</span>
-              <div className="sp-slider-ctrl">
-                <input
-                  type="range"
-                  className="set-slider"
+            <div className="sp-sheet-group">
+              <div className="sp-sheet-row">
+                <span>Icon size</span>
+                <SegmentedControl
+                  compact
+                  options={LINK_SIZE_OPTIONS}
+                  value={config.quickLinkSize}
+                  onChange={(id) => onPatch({ quickLinkSize: id })}
+                  ariaLabel="Quick link tile size"
                   tabIndex={open ? 0 : -1}
-                  min={START_PAGE_LIMITS.quickLinkColumns.min}
-                  max={START_PAGE_LIMITS.quickLinkColumns.max}
-                  step={1}
-                  value={config.quickLinkColumns}
-                  onChange={(e) => onPatch({ quickLinkColumns: Number(e.target.value) })}
                 />
-                <span>{config.quickLinkColumns}</span>
               </div>
-            </label>
+              <label className="sp-sheet-row">
+                <span>Per row</span>
+                <div className="sp-slider-ctrl">
+                  <input
+                    type="range"
+                    className="set-slider"
+                    tabIndex={open ? 0 : -1}
+                    min={START_PAGE_LIMITS.quickLinkColumns.min}
+                    max={START_PAGE_LIMITS.quickLinkColumns.max}
+                    step={1}
+                    value={config.quickLinkColumns}
+                    onChange={(e) => onPatch({ quickLinkColumns: Number(e.target.value) })}
+                  />
+                  <span>{config.quickLinkColumns}</span>
+                </div>
+              </label>
+            </div>
           </section>
 
-          {/* Widgets on/off & order */}
+          {/* Sections */}
           <section className="sp-dsec">
-            <h3>Widgets &amp; order</h3>
-            <p className="sp-dsec-hint">Drag to reorder or use the arrow buttons.</p>
-            <ul className="sp-widget-list">
+            <h3>Sections</h3>
+            <ul className="sp-sheet-group sp-widget-list">
               {config.widgets.map((w, idx) => {
                 const meta = WIDGET_LABELS[w.id]
                 return (
                   <li
                     key={w.id}
-                    className={`sp-widget-item ${dragIdx === idx ? 'dragging' : ''}`}
+                    className={`sp-sheet-row sp-widget-item ${dragIdx === idx ? 'dragging' : ''}`}
                     draggable
                     onDragStart={() => setDragIdx(idx)}
                     onDragOver={(e) => e.preventDefault()}
@@ -358,12 +333,11 @@ export function StartCustomizeDrawer({
                     }}
                     onDragEnd={() => setDragIdx(null)}
                   >
-                    <span className="sp-widget-grip" aria-hidden>
+                    <span className="sp-widget-grip" aria-hidden title="Drag to reorder">
                       <GripVertical size={13} />
                     </span>
                     <div className="sp-widget-info">
                       <span className="sp-widget-name">{meta.name}</span>
-                      <span className="sp-widget-desc">{meta.desc}</span>
                     </div>
                     <div className="sp-widget-order">
                       <button
@@ -410,15 +384,14 @@ export function StartCustomizeDrawer({
         <footer className="sp-drawer-foot">
           <button
             type="button"
-            className="btn set-icon-btn sp-appearance-link"
+            className="btn sp-appearance-link"
             tabIndex={open ? 0 : -1}
             onClick={() => {
               onClose()
               onOpenAppearance()
             }}
           >
-            <Palette size={14} aria-hidden />
-            <span>More in Settings → Appearance</span>
+            More in Settings → Appearance
           </button>
         </footer>
       </aside>

@@ -7,7 +7,7 @@
 import { isAllowedUrl } from './url.ts'
 import { isUiDensity, type UiDensity } from './appearance.ts'
 
-export const START_BACKGROUND_MODES = ['ambient', 'solid', 'image'] as const
+export const START_BACKGROUND_MODES = ['solid', 'tinted', 'image'] as const
 export type StartBackgroundMode = (typeof START_BACKGROUND_MODES)[number]
 
 export const START_LAYOUTS = ['centered', 'wide'] as const
@@ -86,7 +86,7 @@ export const DEFAULT_START_WIDGETS: readonly StartWidgetConfig[] = Object.freeze
 )
 
 export const DEFAULT_START_PAGE: Readonly<StartPageSettings> = Object.freeze({
-  background: 'ambient',
+  background: 'solid',
   backgroundImage: '',
   backgroundDim: 28,
   backgroundBlur: 0,
@@ -246,7 +246,13 @@ export function sanitizeStartPage(raw: unknown): StartPageSettings {
     }
   }
   const backgroundImage = isValidBackgroundFilename(raw.backgroundImage) ? raw.backgroundImage : ''
-  const rawBg = isStartBackgroundMode(raw.background) ? raw.background : DEFAULT_START_PAGE.background
+  // Legacy 'ambient' background mode (removed aurora blobs) maps cleanly to the calm default surface.
+  const rawBg =
+    raw.background === 'ambient'
+      ? DEFAULT_START_PAGE.background
+      : isStartBackgroundMode(raw.background)
+        ? raw.background
+        : DEFAULT_START_PAGE.background
   const userName = cleanSingleLine(raw.userName, START_PAGE_LIMITS.maxUserName)
   const focusNote = cleanMultiLine(raw.focusNote, START_PAGE_LIMITS.maxFocusNote)
   return {

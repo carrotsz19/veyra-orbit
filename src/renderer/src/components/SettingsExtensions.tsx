@@ -306,8 +306,7 @@ export function SettingsExtensions(): React.JSX.Element {
       <div className="set-card ext-list-card">
         {extState.extensions.length === 0 ? (
           <div className="set-empty">
-            <Puzzle size={16} aria-hidden />
-            <span>No extensions installed yet. Visit the Chrome Web Store to add extensions like uBlock Origin Lite or Bitwarden.</span>
+            No extensions installed yet. Visit the Chrome Web Store to add extensions.
           </div>
         ) : (
           <ul className="set-perms">{extState.extensions.map(renderCard)}</ul>

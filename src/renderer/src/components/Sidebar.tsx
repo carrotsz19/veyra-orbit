@@ -343,10 +343,17 @@ export function Sidebar({
                     <div
                       key={t.id}
                       role="tab"
+                      tabIndex={0}
                       aria-selected={t.id === state.activeId}
                       className={`split-cell ${t.id === state.activeId ? 'focused' : ''} ${t.sleeping ? 'sleeping' : ''} ${dragId === t.id ? 'dragging' : ''}`}
                       title={tabTooltip(t)}
                       onClick={() => api.activate(t.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          api.activate(t.id)
+                        }
+                      }}
                       onAuxClick={(e) => e.button === 1 && api.closeTab(t.id)}
                       onContextMenu={(e) => {
                         e.preventDefault()
@@ -392,9 +399,16 @@ export function Sidebar({
               <div
                 key={t.id}
                 role="tab"
+                tabIndex={0}
                 aria-selected={t.id === state.activeId}
                 className={`tab ${t.id === state.activeId ? 'on' : ''} ${t.sleeping ? 'sleeping' : ''} ${dragId === t.id ? 'dragging' : ''}`}
                 onClick={() => api.activate(t.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    api.activate(t.id)
+                  }
+                }}
                 onAuxClick={(e) => e.button === 1 && api.closeTab(t.id)}
                 onContextMenu={(e) => {
                   e.preventDefault()
@@ -485,7 +499,7 @@ export function Sidebar({
         >
           <div className="ws-editor-head">
             <span>{editor.mode === 'create' ? 'New workspace' : 'Edit workspace'}</span>
-            <button type="button" className="dl-btn" aria-label="Close workspace editor" onClick={() => setEditor(null)}>
+            <button type="button" className="dl-btn" aria-label="Close workspace editor" title="Close" onClick={() => setEditor(null)}>
               <X size={13} />
             </button>
           </div>
@@ -510,6 +524,7 @@ export function Sidebar({
                   type="button"
                   className={`ws-icon-pick ${editor.icon === iconId ? 'on' : ''}`}
                   aria-label={`Icon ${iconId}`}
+                  title={iconId.replace(/-/g, ' ')}
                   aria-pressed={editor.icon === iconId}
                   onClick={() => setEditor({ ...editor, icon: iconId })}
                 >
@@ -520,9 +535,9 @@ export function Sidebar({
                 className="ws-emoji-input"
                 type="text"
                 maxLength={8}
-                placeholder="😀"
-                aria-label="Custom emoji"
-                title="Or type an emoji"
+                placeholder="Aa"
+                aria-label="Custom symbol"
+                title="Or type a custom character"
                 value={isBuiltInWorkspaceIcon(editor.icon) ? '' : editor.icon}
                 onChange={(e) => {
                   const val = e.target.value.trim()

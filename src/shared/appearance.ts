@@ -149,15 +149,15 @@ export const ACCENT_SWATCHES: readonly AccentSwatch[] = [
 ]
 
 const LIGHT_SHADOWS = {
-  shadow1: '0 1px 2px rgba(27, 26, 24, 0.05), 0 2px 6px rgba(27, 26, 24, 0.04)',
-  shadow2: '0 1px 2px rgba(27, 26, 24, 0.04), 0 6px 20px rgba(27, 26, 24, 0.075), 0 1px 0 rgba(27, 26, 24, 0.025)',
-  shadow3: '0 4px 12px rgba(27, 26, 24, 0.08), 0 16px 36px rgba(27, 26, 24, 0.13)'
+  shadow1: '0 1px 2px rgba(24, 24, 24, 0.06), 0 1px 3px rgba(24, 24, 24, 0.04)',
+  shadow2: '0 2px 6px rgba(24, 24, 24, 0.06), 0 8px 22px rgba(24, 24, 24, 0.08)',
+  shadow3: '0 2px 6px rgba(24, 24, 24, 0.06), 0 12px 32px rgba(24, 24, 24, 0.12), 0 24px 48px rgba(24, 24, 24, 0.08)'
 }
 
 const DARK_SHADOWS = {
-  shadow1: '0 1px 2px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.22)',
-  shadow2: '0 2px 6px rgba(0, 0, 0, 0.40), 0 10px 26px rgba(0, 0, 0, 0.36)',
-  shadow3: '0 8px 20px rgba(0, 0, 0, 0.50), 0 20px 44px rgba(0, 0, 0, 0.46)'
+  shadow1: '0 1px 2px rgba(0, 0, 0, 0.36), 0 2px 4px rgba(0, 0, 0, 0.24)',
+  shadow2: '0 2px 6px rgba(0, 0, 0, 0.40), 0 10px 26px rgba(0, 0, 0, 0.34)',
+  shadow3: '0 4px 12px rgba(0, 0, 0, 0.44), 0 16px 38px rgba(0, 0, 0, 0.48), 0 28px 56px rgba(0, 0, 0, 0.32)'
 }
 
 export const THEME_PRESETS: readonly ThemePresetDefinition[] = [
@@ -835,7 +835,7 @@ export function deriveAccentTokens(
 
   const rgb = hexToRgb(base)
   const tintSoft = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${isDark ? 0.16 : 0.12})`
-  const tintRing = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${isDark ? 0.30 : 0.24})`
+  const tintRing = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.35)`
 
   return {
     tint: base,
@@ -886,7 +886,9 @@ export function resolveAppearanceTokens(
   const rXs = Math.round(r * 0.6)
   const rSm = Math.round(r * 0.8)
   const rMd = r
-  const rLg = Math.min(28, Math.round(r * 1.4))
+  const rGroup = Math.min(20, Math.round(r * 1.2))
+  const rLg = Math.min(24, Math.round(r * 1.4))
+  const rSheet = Math.min(28, Math.round(r * 1.6))
 
   const effectiveMaterial: 'acrylic' | 'solid' = supportsAcrylic && appearance.translucentSidebar ? 'acrylic' : 'solid'
   const effectiveMotion: MotionMode =
@@ -898,10 +900,10 @@ export function resolveAppearanceTokens(
 
   const densityMetrics =
     appearance.density === 'compact'
-      ? { bar: 36, tabH: 30, pinH: 36, rowPad: 10, sidePad: 6 }
+      ? { bar: 36, tabH: 28, pinH: 34, rowPad: 10, sidePad: 6 }
       : appearance.density === 'spacious'
-        ? { bar: 44, tabH: 40, pinH: 46, rowPad: 18, sidePad: 10 }
-        : { bar: 40, tabH: 36, pinH: 42, rowPad: 14, sidePad: 8 }
+        ? { bar: 44, tabH: 36, pinH: 42, rowPad: 16, sidePad: 10 }
+        : { bar: 40, tabH: 32, pinH: 38, rowPad: 12, sidePad: 8 }
 
   const motionVars: Record<string, string> =
     effectiveMotion === 'off'
@@ -914,16 +916,16 @@ export function resolveAppearanceTokens(
         }
       : effectiveMotion === 'reduced'
         ? {
-            '--t-fast': '60ms',
-            '--t-base': '90ms',
-            '--t-pop': '80ms',
-            '--spring-snappy-ms': '90ms',
+            '--t-fast': '80ms',
+            '--t-base': '100ms',
+            '--t-pop': '100ms',
+            '--spring-snappy-ms': '100ms',
             '--spring-bouncy-ms': '100ms'
           }
         : {
-            '--t-fast': '110ms',
-            '--t-base': '150ms',
-            '--t-pop': '140ms',
+            '--t-fast': '150ms',
+            '--t-base': '180ms',
+            '--t-pop': '220ms',
             '--spring-snappy-ms': '180ms',
             '--spring-bouncy-ms': '200ms'
           }
@@ -964,7 +966,9 @@ export function resolveAppearanceTokens(
     '--r-xs': `${rXs}px`,
     '--r-sm': `${rSm}px`,
     '--r-md': `${rMd}px`,
+    '--r-group': `${rGroup}px`,
     '--r-lg': `${rLg}px`,
+    '--r-sheet': `${rSheet}px`,
     '--side': `${appearance.sidebarWidth}px`,
     '--bar': `${densityMetrics.bar}px`,
     '--gap': `${appearance.pageGap}px`,

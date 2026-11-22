@@ -252,6 +252,7 @@ export function FirstRunImportBanner(): React.JSX.Element | null {
             type="button"
             className={expanded || doneResult ? 'dl-btn' : 'btn ghost sm'}
             aria-label={doneResult ? 'Dismiss import summary' : 'Not now'}
+            title={expanded || doneResult ? 'Dismiss' : undefined}
             onClick={dismiss}
           >
             {expanded || doneResult ? <X size={14} /> : 'Not now'}

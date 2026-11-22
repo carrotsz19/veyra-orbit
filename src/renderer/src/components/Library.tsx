@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Bookmark as BookmarkIcon, Check, Clock, Pencil, Search, Star, Trash2, X } from 'lucide-react'
+import { Check, Pencil, Search, Trash2, X } from 'lucide-react'
 import type { Bookmark, HistoryEntry } from '@shared/types'
 import { displayUrl } from '@shared/url'
 
@@ -37,7 +37,7 @@ function Filter({ value, onChange, label }: { value: string; onChange: (v: strin
       <Search size={15} />
       <input autoFocus value={value} onChange={(e) => onChange(e.target.value)} placeholder={label} aria-label={label} />
       {value && (
-        <button className="icon-btn small" aria-label="Clear search" onClick={() => onChange('')}>
+        <button className="icon-btn small" aria-label="Clear search" title="Clear search" onClick={() => onChange('')}>
           <X size={14} />
         </button>
       )}
@@ -96,7 +96,7 @@ export function HistoryPage({ tabId }: { tabId: number }): React.JSX.Element {
               <button className="btn danger" onClick={() => void clear(0)}>
                 All history
               </button>
-              <button className="icon-btn small" aria-label="Cancel" onClick={() => setClearing(false)}>
+              <button className="icon-btn small" aria-label="Cancel" title="Cancel" onClick={() => setClearing(false)}>
                 <X size={14} />
               </button>
             </div>
@@ -109,15 +109,12 @@ export function HistoryPage({ tabId }: { tabId: number }): React.JSX.Element {
       </header>
 
       {!rows.length && (
-        <div className="lib-empty-card" role="status">
-          <div className="lib-empty-emblem" aria-hidden>
-            {query ? <Search size={20} strokeWidth={1.75} /> : <Clock size={20} strokeWidth={1.75} />}
-          </div>
-          <h2>{query ? 'No matching history' : 'Your browsing history is quiet'}</h2>
+        <div className="lib-empty" role="status">
+          <h2>{query ? 'No matching history' : 'No history yet'}</h2>
           <p>
             {query
-              ? `Nothing in your history matched “${query}”. Try another term or clear the search.`
-              : 'Pages you visit in regular workspaces will appear here, grouped by day.'}
+              ? `Nothing in your history matched “${query}”.`
+              : 'Pages you visit appear here, grouped by day.'}
           </p>
           {query && (
             <button type="button" className="btn sm" onClick={() => setQuery('')}>
@@ -183,17 +180,14 @@ export function BookmarksPage({ tabId }: { tabId: number }): React.JSX.Element {
       </header>
 
       {!shown.length && (
-        <div className="lib-empty-card" role="status">
-          <div className="lib-empty-emblem" aria-hidden>
-            {q ? <Search size={20} strokeWidth={1.75} /> : <BookmarkIcon size={20} strokeWidth={1.75} />}
-          </div>
+        <div className="lib-empty" role="status">
           <h2>{q ? 'No matching bookmarks' : 'No bookmarks yet'}</h2>
           <p>
             {q ? (
               `Nothing in your bookmarks matched “${query}”.`
             ) : (
               <>
-                Press <kbd>Ctrl D</kbd> or click the <Star size={12} strokeWidth={1.75} className="lib-inline-star" /> in the address bar to keep your favourite study pages close.
+                Press <kbd>Ctrl D</kbd> or click the star in the address bar to save a page here.
               </>
             )}
           </p>
@@ -217,7 +211,7 @@ export function BookmarksPage({ tabId }: { tabId: number }): React.JSX.Element {
                 }}
               >
                 <input autoFocus value={editing.title} onChange={(e) => setEditing({ url: b.url, title: e.target.value })} onKeyDown={(e) => e.key === 'Escape' && setEditing(null)} aria-label="Bookmark name" />
-                <button className="icon-btn small" type="submit" aria-label="Save name">
+                <button className="icon-btn small" type="submit" aria-label="Save name" title="Save">
                   <Check size={14} />
                 </button>
               </form>

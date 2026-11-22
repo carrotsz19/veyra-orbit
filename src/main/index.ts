@@ -1866,7 +1866,7 @@ handle('startpage:remove-background', () => {
   const view = settings.update({
     startPage: {
       backgroundImage: '',
-      ...(curBg === 'image' ? { background: 'ambient' } : {})
+      ...(curBg === 'image' ? { background: 'solid' } : {})
     }
   })
   sendSettings()

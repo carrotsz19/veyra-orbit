@@ -4,6 +4,7 @@ All notable changes to Veyra Orbit are documented here.
 
 ## Unreleased
 
+- A calmer, simpler look across Orbit: removed the moving glowing blobs on the start page (saved settings move cleanly to the plain background), switched to system fonts throughout, redesigned the start page with unboxed sections, Safari-style quick-link icons and a compact customize sheet, and refined the sidebar, toolbar, menus, command bar, Library, and Settings with grouped inset lists, sliding segmented controls, and clearer keyboard focus rings.
 - Lower memory use: menus, compact panels, link previews, and the command bar now open on demand and free their memory after sitting unused for a minute.
 - Smarter tab sleeping: choose a 5-minute sleep option in Settings → Performance; tabs using your camera, microphone, or screen sharing, or tabs with unsaved text you typed into a form, never sleep. Sleeping tabs look gently faded in the sidebar.
 - Less background work: hidden windows and background tabs stay throttled, and the start page pauses its moving background when hidden or when reduced motion is on.
