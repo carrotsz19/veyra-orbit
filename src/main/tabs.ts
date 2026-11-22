@@ -7,7 +7,7 @@ import { BrowserWindow, Menu, MenuItem, WebContentsView, clipboard, type Input, 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { BrowserState, Rect, TabInfo, WorkspaceCreateInput, WorkspaceInfo, WorkspaceUpdateInput } from '../shared/types'
-import { INTERNAL_PAGES, buildSearchUrl, isAllowedUrl, isInternalUrl, toUrl } from '../shared/url'
+import { INTERNAL_PAGES, buildSearchUrl, isAllowedUrl, isInternalUrl, shouldFocusOmniboxOnActivate, toUrl } from '../shared/url'
 import { isSafeSubframeUrl, parseExternalAppUrl } from '../shared/external'
 import { clampZoomLevel, zoomPercent } from '../shared/format'
 import {
@@ -682,13 +682,19 @@ export class Tabs {
     }
 
     this.layout()
-    if (this.showsPage(tab) && tab.view && !tab.view.webContents.isDestroyed()) {
-      tab.view.webContents.focus()
-    } else {
-      this.focusOmnibox()
-    }
     this.notifyActiveTab()
     this.changed()
+    if (this.showsPage(tab) && tab.view && !tab.view.webContents.isDestroyed()) {
+      tab.view.webContents.focus()
+    } else if (shouldFocusOmniboxOnActivate(tab.info)) {
+      // Queue after changed()'s setImmediate so the renderer receives the new active tab state
+      // before focus-omnibox arrives.
+      setImmediate(() => {
+        if (this.activeId === id && !this.win.isDestroyed()) this.focusOmnibox()
+      })
+    } else if (!this.win.isDestroyed()) {
+      this.win.webContents.focus()
+    }
   }
 
   /** Focuses another visible pane when the user clicks inside its WebContentsView. */

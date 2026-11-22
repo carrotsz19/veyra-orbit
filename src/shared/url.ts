@@ -70,3 +70,40 @@ export function displayUrl(url: string): string {
     return url
   }
 }
+
+/**
+ * Whether activating a tab should automatically focus and select the address bar.
+ * Only a blank start-page tab does this; web pages focus their view, and internal pages
+ * (orbit://settings, orbit://history, orbit://bookmarks) or error pages focus the UI
+ * without grabbing or selecting the address bar.
+ */
+export function shouldFocusOmniboxOnActivate(tab: { url: string; error?: unknown }): boolean {
+  return !tab.url && !tab.error
+}
+
+export interface OmniboxSyncInput {
+  prevTabId: number | undefined
+  nextTabId: number | undefined
+  url: string
+  editing: boolean
+}
+
+export interface OmniboxSyncResult {
+  resetEditing: boolean
+  nextText: string | null
+}
+
+/**
+ * Decides how the address bar text/editing state should sync when the active tab or its URL updates.
+ * Switching to a different tab always exits editing and shows the newly active tab's URL;
+ * same-tab URL updates leave the input untouched while the user is actively typing.
+ */
+export function resolveOmniboxSync(input: OmniboxSyncInput): OmniboxSyncResult {
+  if (input.prevTabId !== undefined && input.nextTabId !== input.prevTabId) {
+    return { resetEditing: true, nextText: displayUrl(input.url) }
+  }
+  if (!input.editing) {
+    return { resetEditing: false, nextText: displayUrl(input.url) }
+  }
+  return { resetEditing: false, nextText: null }
+}

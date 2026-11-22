@@ -1,6 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { toUrl, isAllowedUrl, isInternalUrl, displayUrl, buildSearchUrl, SEARCH_URL } from '../src/shared/url.ts'
+import {
+  toUrl,
+  isAllowedUrl,
+  isInternalUrl,
+  displayUrl,
+  buildSearchUrl,
+  SEARCH_URL,
+  shouldFocusOmniboxOnActivate,
+  resolveOmniboxSync
+} from '../src/shared/url.ts'
 
 test('sites go to https, local addresses to http', () => {
   assert.equal(toUrl('example.com'), 'https://example.com')
@@ -40,4 +49,36 @@ test('custom search engines build search URLs without breaking URL detection', (
   assert.equal(toUrl('orbit://settings', ddg), 'orbit://settings')
   assert.equal(isInternalUrl('orbit://settings'), true)
   assert.equal(isAllowedUrl('orbit://settings'), false)
+})
+
+test('only blank start-page tabs auto-focus the address bar on activation', () => {
+  assert.equal(shouldFocusOmniboxOnActivate({ url: '' }), true)
+  assert.equal(shouldFocusOmniboxOnActivate({ url: 'orbit://settings' }), false)
+  assert.equal(shouldFocusOmniboxOnActivate({ url: 'orbit://history' }), false)
+  assert.equal(shouldFocusOmniboxOnActivate({ url: 'orbit://bookmarks' }), false)
+  assert.equal(shouldFocusOmniboxOnActivate({ url: 'https://example.com' }), false)
+  assert.equal(shouldFocusOmniboxOnActivate({ url: '', error: { code: -105 } }), false)
+})
+
+test('resolveOmniboxSync updates text and exits editing when switching tabs, including to internal pages', () => {
+  // Switching from a web tab to orbit://settings while editing was active must reset editing and show orbit://settings
+  assert.deepEqual(
+    resolveOmniboxSync({ prevTabId: 1, nextTabId: 2, url: 'orbit://settings', editing: true }),
+    { resetEditing: true, nextText: 'orbit://settings' }
+  )
+  // Switching to orbit://history while not editing shows orbit://history
+  assert.deepEqual(
+    resolveOmniboxSync({ prevTabId: 1, nextTabId: 3, url: 'orbit://history', editing: false }),
+    { resetEditing: true, nextText: 'orbit://history' }
+  )
+  // Same-tab URL update while actively typing must not overwrite user input
+  assert.deepEqual(
+    resolveOmniboxSync({ prevTabId: 1, nextTabId: 1, url: 'https://example.com/redirect', editing: true }),
+    { resetEditing: false, nextText: null }
+  )
+  // Same-tab URL update while not editing updates displayed URL
+  assert.deepEqual(
+    resolveOmniboxSync({ prevTabId: 1, nextTabId: 1, url: 'https://www.example.com/', editing: false }),
+    { resetEditing: false, nextText: 'example.com' }
+  )
 })
