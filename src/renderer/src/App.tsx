@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Sparkles, X } from 'lucide-react'
 import type {
   BrowserState,
   CompactRevealState,
@@ -75,7 +76,6 @@ export function App(): React.JSX.Element {
   const [extInstallAsks, setExtInstallAsks] = useState<ExtensionInstallAsk[]>([])
   const [settings, setSettings] = useState<SettingsView | null>(null)
   const [update, setUpdate] = useState<UpdateState | null>(null)
-  const [dismissedUpdateVer, setDismissedUpdateVer] = useState<string | null>(null)
   const [downloads, setDownloads] = useState<DownloadInfo[]>([])
   const [downloadsOpen, setDownloadsOpen] = useState(false)
   const [hasUnseenDownloads, setHasUnseenDownloads] = useState(false)
@@ -268,6 +268,7 @@ export function App(): React.JSX.Element {
     asks.length,
     externalAsks.length,
     extInstallAsks.length,
+    !!update?.justUpdated,
     findOpen,
     appearance.sidebarSide,
     appearance.sidebarWidth,
@@ -301,9 +302,6 @@ export function App(): React.JSX.Element {
   const activeWorkspace = state.workspaces.find((w) => w.id === state.activeWorkspaceId)
   const tabAsks = asks.filter((a) => a.tabId === null || a.tabId === -1 || visibleTabIds.has(a.tabId))
   const tabExternalAsks = externalAsks.filter((a) => a.tabId === null || a.tabId === -1 || visibleTabIds.has(a.tabId))
-
-  const updateKey = update?.availableVersion ?? (update?.status === 'ready' ? '__ready__' : null)
-  const showUpdateNote = update?.status === 'ready' && dismissedUpdateVer !== updateKey
 
   const handleNewWorkspace = useCallback((): void => {
     setNewWorkspaceTick((n) => n + 1)
@@ -481,6 +479,7 @@ export function App(): React.JSX.Element {
         state={state}
         tab={active}
         settings={settings}
+        update={update}
         winState={winState}
         onPageShot={setShots}
         onEditingChange={setOmniboxEditing}
@@ -501,8 +500,6 @@ export function App(): React.JSX.Element {
           })
         }}
         onCloseDownloads={() => setDownloadsOpen(false)}
-        update={showUpdateNote ? update : null}
-        onDismissUpdate={() => setDismissedUpdateVer(updateKey)}
         onEditorOpenChange={setSidebarEditing}
         onPointerEdge={compact.enabled ? (inside) => api.setCompactHover('sidebar', inside) : undefined}
         onDragTabChange={setDragTabId}
@@ -528,6 +525,41 @@ export function App(): React.JSX.Element {
         {tabAsks.length > 0 && <PermissionBar ask={tabAsks[0]} />}
         {tabExternalAsks.length > 0 && <ExternalAppBar ask={tabExternalAsks[0]} />}
         {extInstallAsks.length > 0 && <ExtensionInstallBar ask={extInstallAsks[0]} />}
+        {update?.justUpdated && (
+          <div className="updated-toast" role="status" aria-live="polite">
+            <span className="updated-toast-text">
+              <Sparkles size={13} strokeWidth={2} className="updated-toast-icon" aria-hidden />
+              <span>Updated to {update.justUpdated.version}</span>
+              {update.justUpdated.releaseNotesUrl && (
+                <>
+                  <span className="updated-toast-sep" aria-hidden>
+                    —
+                  </span>
+                  <button
+                    type="button"
+                    className="updated-toast-link"
+                    onClick={() => {
+                      const url = update.justUpdated?.releaseNotesUrl
+                      api.dismissJustUpdated()
+                      if (url) api.newTab(url)
+                    }}
+                  >
+                    What&apos;s new
+                  </button>
+                </>
+              )}
+            </span>
+            <button
+              type="button"
+              className="dl-btn"
+              aria-label="Dismiss update notification"
+              title="Dismiss"
+              onClick={() => api.dismissJustUpdated()}
+            >
+              <X size={13} />
+            </button>
+          </div>
+        )}
         <FindBar open={findOpen} focusTick={findFocusTick} onClose={() => setFindOpen(false)} />
         <div
           className={`page ${isSplitView ? 'split' : ''}`}

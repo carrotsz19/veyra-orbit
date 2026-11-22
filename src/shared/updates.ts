@@ -9,7 +9,15 @@ export const PROD_REPO = { owner: 'carrotsz19', repo: 'veyra-orbit' } as const
 export const DEV_REPO = { owner: 'carrotsz19', repo: 'veyra-orbit-dev' } as const
 export const DEV_FEED_TOKEN_FILE = 'C:/dev/tools/veyra-orbit-dev-feed.token'
 
-export type UpdateStatus = 'idle' | 'checking' | 'downloading' | 'ready' | 'up-to-date' | 'unavailable' | 'error'
+export type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'up-to-date' | 'unavailable' | 'error'
+
+export const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
+
+export interface JustUpdatedNotice {
+  version: string
+  /** Release notes tag URL for Prod builds, or null for Dev builds. */
+  releaseNotesUrl: string | null
+}
 
 export interface UpdateState {
   status: UpdateStatus
@@ -22,6 +30,8 @@ export interface UpdateState {
   checkedAt?: number
   /** Short calm explanation shown in Settings (e.g. why unavailable or manual check failed). */
   note?: string
+  /** Set once on the first launch after updating to a new version. */
+  justUpdated?: JustUpdatedNotice | null
 }
 
 export type UpdateFeedSelection =
@@ -109,4 +119,47 @@ export function redactSecrets(text: string, secrets: string[] = []): string {
     .replace(/(Authorization:\s*(?:Bearer|token)\s+)\S+/gi, '$1[redacted]')
     .replace(/(token=)\S+/gi, '$1[redacted]')
   return out
+}
+
+const SAFE_VERSION_RE = /^[0-9]+(?:\.[0-9]+){1,3}(?:-[0-9A-Za-z.-]+)?$/
+
+/** Builds the GitHub release tag URL for Prod builds, or null for Dev builds / invalid versions. */
+export function releaseTagUrl(version: string, channel: Channel): string | null {
+  if (channel !== 'prod') return null
+  const clean = version.trim()
+  if (!SAFE_VERSION_RE.test(clean)) return null
+  return `https://github.com/${PROD_REPO.owner}/${PROD_REPO.repo}/releases/tag/v${clean}`
+}
+
+/**
+ * Determines whether the "Updated to <version>" notice should show on launch.
+ * Returns null on first launch (no previous version recorded) or when the version did not change.
+ */
+export function detectJustUpdated(
+  previousVersion: string | null | undefined,
+  currentVersion: string,
+  channel: Channel
+): JustUpdatedNotice | null {
+  const prev = typeof previousVersion === 'string' ? previousVersion.trim() : ''
+  const cur = currentVersion.trim()
+  if (!prev || !cur || prev === cur || !SAFE_VERSION_RE.test(cur)) return null
+  return {
+    version: cur,
+    releaseNotesUrl: releaseTagUrl(cur, channel)
+  }
+}
+
+/** Returns true when enough time (> 4 h by default) has passed since the last check to recheck on focus/resume. */
+export function shouldCheckOnWakeOrFocus(
+  lastCheckedAt: number | undefined,
+  now: number,
+  intervalMs = UPDATE_CHECK_INTERVAL_MS
+): boolean {
+  if (lastCheckedAt === undefined || !Number.isFinite(lastCheckedAt)) return true
+  return now - lastCheckedAt > intervalMs
+}
+
+/** Decides whether an available update should start downloading automatically right away. */
+export function shouldAutoDownloadUpdate(mode: 'automatic' | 'notify'): boolean {
+  return mode === 'automatic'
 }

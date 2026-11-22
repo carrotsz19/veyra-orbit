@@ -97,6 +97,7 @@ export interface MenuBuildContext {
   bookmarks: readonly MenuBookmarkContext[]
   appVersion: string
   isDev: boolean
+  updateReadyVersion?: string | null
 }
 
 const SEP: MenuSeparatorEntry = { kind: 'separator' }
@@ -249,6 +250,16 @@ export function buildMenus(ctx: MenuBuildContext): MenuSection[] {
   ]
 
   const helpItems: MenuEntry[] = [
+    ...(ctx.updateReadyVersion !== undefined && ctx.updateReadyVersion !== null
+      ? [
+          {
+            kind: 'item' as const,
+            id: 'help:install-update',
+            label: ctx.updateReadyVersion ? `Restart to update (v${ctx.updateReadyVersion})` : 'Restart to update'
+          },
+          SEP
+        ]
+      : []),
     { kind: 'item', id: 'help:check-updates', label: 'Check for updates' },
     { kind: 'item', id: 'help:whats-new', label: 'What’s new' },
     { kind: 'item', id: 'help:report-bug', label: 'Report a bug' },

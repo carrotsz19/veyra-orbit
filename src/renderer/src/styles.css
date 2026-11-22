@@ -301,6 +301,7 @@ html[data-sidebar-side='right'] .shell:not(.fullscreen):not(.compact) .side {
 }
 html[data-sidebar-side='right'] .shell:not(.fullscreen):not(.compact) .page,
 html[data-sidebar-side='right'] .shell:not(.fullscreen):not(.compact) .perm,
+html[data-sidebar-side='right'] .shell:not(.fullscreen):not(.compact) .updated-toast,
 html[data-sidebar-side='right'] .shell:not(.fullscreen):not(.compact) .find {
   margin: 0 0 var(--gap) var(--gap);
 }
@@ -347,6 +348,7 @@ html[data-sidebar-side='right'] .shell:not(.fullscreen):not(.compact) .find {
 .shell.fullscreen .side,
 .shell.fullscreen .titlebar,
 .shell.fullscreen .perm,
+.shell.fullscreen .updated-toast,
 .shell.fullscreen .find {
   display: none;
 }
@@ -369,7 +371,8 @@ html[data-sidebar-side='right'] .shell:not(.fullscreen):not(.compact) .find {
   margin: 5px;
   border-radius: var(--r-md);
 }
-.shell.compact .perm {
+.shell.compact .perm,
+.shell.compact .updated-toast {
   margin: 5px 5px 0 5px;
 }
 /* Always-visible 5px edge strips outside .page bounds so compact hover works over live pages. */
@@ -986,6 +989,69 @@ html[data-platform='darwin'] .titlebar {
 }
 .zoom-pill:active {
   transform: scale(0.97);
+}
+.update-pill {
+  flex: none;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: var(--r-pill);
+  background: var(--tint-soft);
+  border: 1px solid color-mix(in srgb, var(--tint) 28%, transparent);
+  color: var(--tint-text, var(--tint));
+  font-size: 11.5px;
+  font-weight: 550;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  -webkit-app-region: no-drag;
+  transition: background-color var(--t-fast) var(--ease-state), border-color var(--t-fast) var(--ease-state), transform var(--t-fast) var(--ease-state);
+}
+.update-pill:hover {
+  background: color-mix(in srgb, var(--tint) 20%, transparent);
+  border-color: color-mix(in srgb, var(--tint) 42%, transparent);
+}
+.update-pill:active {
+  transform: scale(0.97);
+}
+.updated-toast {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin: 0 var(--gap) var(--gap) 0;
+  padding: 6px 8px 6px 12px;
+  border-radius: var(--r-group);
+  background: var(--bg-float);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: var(--shadow-1);
+  animation: surface-in var(--t-pop) var(--ease-sheet);
+}
+.updated-toast-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--label-primary);
+}
+.updated-toast-icon {
+  color: var(--tint-text, var(--tint));
+  flex: none;
+}
+.updated-toast-sep {
+  color: var(--label-tertiary);
+}
+.updated-toast-link {
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--tint-text, var(--tint));
+  transition: background-color var(--t-fast) var(--ease-state);
+}
+.updated-toast-link:hover {
+  background: var(--tint-soft);
 }
 .caption-space {
   width: max(138px, calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px)));

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
+import { Download, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
 import type {
   ClearDataRange,
   NewTabBehavior,
@@ -8,6 +8,7 @@ import type {
   SitePermission,
   SleepMinutes,
   StartupBehavior,
+  UpdateMode,
   UpdateState
 } from '@shared/types'
 import { SEARCH_ENGINES } from '@shared/settings'
@@ -62,6 +63,11 @@ const ENGINE_OPTIONS = SEARCH_ENGINES.map((engine) => ({
   label: engine.name
 }))
 
+const UPDATE_MODE_OPTIONS: readonly SegmentedOption<UpdateMode>[] = [
+  { value: 'automatic', label: 'Automatic (recommended)' },
+  { value: 'notify', label: 'Notify only' }
+]
+
 const SETTING_SECTIONS = [
   { id: 'set-general', label: 'General' },
   { id: 'set-import', label: 'Import data' },
@@ -87,6 +93,10 @@ function updateStatusText(u: UpdateState): string {
   switch (u.status) {
     case 'checking':
       return 'Checking for updates…'
+    case 'available':
+      return u.availableVersion
+        ? `Update ${u.availableVersion} is available to download.`
+        : 'An update is available to download.'
     case 'downloading':
       return u.availableVersion
         ? `Downloading ${u.availableVersion}… ${u.progress ?? 0}%`
@@ -554,7 +564,12 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
                 <div className="set-row-actions">
                   {update?.status === 'ready' ? (
                     <button type="button" className="btn primary" onClick={() => api.installUpdate()}>
-                      Restart
+                      Restart to update
+                    </button>
+                  ) : update?.status === 'available' ? (
+                    <button type="button" className="btn primary set-icon-btn" onClick={() => void api.downloadUpdate()}>
+                      <Download size={14} aria-hidden />
+                      <span>Download update</span>
                     </button>
                   ) : (
                     <button
@@ -568,6 +583,20 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
                     </button>
                   )}
                 </div>
+              </div>
+              <div className="set-row">
+                <div className="set-row-info">
+                  <div className="set-label">Update behaviour</div>
+                  <div className="set-desc">
+                    Automatic downloads updates quietly in the background and installs when you restart. Notify only waits for you to start the download.
+                  </div>
+                </div>
+                <SegmentedControl
+                  options={UPDATE_MODE_OPTIONS}
+                  value={settings.updateMode}
+                  onChange={(mode) => patch({ updateMode: mode })}
+                  ariaLabel="Update behaviour"
+                />
               </div>
             </div>
           </section>

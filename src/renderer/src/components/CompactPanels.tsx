@@ -28,8 +28,6 @@ export function CompactSidebarWindow(): React.JSX.Element {
   const [downloadsOpen, setDownloadsOpen] = useState(false)
   const [hasUnseenDownloads, setHasUnseenDownloads] = useState(false)
   const [downloadPulseTick, setDownloadPulseTick] = useState(0)
-  const [update, setUpdate] = useState<UpdateState | null>(null)
-  const [dismissedUpdateVer, setDismissedUpdateVer] = useState<string | null>(null)
   const [sidebarEditing, setSidebarEditing] = useState(false)
   const [draggingTab, setDraggingTab] = useState(false)
   const [newWorkspaceTick, setNewWorkspaceTick] = useState(0)
@@ -44,7 +42,6 @@ export function CompactSidebarWindow(): React.JSX.Element {
     const offs = [
       api.onState(setState),
       api.onAppearance(applyResolvedAppearance),
-      api.onUpdateState(setUpdate),
       api.onDownloads((items) => {
         setDownloads(items)
         const newest = items.reduce((m, d) => Math.max(m, d.id), 0)
@@ -78,8 +75,6 @@ export function CompactSidebarWindow(): React.JSX.Element {
   }, [downloadsOpen, sidebarEditing, draggingTab])
 
   const activeWorkspace = state.workspaces.find((w) => w.id === state.activeWorkspaceId)
-  const updateKey = update?.availableVersion ?? (update?.status === 'ready' ? '__ready__' : null)
-  const showUpdateNote = update?.status === 'ready' && dismissedUpdateVer !== updateKey
 
   return (
     <div
@@ -100,8 +95,6 @@ export function CompactSidebarWindow(): React.JSX.Element {
             })
           }}
           onCloseDownloads={() => setDownloadsOpen(false)}
-          update={showUpdateNote ? update : null}
-          onDismissUpdate={() => setDismissedUpdateVer(updateKey)}
           onEditorOpenChange={setSidebarEditing}
           onPointerEdge={(inside) => api.setCompactHover('sidebar', inside)}
           onDragTabChange={(id) => {
@@ -123,6 +116,7 @@ export function CompactSidebarWindow(): React.JSX.Element {
 export function CompactTitlebarWindow(): React.JSX.Element {
   const [state, setState] = useState<BrowserState>(INITIAL_STATE)
   const [settings, setSettings] = useState<SettingsView | null>(null)
+  const [update, setUpdate] = useState<UpdateState | null>(null)
   const [winState, setWinState] = useState<WindowState>({ focused: true, maximized: false, fullscreen: false })
   const [omniboxEditing, setOmniboxEditing] = useState(false)
   const [visible, setVisible] = useState(false)
@@ -133,6 +127,7 @@ export function CompactTitlebarWindow(): React.JSX.Element {
     const offs = [
       api.onState(setState),
       api.onSettings(setSettings),
+      api.onUpdateState(setUpdate),
       api.onAppearance(applyResolvedAppearance),
       api.onWinState(setWinState),
       panel.onVisible(setVisible)
@@ -210,6 +205,7 @@ export function CompactTitlebarWindow(): React.JSX.Element {
           state={state}
           tab={active}
           settings={settings}
+          update={update}
           winState={winState}
           onPageShot={noopShot}
           onEditingChange={setOmniboxEditing}

@@ -4,10 +4,15 @@ import {
   DEV_FEED_TOKEN_FILE,
   DEV_REPO,
   PROD_REPO,
+  UPDATE_CHECK_INTERVAL_MS,
   classifyUpdateError,
+  detectJustUpdated,
   redactSecrets,
+  releaseTagUrl,
   resolveDevFeedToken,
-  selectUpdateFeed
+  selectUpdateFeed,
+  shouldAutoDownloadUpdate,
+  shouldCheckOnWakeOrFocus
 } from '../src/shared/updates.ts'
 
 test('resolveDevFeedToken returns empty string in Prod even if env or file has a token', () => {
@@ -144,4 +149,39 @@ test('redactSecrets strips embedded tokens and Authorization headers from log me
   assert.equal(clean.includes('secret123'), false)
   assert.equal(clean.includes('github_pat_11AAbbCC_xyz'), false)
   assert.equal(clean.includes('token=abc'), false)
+})
+
+test('shouldCheckOnWakeOrFocus checks when never checked or older than 4 hours', () => {
+  const now = 1_700_000_000_000
+  assert.equal(shouldCheckOnWakeOrFocus(undefined, now), true)
+  assert.equal(shouldCheckOnWakeOrFocus(now - 60_000, now), false)
+  assert.equal(shouldCheckOnWakeOrFocus(now - UPDATE_CHECK_INTERVAL_MS, now), false)
+  assert.equal(shouldCheckOnWakeOrFocus(now - UPDATE_CHECK_INTERVAL_MS - 1, now), true)
+})
+
+test('shouldAutoDownloadUpdate respects automatic vs notify-only modes', () => {
+  assert.equal(shouldAutoDownloadUpdate('automatic'), true)
+  assert.equal(shouldAutoDownloadUpdate('notify'), false)
+})
+
+test('releaseTagUrl and detectJustUpdated handle Prod release notes vs Dev version-only toast', () => {
+  assert.equal(releaseTagUrl('26.11.9', 'prod'), 'https://github.com/carrotsz19/veyra-orbit/releases/tag/v26.11.9')
+  assert.equal(releaseTagUrl('26.11.9-dev.1', 'dev'), null)
+  assert.equal(releaseTagUrl('../evil', 'prod'), null)
+
+  // First launch or unchanged version -> no toast
+  assert.equal(detectJustUpdated(null, '26.11.9', 'prod'), null)
+  assert.equal(detectJustUpdated('26.11.9', '26.11.9', 'prod'), null)
+
+  // Updated in Prod -> version + release tag URL
+  assert.deepEqual(detectJustUpdated('26.11.8', '26.11.9', 'prod'), {
+    version: '26.11.9',
+    releaseNotesUrl: 'https://github.com/carrotsz19/veyra-orbit/releases/tag/v26.11.9'
+  })
+
+  // Updated in Dev -> version only, no release notes URL
+  assert.deepEqual(detectJustUpdated('26.11.8-dev.1', '26.11.8-dev.2', 'dev'), {
+    version: '26.11.8-dev.2',
+    releaseNotesUrl: null
+  })
 })

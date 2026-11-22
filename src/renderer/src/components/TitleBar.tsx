@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Copy, EyeOff, Menu as MenuIcon, Minus, RotateCw, Square, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ArrowUpCircle, Copy, EyeOff, Menu as MenuIcon, Minus, RotateCw, Square, X } from 'lucide-react'
 import type {
   Bookmark,
   BrowserState,
@@ -9,6 +9,7 @@ import type {
   MenuId,
   SettingsView,
   TabInfo,
+  UpdateState,
   WindowButtonsStyle,
   WindowState
 } from '@shared/types'
@@ -121,6 +122,7 @@ interface TitleBarProps {
   state: BrowserState
   tab?: TabInfo
   settings: SettingsView | null
+  update?: UpdateState | null
   winState: WindowState
   onPageShot: (shots: Record<number, string> | null) => void
   onEditingChange?: (editing: boolean) => void
@@ -139,6 +141,7 @@ export function TitleBar({
   state,
   tab,
   settings,
+  update = null,
   winState,
   onPageShot,
   onEditingChange,
@@ -242,9 +245,10 @@ export function TitleBar({
         history: history.map((h) => ({ url: h.url, title: h.title })),
         bookmarks: bookmarks.map((b) => ({ url: b.url, title: b.title })),
         appVersion: INITIAL_VERSION,
-        isDev: __CHANNEL__ === 'dev'
+        isDev: __CHANNEL__ === 'dev',
+        updateReadyVersion: update?.status === 'ready' ? (update.availableVersion ?? '') : null
       }),
-    [tab, activeSplitGroup, state.workspaces, state.activeWorkspaceId, state.canReopenClosed, settings?.compactMode, winState.fullscreen, history, bookmarks]
+    [tab, activeSplitGroup, state.workspaces, state.activeWorkspaceId, state.canReopenClosed, settings?.compactMode, winState.fullscreen, history, bookmarks, update?.status, update?.availableVersion]
   )
 
   const recentUrls = useMemo(() => recentHistoryItems(history.map((h) => ({ url: h.url, title: h.title }))), [history])
@@ -412,6 +416,9 @@ export function TitleBar({
           return
         case 'bookmarks:all':
           api.openInternal('orbit://bookmarks')
+          return
+        case 'help:install-update':
+          api.installUpdate()
           return
         case 'help:check-updates':
           onOpenSettingsSection('set-updates')
@@ -743,6 +750,18 @@ export function TitleBar({
             <EyeOff size={12} aria-hidden />
             <span>Private</span>
           </span>
+        )}
+        {update?.status === 'ready' && (
+          <button
+            type="button"
+            className="update-pill"
+            aria-label={update.availableVersion ? `Restart to update to version ${update.availableVersion}` : 'Restart to update'}
+            title={update.availableVersion ? `Restart to update to v${update.availableVersion}` : 'Restart to update'}
+            onClick={() => api.installUpdate()}
+          >
+            <ArrowUpCircle size={13} strokeWidth={2} aria-hidden />
+            <span>Restart to update</span>
+          </button>
         )}
         {tab && tab.zoom !== 100 && (
           <button

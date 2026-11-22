@@ -28,7 +28,7 @@ import {
   VolumeX,
   X
 } from 'lucide-react'
-import type { BrowserState, DownloadInfo, SplitGroup, TabInfo, UpdateState, WorkspaceAccentId, WorkspaceIconId, WorkspaceInfo } from '@shared/types'
+import type { BrowserState, DownloadInfo, SplitGroup, TabInfo, WorkspaceAccentId, WorkspaceIconId, WorkspaceInfo } from '@shared/types'
 import { WORKSPACE_ACCENTS, WORKSPACE_ICONS, isBuiltInWorkspaceIcon } from '@shared/workspaces'
 import { displayUrl } from '@shared/url'
 import { DownloadTriggerButton, Downloads } from './Downloads'
@@ -101,8 +101,6 @@ interface Props {
   downloadPulseTick?: number
   onToggleDownloads: () => void
   onCloseDownloads: () => void
-  update: UpdateState | null
-  onDismissUpdate: () => void
   onEditorOpenChange?: (open: boolean) => void
   onPointerEdge?: (inside: boolean) => void
   onDragTabChange?: (tabId: number | null) => void
@@ -117,8 +115,6 @@ export function Sidebar({
   downloadPulseTick = 0,
   onToggleDownloads,
   onCloseDownloads,
-  update,
-  onDismissUpdate,
   onEditorOpenChange,
   onPointerEdge,
   onDragTabChange,
@@ -479,23 +475,6 @@ export function Sidebar({
       </div>
 
       {downloadsOpen && <Downloads items={downloads} onClose={onCloseDownloads} />}
-      {update?.status === 'ready' && (
-        <div className="update-note" role="status" aria-live="polite">
-          <div className="update-note-top">
-            <span className="update-note-dot" aria-hidden />
-            <span className="update-note-text">Update ready — restart to update</span>
-            <button type="button" className="dl-btn" aria-label="Dismiss update notice" title="Dismiss" onClick={onDismissUpdate}>
-              <X size={13} />
-            </button>
-          </div>
-          <div className="update-note-actions">
-            {update.availableVersion && <span className="update-note-ver">v{update.availableVersion}</span>}
-            <button type="button" className="btn primary update-note-btn" onClick={() => api.installUpdate()}>
-              Restart
-            </button>
-          </div>
-        </div>
-      )}
 
       {editor && (
         <form

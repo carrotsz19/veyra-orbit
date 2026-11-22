@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, webContents, type IpcMainEvent, type IpcMainInvokeEvent, type Session } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, powerMonitor, screen, webContents, type IpcMainEvent, type IpcMainInvokeEvent, type Session } from 'electron'
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { release } from 'node:os'
@@ -1165,7 +1165,10 @@ function createWindow(): void {
   })
   // Windows flickers acrylic on a full-screen window, so full screen is solid; and a page in
   // full screen leaves it when the window does (Esc, F11).
-  w.on('focus', sendWinState)
+  w.on('focus', () => {
+    sendWinState()
+    updater?.checkIfStale()
+  })
   w.on('blur', handleOrbitFocusBlur)
   w.on('minimize', () => {
     stopCompactPoller()
@@ -1282,9 +1285,16 @@ function createWindow(): void {
   })
 
   if (!updater) {
-    updater = new Updater((state) => {
-      broadcastUi('update:state', state)
-    })
+    updater = new Updater(
+      (state) => {
+        broadcastUi('update:state', state)
+      },
+      {
+        getMode: () => settings?.get().updateMode ?? 'automatic',
+        onBeforeInstall: () => tabs?.save(),
+        metaFile: join(app.getPath('userData'), 'update-meta.json')
+      }
+    )
     updater.start()
   }
 }
@@ -1843,6 +1853,9 @@ handle('settings:update', (patch) => {
   if (view.sleepAfterMinutes !== prev.sleepAfterMinutes || view.sleepPinnedTabs !== prev.sleepPinnedTabs) {
     tabs?.refreshSleepPolicy()
   }
+  if (view.updateMode !== prev.updateMode) {
+    updater?.syncMode(view.updateMode)
+  }
   sendSettings()
   applyWindowAppearance()
   if (view.compactMode && (view.appearance.sidebarSide !== prev.appearance.sidebarSide || view.appearance.sidebarWidth !== prev.appearance.sidebarWidth)) {
@@ -2049,7 +2062,9 @@ onSurface('download:clear', () => {
 })
 handle('update:state', () => updater?.state() ?? null)
 handleSurface('update:check', () => updater?.check(true) ?? null)
+handleSurface('update:download', () => updater?.downloadAvailable() ?? null)
 onSurface('update:install', () => updater?.install())
+onSurface('update:dismiss-just-updated', () => updater?.dismissJustUpdated())
 
 handle('import:status', () => importer?.status() ?? { profiles: [], showFirstRunPrompt: false })
 handle('import:dismiss-prompt', () => importer?.dismissPrompt())
@@ -2167,7 +2182,12 @@ app.on('second-instance', () => {
   win.focus()
 })
 
-void app.whenReady().then(createWindow)
+void app.whenReady().then(() => {
+  createWindow()
+  powerMonitor.on('resume', () => {
+    updater?.checkIfStale()
+  })
+})
 app.on('will-quit', () => {
   stopCompactPoller()
   updater?.stop()

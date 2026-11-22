@@ -122,6 +122,7 @@ export type {
   StartPageSettings,
   StartupBehavior,
   ThemeSource,
+  UpdateMode,
   WindowButtonsStyle
 } from './settings'
 export type {
@@ -144,7 +145,7 @@ export type {
   ThemePresetId,
   UiDensity
 } from './appearance'
-export type { UpdateState, UpdateStatus } from './updates'
+export type { JustUpdatedNotice, UpdateState, UpdateStatus } from './updates'
 export type { WorkspaceAccentId, WorkspaceCreateInput, WorkspaceIconId, WorkspaceInfo, WorkspaceUpdateInput } from './workspaces'
 export type { CompactRevealState } from './compact'
 export type { MenuEntry, MenuId, MenuItemEntry, MenuPopupHeader, MenuPopupSpec, MenuSection } from './menu'
@@ -372,7 +373,9 @@ export interface VeyraApi {
   onUpdateState(cb: (s: import('./updates').UpdateState) => void): () => void
   getUpdateState(): Promise<import('./updates').UpdateState | null>
   checkForUpdates(): Promise<import('./updates').UpdateState | null>
+  downloadUpdate(): Promise<import('./updates').UpdateState | null>
   installUpdate(): void
+  dismissJustUpdated(): void
   reopenClosedTab(): void
   print(): void
   zoomIn(): void
