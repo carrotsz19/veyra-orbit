@@ -4,6 +4,10 @@ All notable changes to Veyra Orbit are documented here.
 
 ## Unreleased
 
+- A more polished look: a deep, even window background, the page on a softly shadowed card, quieter menus, a filled address bar, the active tab as a raised pill, a round workspace switcher, slim scrollbars, styled dropdowns and checkboxes, and one consistent look and animation for every popup. Light mode got the same care.
+- The start page greeting, search box and import card are more refined.
+- Sharper app icon on the taskbar, Start menu and desktop: every size is drawn for its own size, and the window and installer use the same icon.
+
 ## 26.11.6 — 2026-11-22
 
 - Google sign-in: Orbit's sign-in fix now switches on properly from the very first launch, so a brand-new install should sign in first time.
