@@ -80,19 +80,18 @@
 /* ---- first-run import banner on StartPage -------------------------------- */
 .start-import {
   width: min(560px, 100%);
-  margin-top: 18px;
-  padding: 13px 15px;
-  border-radius: var(--r-card);
-  background: var(--bg-grouped);
-  border: 1px solid var(--separator);
+  margin-top: var(--sp-4);
+  padding: var(--sp-3) 14px;
+  border-radius: var(--r-lg);
+  background: var(--fill-tertiary);
+  border: 1px solid var(--hairline);
   text-align: left;
-  box-shadow: var(--elev-1);
 }
 .start-import-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--sp-3);
 }
 .start-import-copy {
   display: flex;
@@ -101,8 +100,8 @@
   min-width: 0;
 }
 .start-import-copy strong {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12.5px;
+  font-weight: 550;
   color: var(--label-primary);
 }
 .start-import-copy span {
@@ -116,9 +115,9 @@
   flex: none;
 }
 .start-import-body {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--separator);
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--hairline);
 }
 
 /* ---- private workspace --------------------------------------------------- */

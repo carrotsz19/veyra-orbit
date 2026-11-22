@@ -241,13 +241,13 @@ export function FirstRunImportBanner(): React.JSX.Element | null {
         </div>
         <div className="start-import-btns">
           {!expanded && !doneResult && (
-            <button type="button" className="btn primary" onClick={() => setExpanded(true)}>
+            <button type="button" className="btn primary sm" onClick={() => setExpanded(true)}>
               Import data…
             </button>
           )}
           <button
             type="button"
-            className={expanded || doneResult ? 'dl-btn' : 'btn'}
+            className={expanded || doneResult ? 'dl-btn' : 'btn ghost sm'}
             aria-label={doneResult ? 'Dismiss import summary' : 'Not now'}
             onClick={dismiss}
           >
