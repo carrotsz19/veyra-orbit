@@ -4,6 +4,12 @@ All notable changes to Veyra Orbit are documented here.
 
 ## Unreleased
 
+- Google sign-in: Orbit's sign-in fix now switches on properly from the very first launch, so a brand-new install should sign in first time.
+- The address bar shows the right address when you switch to Settings, History or Bookmarks, and no longer selects the previous tab's address.
+- Adding an extension: the confirmation is now a compact bar (long permission lists scroll inside it), and the Chrome Web Store no longer scrolls sideways.
+- Compact mode: after dragging the window, hovering the top edge brings the title bar back again without clicking.
+- Security: updated the library that unpacks extensions, and Orbit now refuses extension files with duplicate file names.
+
 ## 26.11.5 — 2026-11-21
 
 - Extensions: install Chrome extensions from the Chrome Web Store ("Add to Veyra Orbit"). Orbit shows what an extension can do, in plain words, before adding it. Extensions work straight away, have buttons in the title bar, and are managed in Settings → Extensions (on/off, remove, permissions, memory use). Private workspaces never run extensions. Some extensions won't fully work, because Orbit doesn't support every Chrome feature (for example side panels).
