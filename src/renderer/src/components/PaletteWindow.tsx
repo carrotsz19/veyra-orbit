@@ -139,11 +139,12 @@ export function PaletteWindow(): React.JSX.Element {
   }, [palette])
 
   useLayoutEffect(() => {
+    if (openTick === 0) return
     const el = boxRef.current
     if (!el) return
     const h = Math.ceil(el.getBoundingClientRect().height)
     if (h > 0) palette.size(h)
-  }, [items, mode, palette])
+  }, [items, mode, openTick, palette])
 
   useEffect(() => {
     listRef.current?.querySelector(`[data-i="${active}"]`)?.scrollIntoView({ block: 'nearest' })

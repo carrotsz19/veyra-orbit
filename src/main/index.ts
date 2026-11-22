@@ -1,5 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, type IpcMainEvent, type IpcMainInvokeEvent, type Session } from 'electron'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, webContents, type IpcMainEvent, type IpcMainInvokeEvent, type Session } from 'electron'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { release } from 'node:os'
 import type {
@@ -25,6 +25,7 @@ import {
   type WindowBounds
 } from '../shared/compact'
 import { resolveSleepTimeoutMs } from '../shared/sleep'
+import { computeMemorySnapshot } from '../shared/memory'
 import { WORKSPACE_ACCENTS } from '../shared/workspaces'
 import {
   buildPaletteResults,
@@ -77,6 +78,7 @@ const HOUR_MS = 3_600_000
 const CLEAR_RANGES = new Set<ClearDataRange>(['hour', 'day', 'all'])
 const COMPACT_POLL_MS = 100
 const COMPACT_HIDE_DELAY_MS = 240
+const PALETTE_PREWARM_DELAY_MS = 4_000
 
 function resolveCurrentAppearance(): ResolvedAppearance {
   const appCfg = settings?.get().appearance ?? DEFAULT_APPEARANCE
@@ -155,6 +157,7 @@ let lastPolledCursor: { x: number; y: number } | null = null
 let compactPoller: NodeJS.Timeout | null = null
 let sideHideTimer: NodeJS.Timeout | null = null
 let barHideTimer: NodeJS.Timeout | null = null
+let paletteWarmTimer: NodeJS.Timeout | null = null
 
 const COMPACT_SIDEBAR_W = 264
 const COMPACT_TITLEBAR_H = 52
@@ -426,6 +429,12 @@ function pollCompactCursor(): void {
   applyCompactTargets(wantSide, wantBar)
 }
 
+function startCompactPoller(): void {
+  if (!compactPoller && settings?.get().compactMode && win && !win.isDestroyed() && !win.isMinimized() && win.isVisible()) {
+    compactPoller = setInterval(pollCompactCursor, COMPACT_POLL_MS)
+  }
+}
+
 function syncCompactMode(): void {
   const enabled = !!settings?.get().compactMode
   if (!enabled) {
@@ -444,9 +453,7 @@ function syncCompactMode(): void {
     toolbar: compactPins.omnibox || compactPins.titleMenu || compactPins.dragging || compactPins.extPopup || compactHover.toolbar
   }
   sendCompactState(true)
-  if (!compactPoller) {
-    compactPoller = setInterval(pollCompactCursor, COMPACT_POLL_MS)
-  }
+  startCompactPoller()
 }
 
 /** History and bookmarks changed: the UI re-reads them (the Library page, the star). */
@@ -724,7 +731,8 @@ function createWindow(): void {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
-      spellcheck: true
+      spellcheck: true,
+      backgroundThrottling: true
     }
   })
   win = w
@@ -905,6 +913,7 @@ function createWindow(): void {
     },
     discardSession: (partition) => discardWebSession(partition),
     hasPendingPermission: (tabId) => perms?.hasPendingPermission(tabId) ?? false,
+    hasActiveMediaCapture: (tabId) => perms?.hasActiveMediaCapture(tabId) ?? false,
     sleepPolicy: () => {
       const cur = s.get()
       return {
@@ -1085,14 +1094,35 @@ function createWindow(): void {
     if (t.shortcut(input)) e.preventDefault()
   })
 
-  w.once('ready-to-show', () => w.show())
+  w.once('ready-to-show', () => {
+    w.show()
+    // Cold-opening the command palette takes >150 ms; pre-warm only the palette after startup settles.
+    // Its idle-destroy timer still tears it down after ~60 s if unused.
+    if (paletteWarmTimer) clearTimeout(paletteWarmTimer)
+    paletteWarmTimer = setTimeout(() => {
+      paletteWarmTimer = null
+      if (win === w && !w.isDestroyed() && !w.isMinimized() && palettePopup && !palettePopup.hasLiveWindow()) {
+        palettePopup.warm()
+      }
+    }, PALETTE_PREWARM_DELAY_MS)
+  })
   // Windows flickers acrylic on a full-screen window, so full screen is solid; and a page in
   // full screen leaves it when the window does (Esc, F11).
   w.on('focus', sendWinState)
   w.on('blur', handleOrbitFocusBlur)
   w.on('minimize', () => {
+    stopCompactPoller()
     compactSidebar?.hide(true)
     compactTitlebar?.hide(true)
+  })
+  w.on('hide', () => {
+    stopCompactPoller()
+    compactSidebar?.hide(true)
+    compactTitlebar?.hide(true)
+  })
+  w.on('show', () => {
+    startCompactPoller()
+    if (settings?.get().compactMode) syncCompactPanels()
   })
   w.on('maximize', () => {
     sendWinState()
@@ -1103,6 +1133,7 @@ function createWindow(): void {
     syncCompactPanels()
   })
   w.on('restore', () => {
+    startCompactPoller()
     sendWinState()
     syncCompactPanels()
   })
@@ -1139,6 +1170,10 @@ function createWindow(): void {
   })
   w.on('close', () => t.save())
   w.on('closed', () => {
+    if (paletteWarmTimer) {
+      clearTimeout(paletteWarmTimer)
+      paletteWarmTimer = null
+    }
     stopCompactPoller()
     compactDrag = null
     compactPins = { omnibox: false, sidebar: false, menu: false, titleMenu: false, dragging: false, extPopup: false }
@@ -1198,7 +1233,7 @@ function createWindow(): void {
 
 /** Only the browser's own main UI may call privileged IPC (settings, privacy, bounds, overlay); pages have no preload. */
 function fromUi(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
-  return !!win && e.sender === win.webContents
+  return !!win && !win.isDestroyed() && e.sender === win.webContents
 }
 
 /** Only the floating compact-mode sidebar or titlebar panels may call compact-panel channels. */
@@ -1280,21 +1315,23 @@ ipcMain.on('compact-panel:ready', (e) => {
   if (!fromCompactPanel(e) || !tabs) return
   const panel = compactSidebar?.isSender(e.sender) ? compactSidebar : compactTitlebar
   if (!panel) return
-  panel.markReady()
-  panel.send('state', tabs.state())
-  panel.send('downloads', downloads?.list() ?? [])
-  if (settings) panel.send('settings', settings.view())
-  panel.sendAppearance(resolveCurrentAppearance())
-  panel.send('compact:state', compactState)
-  panel.send('win:state', {
-    focused: isAnyOrbitFocused(),
-    maximized: !!win && !win.isDestroyed() && win.isMaximized(),
-    fullscreen: !!win && !win.isDestroyed() && win.isFullScreen()
+  const currentTabs = tabs
+  panel.markReady(() => {
+    panel.sendAppearance(resolveCurrentAppearance())
+    if (settings) panel.send('settings', settings.view())
+    panel.send('state', currentTabs.state())
+    panel.send('downloads', downloads?.list() ?? [])
+    panel.send('compact:state', compactState)
+    panel.send('win:state', {
+      focused: isAnyOrbitFocused(),
+      maximized: !!win && !win.isDestroyed() && win.isMaximized(),
+      fullscreen: !!win && !win.isDestroyed() && win.isFullScreen()
+    })
+    if (updater) panel.send('update:state', updater.state())
+    if (extManager && panel === compactTitlebar) {
+      panel.send('extensions:actions', extManager.getToolbarActions())
+    }
   })
-  if (updater) panel.send('update:state', updater.state())
-  if (extManager && panel === compactTitlebar) {
-    panel.send('extensions:actions', extManager.getToolbarActions())
-  }
 })
 ipcMain.on('compact-panel:omnibox-open', (e, open: unknown) => {
   if (!compactTitlebar?.isSender(e.sender)) return
@@ -1470,8 +1507,7 @@ ipcMain.on('menu:close', (e) => {
 })
 ipcMain.on('menu:ready', (e) => {
   if (fromMenu(e)) {
-    menuPopup?.markReady()
-    menuPopup?.sendAppearance(resolveCurrentAppearance())
+    menuPopup?.markReady(resolveCurrentAppearance())
   }
 })
 ipcMain.on('menu:size', (e, width: unknown, height: unknown) => {
@@ -1490,8 +1526,7 @@ ipcMain.on('menu:dismiss', (e) => {
 // Floating Ctrl+K command palette IPC: strict sender check + main-side ID/URL validation.
 ipcMain.on('palette:ready', (e) => {
   if (fromPalette(e)) {
-    palettePopup?.markReady()
-    palettePopup?.sendAppearance(resolveCurrentAppearance())
+    palettePopup?.markReady(resolveCurrentAppearance())
   }
 })
 ipcMain.on('palette:query', (e, text: unknown) => {
@@ -1523,8 +1558,7 @@ ipcMain.on('palette:dismiss', (e) => {
 // Floating Link Preview ("Peek") toolbar IPC: strict sender check + fixed action allowlist (never accepts URLs).
 ipcMain.on('peek:ready', (e) => {
   if (fromPeek(e)) {
-    peekPopup?.markReady()
-    peekPopup?.sendAppearance(resolveCurrentAppearance())
+    peekPopup?.markReady(resolveCurrentAppearance())
   }
 })
 ipcMain.on('peek:action', (e, act: unknown) => {
@@ -1911,6 +1945,19 @@ onSurface('update:install', () => updater?.install())
 handle('import:status', () => importer?.status() ?? { profiles: [], showFirstRunPrompt: false })
 handle('import:dismiss-prompt', () => importer?.dismissPrompt())
 
+// Sender-checked live memory readout for Settings -> Performance (exposes only what is shown).
+handle('performance:memory', () => {
+  const rawMetrics = app.getAppMetrics()
+  const metrics = rawMetrics.map((m) => ({
+    pid: m.pid,
+    workingSetKB: m.memory.workingSetSize ?? 0,
+    privateKB: m.memory.privateBytes ?? 0
+  }))
+  const tabEntries = tabs?.memoryTabEntries() ?? []
+  const extInfo = extManager?.getExtensionMemoryPids(rawMetrics) ?? { pids: new Set<number>(), enabledCount: 0 }
+  return computeMemorySnapshot(metrics, tabEntries, extInfo.pids, extInfo.enabledCount)
+})
+
 // Chrome extensions IPC: strictly gated to Orbit's own UI / compact titlebar.
 handle('extensions:get-state', () => extManager?.getState() ?? { extensions: [], developerMode: false })
 handleSurface('extensions:get-actions', () => extManager?.getToolbarActions() ?? [])
@@ -2029,4 +2076,93 @@ app.on('activate', () => {
 const smokeExitMs = Number(process.env.VEYRA_TEST_EXIT_MS)
 if (!app.isPackaged && Number.isFinite(smokeExitMs) && smokeExitMs > 0) {
   setTimeout(() => app.exit(0), Math.min(smokeExitMs, 120_000))
+}
+
+// Dev-only memory measurement hook for tools/measure-memory.mjs. Never runs in packaged builds.
+if (!app.isPackaged && process.env.VEYRA_MEASURE_IPC_DIR) {
+  const ipcDir = process.env.VEYRA_MEASURE_IPC_DIR
+  const reqFile = join(ipcDir, 'req.json')
+  const collectMeasureSnapshot = (label: string): Record<string, unknown> => {
+    const metrics = app.getAppMetrics()
+    const wcByPid = new Map<number, string[]>()
+    for (const wc of webContents.getAllWebContents()) {
+      if (wc.isDestroyed()) continue
+      const pid = wc.getOSProcessId()
+      const url = wc.getURL()
+      let desc = url
+      if (url.includes('index.html')) {
+        try {
+          const view = new URL(url).searchParams.get('view')
+          desc = view ? `floating:${view}` : 'main-ui'
+        } catch {
+          desc = 'orbit-ui'
+        }
+      } else if (url.length > 80) {
+        desc = url.slice(0, 77) + '...'
+      }
+      const list = wcByPid.get(pid) ?? []
+      list.push(desc || '(blank)')
+      wcByPid.set(pid, list)
+    }
+
+    const processes = metrics.map((m) => ({
+      pid: m.pid,
+      type: m.type,
+      name: m.name ?? m.serviceName ?? '',
+      workingSetKB: m.memory.workingSetSize ?? 0,
+      privateKB: m.memory.privateBytes ?? 0,
+      peakWorkingSetKB: m.memory.peakWorkingSetSize ?? 0,
+      targets: wcByPid.get(m.pid) ?? []
+    }))
+
+    const allTabs = tabs?.allTabs() ?? []
+    const totalWorkingSetKB = processes.reduce((s, p) => s + p.workingSetKB, 0)
+    const totalPrivateKB = processes.reduce((s, p) => s + p.privateKB, 0)
+    return {
+      label,
+      timestamp: Date.now(),
+      windowCount: BrowserWindow.getAllWindows().length,
+      webContentsCount: webContents.getAllWebContents().filter((w) => !w.isDestroyed()).length,
+      tabs: {
+        total: allTabs.length,
+        loading: allTabs.filter((t) => t.loading).length,
+        sleeping: allTabs.filter((t) => t.sleeping).length
+      },
+      processCount: processes.length,
+      totalWorkingSetKB,
+      totalPrivateKB,
+      processes
+    }
+  }
+
+  const measurePoll = setInterval(() => {
+    if (!existsSync(reqFile)) return
+    let req: { id?: string; cmd?: string; label?: string } | null = null
+    try {
+      req = JSON.parse(readFileSync(reqFile, 'utf8')) as { id?: string; cmd?: string; label?: string }
+      unlinkSync(reqFile)
+    } catch {
+      return
+    }
+    if (!req?.cmd) return
+    if (req.cmd === 'quit') {
+      clearInterval(measurePoll)
+      app.exit(0)
+      return
+    }
+    if (req.cmd === 'metrics' && req.id) {
+      const snap = collectMeasureSnapshot(req.label ?? '')
+      try {
+        mkdirSync(ipcDir, { recursive: true })
+        const tmp = join(ipcDir, `res-${req.id}.tmp`)
+        const out = join(ipcDir, `res-${req.id}.json`)
+        writeFileSync(tmp, JSON.stringify(snap), 'utf8')
+        renameSync(tmp, out)
+      } catch {
+        /* ignore */
+      }
+    }
+  }, 80)
+  measurePoll.unref()
+  app.on('will-quit', () => clearInterval(measurePoll))
 }

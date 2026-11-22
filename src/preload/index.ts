@@ -138,6 +138,7 @@ const api: VeyraApi = {
   getImportStatus: () => ipcRenderer.invoke('import:status'),
   runImport: (req) => ipcRenderer.invoke('import:run', req),
   dismissImportPrompt: () => ipcRenderer.invoke('import:dismiss-prompt'),
+  getMemoryUsage: () => ipcRenderer.invoke('performance:memory'),
   extensions: {
     onState: (cb) => listen<ExtensionsState>('extensions:state', cb),
     onActions: (cb) => listen<ExtensionActionView[]>('extensions:actions', cb),

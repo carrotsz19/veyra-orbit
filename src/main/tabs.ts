@@ -7,7 +7,7 @@ import { BrowserWindow, Menu, MenuItem, WebContentsView, clipboard, type Input, 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { BrowserState, Rect, TabInfo, WorkspaceCreateInput, WorkspaceInfo, WorkspaceUpdateInput } from '../shared/types'
-import { INTERNAL_PAGES, buildSearchUrl, isAllowedUrl, isInternalUrl, shouldFocusOmniboxOnActivate, toUrl } from '../shared/url'
+import { INTERNAL_PAGES, buildSearchUrl, displayUrl, isAllowedUrl, isInternalUrl, shouldFocusOmniboxOnActivate, toUrl } from '../shared/url'
 import { isSafeSubframeUrl, parseExternalAppUrl } from '../shared/external'
 import { clampZoomLevel, zoomPercent } from '../shared/format'
 import {
@@ -34,7 +34,7 @@ import {
   updateSplitGroupRatio,
   type SplitGroup
 } from '../shared/split'
-import { canSleepTab, type SleepPolicy } from '../shared/sleep'
+import { FORM_DIRTY_CHECK_SCRIPT, canSleepTab, isTypingKeyInput, type SleepPolicy } from '../shared/sleep'
 import { shouldPeekWindowOpen } from '../shared/peek'
 import { attachPageCompat } from './compat'
 
@@ -47,6 +47,10 @@ interface Tab {
   typed?: boolean
   /** Timestamp when this tab was last active in the window (for sleeping tabs). */
   lastActiveAt: number
+  /** True once a typing/editing keydown occurred in the current document (gates cheap on-demand form probe). */
+  hasTypedInput: boolean
+  /** Cached result of the cheap on-demand unsaved-form-text check for the current document. */
+  hasUnsavedFormText: boolean
   /** If set, this tab may navigate to chrome-extension://<allowedExtensionId>/... pages. */
   allowedExtensionId?: string
 }
@@ -68,6 +72,8 @@ export interface TabHooks {
   discardSession?(partition: string): void | Promise<void>
   /** True when a tab currently has an unanswered permission prompt. */
   hasPendingPermission(tabId: number): boolean
+  /** True when a tab has an active camera, microphone, or screen-capture grant on its current page. */
+  hasActiveMediaCapture(tabId: number): boolean
   /** Current sleeping-tabs policy. */
   sleepPolicy(): SleepPolicy
   /** Toggles Zen-style compact mode (Ctrl+Shift+S). */
@@ -245,6 +251,20 @@ export class Tabs {
     return this.tabs.map((t) => ({ ...t.info, bookmarked: !!t.info.url && this.hooks.isBookmarked(t.info.url) }))
   }
 
+  /** Minimal per-tab process info for Settings -> Performance memory attribution. */
+  memoryTabEntries(): { id: number; title: string; pid: number | null; sleeping: boolean; canSleep: boolean }[] {
+    return this.tabs.map((t) => {
+      const wc = t.view && !t.view.webContents.isDestroyed() ? t.view.webContents : null
+      return {
+        id: t.info.id,
+        title: t.info.title || displayUrl(t.info.url) || 'New tab',
+        pid: wc ? wc.getOSProcessId() : null,
+        sleeping: t.info.sleeping,
+        canSleep: this.canSleep(t, true)
+      }
+    })
+  }
+
   /**
    * Tabs eligible for omnibox "Switch to tab" suggestions.
    * Private workspace tabs never leak into normal workspaces or other private workspaces.
@@ -387,7 +407,8 @@ export class Tabs {
         spellcheck: true,
         safeDialogs: true,
         // Chromium's built-in PDF viewer.
-        plugins: true
+        plugins: true,
+        backgroundThrottling: true
       }
     })
     view.setBackgroundColor('#ffffffff')
@@ -408,6 +429,8 @@ export class Tabs {
 
   private destroyView(tab: Tab): void {
     const view = tab.view
+    tab.hasTypedInput = false
+    tab.hasUnsavedFormText = false
     if (!view) return
     tab.view = null
     const partition = this.partitionFor(tab.info.workspaceId)
@@ -431,7 +454,12 @@ export class Tabs {
 
     const dir: -1 | 1 = explicitDir ?? (nextIdx > prevIdx ? 1 : -1)
     const now = Date.now()
-    for (const vt of this.visibleTabs()) vt.lastActiveAt = now
+    for (const vt of this.visibleTabs()) {
+      vt.lastActiveAt = now
+      if (this.showsPage(vt) && vt.view && !vt.view.webContents.isDestroyed()) {
+        void this.probeUnsavedFormText(vt)
+      }
+    }
     this.stopFind(true)
     if (this.fullscreenTab) this.exitPageFullscreen(true)
 
@@ -555,6 +583,8 @@ export class Tabs {
     const tab: Tab = {
       view: null,
       lastActiveAt: now,
+      hasTypedInput: false,
+      hasUnsavedFormText: false,
       info: {
         id,
         workspaceId,
@@ -688,7 +718,12 @@ export class Tabs {
     const now = Date.now()
     const prevVisible = this.visibleTabs()
     if (this.active && this.active.info.id !== id) {
-      for (const vt of prevVisible) vt.lastActiveAt = now
+      for (const vt of prevVisible) {
+        vt.lastActiveAt = now
+        if (vt.info.id !== id && this.showsPage(vt) && vt.view && !vt.view.webContents.isDestroyed()) {
+          void this.probeUnsavedFormText(vt)
+        }
+      }
       this.stopFind(true)
       if (this.fullscreenTab) this.exitPageFullscreen(true)
     }
@@ -746,6 +781,8 @@ export class Tabs {
     if (!tab || !url) return
     tab.pendingUrl = undefined
     tab.info.sleeping = false
+    tab.hasTypedInput = false
+    tab.hasUnsavedFormText = false
     tab.info.url = url
     tab.info.error = undefined
     tab.lastActiveAt = Date.now()
@@ -1013,6 +1050,8 @@ export class Tabs {
 
   // ---- sleeping tabs ------------------------------------------------------
 
+  private sleepSweepInFlight = false
+
   refreshSleepPolicy(): void {
     if (this.sleepTimer) {
       clearInterval(this.sleepTimer)
@@ -1021,38 +1060,84 @@ export class Tabs {
     const { timeoutMs } = this.hooks.sleepPolicy()
     if (timeoutMs <= 0) return
     const intervalMs = Math.max(250, Math.min(30_000, Math.floor(timeoutMs / 4)))
-    this.sleepTimer = setInterval(() => this.sweepSleepingTabs(), intervalMs)
+    this.sleepTimer = setInterval(() => {
+      void this.sweepSleepingTabs()
+    }, intervalMs)
+  }
+
+  private buildSleepCandidate(tab: Tab, ignoreUnsavedForm = false) {
+    const wc = tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null
+    const isCapturingMedia = this.hooks.hasActiveMediaCapture(tab.info.id) || (wc ? wc.isBeingCaptured() : false)
+    return {
+      isActive: this.isVisibleTab(tab.info.id),
+      sleeping: tab.info.sleeping,
+      hasLoadedWebView: !!wc,
+      url: tab.info.url,
+      hasError: !!tab.info.error,
+      audible: tab.info.audible,
+      pinned: tab.info.pinned,
+      hasPendingPermission: this.hooks.hasPendingPermission(tab.info.id),
+      hasActiveFind: this.findOpen && this.activeId === tab.info.id,
+      isFullscreen: this.fullscreenTab === tab,
+      isCapturingMedia,
+      hasUnsavedFormText: ignoreUnsavedForm ? false : tab.hasUnsavedFormText,
+      lastActiveAt: tab.lastActiveAt
+    }
   }
 
   private canSleep(tab: Tab, manual: boolean, now = Date.now()): boolean {
-    return canSleepTab(
-      {
-        isActive: this.isVisibleTab(tab.info.id),
-        sleeping: tab.info.sleeping,
-        hasLoadedWebView: !!tab.view && !tab.view.webContents.isDestroyed(),
-        url: tab.info.url,
-        hasError: !!tab.info.error,
-        audible: tab.info.audible,
-        pinned: tab.info.pinned,
-        hasPendingPermission: this.hooks.hasPendingPermission(tab.info.id),
-        hasActiveFind: this.findOpen && this.activeId === tab.info.id,
-        isFullscreen: this.fullscreenTab === tab,
-        lastActiveAt: tab.lastActiveAt
-      },
-      this.hooks.sleepPolicy(),
-      now,
-      manual
-    )
+    return canSleepTab(this.buildSleepCandidate(tab), this.hooks.sleepPolicy(), now, manual)
   }
 
-  sweepSleepingTabs(now = Date.now()): number {
-    let slept = 0
-    for (const tab of this.tabs) {
-      if (this.canSleep(tab, false, now)) {
-        if (this.sleepTab(tab.info.id, false)) slept++
-      }
+  /**
+   * Runs a tiny bounded, read-only DOM check on demand (when leaving a tab or right before
+   * auto-sleeping it) so we catch typed text, IME input, and pasted form drafts without
+   * injecting any persistent preload or page-load script into web pages.
+   */
+  private async probeUnsavedFormText(tab: Tab): Promise<boolean> {
+    const view = tab.view
+    if (!view || view.webContents.isDestroyed() || !this.showsPage(tab)) {
+      tab.hasUnsavedFormText = false
+      return false
     }
-    return slept
+    const wc = view.webContents
+    const probedUrl = tab.info.url
+    let timer: NodeJS.Timeout | null = null
+    try {
+      const result = await Promise.race<unknown>([
+        wc.executeJavaScript(FORM_DIRTY_CHECK_SCRIPT, false),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), 300)
+        })
+      ])
+      if (timer) clearTimeout(timer)
+      if (tab.view === view && tab.info.url === probedUrl && typeof result === 'boolean') {
+        tab.hasUnsavedFormText = result
+      }
+    } catch {
+      if (timer) clearTimeout(timer)
+    }
+    return tab.hasUnsavedFormText
+  }
+
+  async sweepSleepingTabs(now = Date.now()): Promise<number> {
+    if (this.sleepSweepInFlight) return 0
+    this.sleepSweepInFlight = true
+    try {
+      let slept = 0
+      const policy = this.hooks.sleepPolicy()
+      for (const tab of [...this.tabs]) {
+        if (canSleepTab(this.buildSleepCandidate(tab, true), policy, now, false)) {
+          await this.probeUnsavedFormText(tab)
+        }
+        if (this.canSleep(tab, false, now)) {
+          if (this.sleepTab(tab.info.id, false)) slept++
+        }
+      }
+      return slept
+    } finally {
+      this.sleepSweepInFlight = false
+    }
   }
 
   sleepTab(id: number, manual = true): boolean {
@@ -1601,7 +1686,13 @@ export class Tabs {
       }
     })
     wc.on('before-input-event', (e, input) => {
-      if (this.shortcut(input)) e.preventDefault()
+      if (this.shortcut(input)) {
+        e.preventDefault()
+        return
+      }
+      if (isCurrent() && isTypingKeyInput(input)) {
+        tab.hasTypedInput = true
+      }
     })
     wc.on('zoom-changed', (_e, direction) => {
       if (!isCurrent()) return
@@ -1656,7 +1747,8 @@ export class Tabs {
               sandbox: true,
               contextIsolation: true,
               nodeIntegration: false,
-              webSecurity: true
+              webSecurity: true,
+              backgroundThrottling: true
             }
           }
         }
@@ -1703,6 +1795,8 @@ export class Tabs {
       if (!isCurrent()) return
       if (details.isMainFrame && !details.isSameDocument) {
         info.favicon = undefined
+        tab.hasTypedInput = false
+        tab.hasUnsavedFormText = false
         // A question from the page you're leaving is answered no.
         this.onTabGone(info.id)
         if (info.id === this.activeId) this.stopFind(true)

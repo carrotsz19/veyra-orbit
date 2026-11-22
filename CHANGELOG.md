@@ -4,6 +4,11 @@ All notable changes to Veyra Orbit are documented here.
 
 ## Unreleased
 
+- Lower memory use: menus, compact panels, link previews, and the command bar now open on demand and free their memory after sitting unused for a minute.
+- Smarter tab sleeping: choose a 5-minute sleep option in Settings → Performance; tabs using your camera, microphone, or screen sharing, or tabs with unsaved text you typed into a form, never sleep. Sleeping tabs look gently faded in the sidebar.
+- Less background work: hidden windows and background tabs stay throttled, and the start page pauses its moving background when hidden or when reduced motion is on.
+- Live memory view in Settings → Performance: see how much memory Orbit, each tab, and your extensions are using, and put any background tab to sleep with one click.
+
 ## 26.11.8 — 2026-11-22
 
 - A new start page: a clock and greeting with your name, quick-link tiles you can add, rename and reorder, "Continue where you left off", your bookmarks, a "What are you studying today?" note and a daily quote. Pick a soft moving background, a plain colour, or your own picture (with dim and blur). Use the Customize button to turn widgets on or off and reorder them.
