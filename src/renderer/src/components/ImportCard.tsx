@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { CheckCircle2, Download, Lock, RefreshCw, X } from 'lucide-react'
+import { CheckCircle2, ChevronDown, Download, Lock, RefreshCw, X } from 'lucide-react'
 import type { ImportProfile, ImportResult, ImportStatus } from '@shared/types'
 import { formatImportSummary } from '@shared/importer'
 
@@ -67,19 +67,22 @@ function ImportForm({ profiles, compact = false, onRefresh, onImported }: Import
           Browser &amp; profile
         </label>
         <div className="imp-select-row">
-          <select
-            id={compact ? 'imp-profile-start' : 'imp-profile-settings'}
-            className="imp-select"
-            value={selected?.id ?? ''}
-            disabled={running}
-            onChange={(e) => setSelectedId(e.target.value)}
-          >
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {profileLabel(p)}
-              </option>
-            ))}
-          </select>
+          <div className="imp-select-wrap">
+            <select
+              id={compact ? 'imp-profile-start' : 'imp-profile-settings'}
+              className="imp-select"
+              value={selected?.id ?? ''}
+              disabled={running}
+              onChange={(e) => setSelectedId(e.target.value)}
+            >
+              {profiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {profileLabel(p)}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={14} strokeWidth={1.85} className="imp-select-chevron" aria-hidden />
+          </div>
           {onRefresh && (
             <button
               type="button"

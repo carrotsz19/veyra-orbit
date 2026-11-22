@@ -115,20 +115,21 @@
   overflow-y: auto;
   padding: 36px max(24px, calc((100% - 760px) / 2)) 48px;
   user-select: text;
-  animation: rise 0.4s var(--ease-out);
+  animation: rise 180ms var(--ease-out);
 }
 .lib-head {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--sp-4);
   flex-wrap: wrap;
   margin-bottom: 18px;
 }
 .lib-head h1 {
-  margin: 0 8px 0 0;
+  margin: 0 var(--sp-2) 0 0;
   font-family: var(--serif);
-  font-weight: 500;
-  font-size: 30px;
+  font-weight: 400;
+  font-size: 32px;
+  letter-spacing: -0.02em;
 }
 .lib-search {
   flex: 1;
@@ -136,15 +137,17 @@
   height: 36px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   padding: 0 8px 0 12px;
-  border-radius: var(--r-control);
+  border-radius: var(--r-md);
   background: var(--bg-grouped);
   color: var(--label-tertiary);
-  box-shadow: inset 0 0 0 1px var(--separator);
+  box-shadow: inset 0 0 0 1px var(--hairline-strong);
+  transition: box-shadow var(--t-base) var(--ease-out), background-color var(--t-fast) ease;
 }
 .lib-search:focus-within {
-  box-shadow: inset 0 0 0 1px var(--tint), 0 0 0 3px var(--tint-soft);
+  background: var(--bg-surface-raised);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tint) 60%, transparent), 0 0 0 3px var(--tint-soft);
 }
 .lib-search input {
   flex: 1;
@@ -165,6 +168,11 @@
 .btn.danger {
   background: var(--tint-soft);
   color: var(--tint);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tint) 26%, transparent);
+}
+.btn.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--tint) 22%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tint) 40%, transparent);
 }
 .btn:disabled {
   opacity: 0.45;
@@ -182,7 +190,7 @@
   vertical-align: -1px;
 }
 .lib-group {
-  margin: 0 0 20px;
+  margin: 0 0 var(--sp-5);
   padding: 0;
   list-style: none;
 }
@@ -194,11 +202,11 @@
 .lib-group h2 {
   margin: 0 0 6px;
   padding: 0 10px;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--label-secondary);
+  color: var(--label-tertiary);
 }
 .lib-row {
   display: flex;

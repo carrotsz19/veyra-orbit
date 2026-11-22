@@ -2357,8 +2357,11 @@ html[data-material='solid'] .peek-shell {
   color: var(--label-primary);
 }
 .ws-iso input {
-  margin: 2px 0 0;
-  accent-color: var(--ws-accent);
+  margin-top: 2px;
+}
+.ws-iso input:checked {
+  background: var(--ws-accent);
+  border-color: var(--ws-accent);
 }
 .ws-iso span {
   display: flex;
