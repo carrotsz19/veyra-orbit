@@ -456,7 +456,9 @@ export class Tabs {
     const now = Date.now()
     for (const vt of this.visibleTabs()) {
       vt.lastActiveAt = now
-      if (vt.hasTypedInput) void this.probeUnsavedFormText(vt)
+      if (this.showsPage(vt) && vt.view && !vt.view.webContents.isDestroyed()) {
+        void this.probeUnsavedFormText(vt)
+      }
     }
     this.stopFind(true)
     if (this.fullscreenTab) this.exitPageFullscreen(true)
@@ -718,7 +720,9 @@ export class Tabs {
     if (this.active && this.active.info.id !== id) {
       for (const vt of prevVisible) {
         vt.lastActiveAt = now
-        if (vt.info.id !== id && vt.hasTypedInput) void this.probeUnsavedFormText(vt)
+        if (vt.info.id !== id && this.showsPage(vt) && vt.view && !vt.view.webContents.isDestroyed()) {
+          void this.probeUnsavedFormText(vt)
+        }
       }
       this.stopFind(true)
       if (this.fullscreenTab) this.exitPageFullscreen(true)
@@ -1086,16 +1090,13 @@ export class Tabs {
   }
 
   /**
-   * Runs a tiny bounded DOM check only when a tab previously received typing input,
-   * avoiding any persistent injected script or page-load overhead on normal tabs.
+   * Runs a tiny bounded, read-only DOM check on demand (when leaving a tab or right before
+   * auto-sleeping it) so we catch typed text, IME input, and pasted form drafts without
+   * injecting any persistent preload or page-load script into web pages.
    */
   private async probeUnsavedFormText(tab: Tab): Promise<boolean> {
-    if (!tab.hasTypedInput) {
-      tab.hasUnsavedFormText = false
-      return false
-    }
     const view = tab.view
-    if (!view || view.webContents.isDestroyed()) {
+    if (!view || view.webContents.isDestroyed() || !this.showsPage(tab)) {
       tab.hasUnsavedFormText = false
       return false
     }
@@ -1126,7 +1127,7 @@ export class Tabs {
       let slept = 0
       const policy = this.hooks.sleepPolicy()
       for (const tab of [...this.tabs]) {
-        if (tab.hasTypedInput && canSleepTab(this.buildSleepCandidate(tab, true), policy, now, false)) {
+        if (canSleepTab(this.buildSleepCandidate(tab, true), policy, now, false)) {
           await this.probeUnsavedFormText(tab)
         }
         if (this.canSleep(tab, false, now)) {

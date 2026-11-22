@@ -82,14 +82,14 @@ export function isTypingKeyInput(input: {
 }
 
 /**
- * Tiny, read-only, bounded DOM probe executed on demand ONLY for background tabs that have
- * already received typing input (`isTypingKeyInput`).
+ * Tiny, read-only, bounded DOM probe executed on demand ONLY when leaving a loaded web tab
+ * or right before auto-sleeping an idle candidate tab.
  *
  * Design choice: avoids injecting any persistent preload or page-load script into web pages
- * (keeping tabs sandboxed with zero extra listeners or memory overhead). Runs at most once
- * when leaving a typed tab and once right before auto-sleeping it. Checks whether any text
- * `<input>` or `<textarea>` differs from its HTML `defaultValue` with non-empty text, or
- * whether a `contenteditable` element contains non-empty text (bounded to the first 300 fields).
+ * (keeping tabs sandboxed with zero extra listeners or memory overhead), while still catching
+ * typing, IME composition, and context-menu paste. Checks whether any text `<input>` or
+ * `<textarea>` differs from its HTML `defaultValue` with non-empty text, or whether a
+ * `contenteditable` element contains non-empty text (bounded to the first 300 fields).
  */
 export const FORM_DIRTY_CHECK_SCRIPT = `(() => {
   try {
