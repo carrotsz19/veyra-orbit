@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, Pencil, Search, Trash2, X } from 'lucide-react'
-import type { Bookmark, HistoryEntry } from '@shared/types'
+import { Check, ExternalLink, FolderOpen, Pause, Pencil, Play, Search, Trash2, X } from 'lucide-react'
+import type { Bookmark, DownloadInfo, HistoryEntry } from '@shared/types'
+import { summarizeDownloads } from '@shared/downloads'
 import { displayUrl } from '@shared/url'
+import { DownloadFileIcon, downloadMetaText } from './Downloads'
 
 const api = window.veyra
 const PAGE = 100
@@ -230,6 +232,139 @@ export function BookmarksPage({ tabId }: { tabId: number }): React.JSX.Element {
           </li>
         ))}
       </ul>
+    </div>
+  )
+}
+
+export function DownloadsPage({ items }: { items: DownloadInfo[] }): React.JSX.Element {
+  const [query, setQuery] = useState('')
+  const summary = useMemo(() => summarizeDownloads(items), [items])
+  const q = query.trim().toLowerCase()
+  const shown = q
+    ? items.filter((d) => d.filename.toLowerCase().includes(q) || d.url.toLowerCase().includes(q))
+    : items
+
+  return (
+    <div className="lib">
+      <header className="lib-head">
+        <h1>Downloads</h1>
+        <Filter value={query} onChange={setQuery} label="Search downloads" />
+        <div className="lib-actions">
+          <button type="button" className="btn" disabled={!summary.hasFinished} onClick={() => api.clearFinishedDownloads()}>
+            Clear finished
+          </button>
+        </div>
+      </header>
+
+      {!shown.length && (
+        <div className="lib-empty" role="status">
+          <h2>{q ? 'No matching downloads' : 'No downloads yet'}</h2>
+          <p>{q ? `Nothing in your downloads matched “${query}”.` : 'Files you download during this session appear here.'}</p>
+          {q && (
+            <button type="button" className="btn sm" onClick={() => setQuery('')}>
+              Clear search
+            </button>
+          )}
+        </div>
+      )}
+
+      {shown.length > 0 && (
+        <ul className="lib-group dl-page-list">
+          {shown.map((d) => {
+            const active = d.state === 'progressing' || d.state === 'paused'
+            const finished = !active && !(d.state === 'interrupted' && d.canResume)
+            const completed = d.state === 'completed'
+            const pct = d.totalBytes > 0 ? Math.min(100, Math.round((d.receivedBytes / d.totalBytes) * 100)) : null
+            return (
+              <li
+                key={d.id}
+                className={`lib-row dl-page-row ${d.state} ${completed ? 'draggable' : ''}`}
+                draggable={completed}
+                onDragStart={(e) => {
+                  if (!completed) return
+                  e.preventDefault()
+                  api.dragDownload(d.id)
+                }}
+              >
+                <span className="dl-page-icon">
+                  <DownloadFileIcon filename={d.filename} size={16} />
+                </span>
+                <div className="dl-page-info">
+                  {completed ? (
+                    <button
+                      type="button"
+                      className="lib-link dl-page-link"
+                      title={`${d.filename}\nClick to open · Drag to another app`}
+                      onClick={() => api.openDownload(d.id)}
+                    >
+                      <span className="lib-title">{d.filename}</span>
+                      <span className="lib-host">{downloadMetaText(d)}</span>
+                    </button>
+                  ) : (
+                    <div className="dl-page-static">
+                      <span className="lib-title">{d.filename}</span>
+                      <span className="lib-host">{downloadMetaText(d)}</span>
+                    </div>
+                  )}
+                  {active && (
+                    <div className="dl-track" role="progressbar" aria-valuenow={pct ?? undefined} aria-valuemin={0} aria-valuemax={100}>
+                      <div
+                        className={`dl-bar ${d.state === 'paused' ? 'paused' : ''} ${pct === null ? 'indeterminate' : ''}`}
+                        style={pct !== null ? { width: `${pct}%` } : undefined}
+                      />
+                    </div>
+                  )}
+                </div>
+                <div className="dl-page-actions">
+                  {d.state === 'progressing' && (
+                    <button type="button" className="icon-btn small" aria-label="Pause download" title="Pause" onClick={() => api.pauseDownload(d.id)}>
+                      <Pause size={14} />
+                    </button>
+                  )}
+                  {(d.state === 'paused' || (d.state === 'interrupted' && d.canResume)) && (
+                    <button
+                      type="button"
+                      className="icon-btn small"
+                      aria-label="Resume download"
+                      title="Resume"
+                      disabled={!d.canResume}
+                      onClick={() => api.resumeDownload(d.id)}
+                    >
+                      <Play size={14} />
+                    </button>
+                  )}
+                  {(active || (d.state === 'interrupted' && d.canResume)) && (
+                    <button type="button" className="icon-btn small" aria-label="Cancel download" title="Cancel" onClick={() => api.cancelDownload(d.id)}>
+                      <X size={14} />
+                    </button>
+                  )}
+                  {completed && (
+                    <>
+                      <button type="button" className="icon-btn small" aria-label="Open file" title="Open file" onClick={() => api.openDownload(d.id)}>
+                        <ExternalLink size={14} />
+                      </button>
+                      <button type="button" className="icon-btn small" aria-label="Show in folder" title="Show in folder" onClick={() => api.showDownload(d.id)}>
+                        <FolderOpen size={14} />
+                      </button>
+                    </>
+                  )}
+                  {finished && (
+                    <button
+                      type="button"
+                      className="icon-btn small"
+                      aria-label="Remove from list"
+                      title="Remove from list"
+                      onClick={() => api.removeDownload(d.id)}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
     </div>
   )
 }

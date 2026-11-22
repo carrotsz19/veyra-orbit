@@ -26,7 +26,7 @@ import { ErrorPage } from './components/ErrorPage'
 import { ExternalAppBar, PermissionBar } from './components/PermissionBar'
 import { ExtensionInstallBar } from './components/ExtensionInstallBar'
 import { FindBar } from './components/FindBar'
-import { BookmarksPage, HistoryPage } from './components/Library'
+import { BookmarksPage, DownloadsPage, HistoryPage } from './components/Library'
 import { SettingsPage } from './components/SettingsPage'
 
 const api = window.veyra
@@ -46,6 +46,7 @@ function renderTabSurface(
   tab: TabInfo,
   settings: SettingsView | null,
   update: UpdateState | null,
+  downloads: DownloadInfo[],
   onOpenAppearance: () => void,
   shot?: string,
   isPrivate = false
@@ -53,6 +54,7 @@ function renderTabSurface(
   if (!tab.url) return <StartPage tabId={tab.id} settings={settings} isPrivate={isPrivate} onOpenAppearance={onOpenAppearance} />
   if (tab.url === 'orbit://history') return <HistoryPage key={tab.id} tabId={tab.id} />
   if (tab.url === 'orbit://bookmarks') return <BookmarksPage key={tab.id} tabId={tab.id} />
+  if (tab.url === 'orbit://downloads') return <DownloadsPage key={tab.id} items={downloads} />
   if (tab.url === 'orbit://settings') return <SettingsPage key={tab.id} settings={settings} update={update} />
   if (tab.error) return <ErrorPage tab={tab} />
   if (shot) return <img className="page-shot" src={shot} alt="" />
@@ -69,6 +71,9 @@ export function App(): React.JSX.Element {
   const [dismissedUpdateVer, setDismissedUpdateVer] = useState<string | null>(null)
   const [downloads, setDownloads] = useState<DownloadInfo[]>([])
   const [downloadsOpen, setDownloadsOpen] = useState(false)
+  const [hasUnseenDownloads, setHasUnseenDownloads] = useState(false)
+  const [downloadPulseTick, setDownloadPulseTick] = useState(0)
+  const [dlFly, setDlFly] = useState<{ key: number; fromX: number; fromY: number; toX: number; toY: number } | null>(null)
   const [sidebarEditing, setSidebarEditing] = useState(false)
   const [omniboxEditing, setOmniboxEditing] = useState(false)
   const [compact, setCompact] = useState<CompactRevealState>({ enabled: false, sidebar: false, toolbar: false })
@@ -87,6 +92,8 @@ export function App(): React.JSX.Element {
   const pageRef = useRef<HTMLDivElement>(null)
   const pageFullscreenRef = useRef(false)
   const maxDownloadId = useRef(0)
+  const downloadsOpenRef = useRef(false)
+  downloadsOpenRef.current = downloadsOpen
   const dragOverlayActive = useRef(false)
   const dragTabRef = useRef<number | null>(null)
   const lastTokensRef = useRef<import('@shared/types').ResolvedAppearance | null>(null)
@@ -116,12 +123,31 @@ export function App(): React.JSX.Element {
         const newest = items.reduce((m, d) => Math.max(m, d.id), 0)
         if (newest > maxDownloadId.current) {
           maxDownloadId.current = newest
-          setDownloadsOpen(true)
+          setDownloadPulseTick((n) => n + 1)
+          if (!downloadsOpenRef.current) setHasUnseenDownloads(true)
+          const pageEl = pageRef.current
+          if (pageEl) {
+            const pr = pageEl.getBoundingClientRect()
+            const trigEl = document.querySelector<HTMLElement>('.dl-trigger')
+            const tr = trigEl && trigEl.offsetParent !== null ? trigEl.getBoundingClientRect() : null
+            const sideRight = document.documentElement.dataset.sidebarSide === 'right'
+            const fromX = Math.round(pr.left + pr.width * 0.5)
+            const fromY = Math.round(pr.top + Math.min(120, pr.height * 0.28))
+            const toX = tr ? Math.round(tr.left + tr.width / 2) : sideRight ? window.innerWidth - 24 : 24
+            const toY = tr ? Math.round(tr.top + tr.height / 2) : window.innerHeight - 24
+            setDlFly({ key: newest, fromX, fromY, toX, toY })
+          }
         } else if (items.length === 0) {
           setDownloadsOpen(false)
+          setHasUnseenDownloads(false)
         }
       }),
-      api.onToggleDownloads(() => setDownloadsOpen((v) => !v)),
+      api.onToggleDownloads(() => {
+        setDownloadsOpen((v) => {
+          if (!v) setHasUnseenDownloads(false)
+          return !v
+        })
+      }),
       api.onFindOpen(() => {
         setFindOpen(true)
         setFindFocusTick((n) => n + 1)
@@ -140,6 +166,13 @@ export function App(): React.JSX.Element {
       offs.forEach((off) => off())
     }
   }, [])
+
+  // Clear the download-start fly animation after it finishes.
+  useEffect(() => {
+    if (!dlFly) return
+    const timer = setTimeout(() => setDlFly(null), 540)
+    return () => clearTimeout(timer)
+  }, [dlFly])
 
   // Keep revealed compact panels pinned while interactive UI inside them is open.
   useEffect(() => {
@@ -401,6 +434,14 @@ export function App(): React.JSX.Element {
         state={state}
         downloads={downloads}
         downloadsOpen={downloadsOpen}
+        hasUnseenDownloads={hasUnseenDownloads}
+        downloadPulseTick={downloadPulseTick}
+        onToggleDownloads={() => {
+          setDownloadsOpen((v) => {
+            if (!v) setHasUnseenDownloads(false)
+            return !v
+          })
+        }}
         onCloseDownloads={() => setDownloadsOpen(false)}
         update={showUpdateNote ? update : null}
         onDismissUpdate={() => setDismissedUpdateVer(updateKey)}
@@ -465,7 +506,7 @@ export function App(): React.JSX.Element {
                     }}
                   >
                     <div className="split-pane-inner">
-                      {renderTabSurface(pane, settings, update, () => handleOpenSettingsSection('set-appearance'), shots?.[pane.id], !!activeWorkspace?.private)}
+                      {renderTabSurface(pane, settings, update, downloads, () => handleOpenSettingsSection('set-appearance'), shots?.[pane.id], !!activeWorkspace?.private)}
                     </div>
                   </div>
                 )
@@ -492,7 +533,7 @@ export function App(): React.JSX.Element {
               ))}
             </>
           ) : (
-            active && renderTabSurface(active, settings, update, () => handleOpenSettingsSection('set-appearance'), shots?.[active.id], !!activeWorkspace?.private)
+            active && renderTabSurface(active, settings, update, downloads, () => handleOpenSettingsSection('set-appearance'), shots?.[active.id], !!activeWorkspace?.private)
           )}
 
           {dragTabId !== null && dropSide && (
@@ -504,6 +545,21 @@ export function App(): React.JSX.Element {
           )}
         </div>
       </main>
+      {dlFly && (
+        <div
+          key={dlFly.key}
+          className="dl-fly-chip"
+          aria-hidden
+          style={
+            {
+              '--dl-from-x': `${dlFly.fromX}px`,
+              '--dl-from-y': `${dlFly.fromY}px`,
+              '--dl-to-x': `${dlFly.toX}px`,
+              '--dl-to-y': `${dlFly.toY}px`
+            } as React.CSSProperties
+          }
+        />
+      )}
     </div>
   )
 }

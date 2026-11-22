@@ -1935,6 +1935,12 @@ onSurface('download:open', (_t, id: unknown) => {
 onSurface('download:show', (_t, id: unknown) => {
   if (num(id)) downloads?.show(id)
 })
+onSurface('download:remove', (_t, id: unknown) => {
+  if (num(id)) downloads?.remove(id)
+})
+ipcMain.on('download:drag', (e, id: unknown) => {
+  if (fromUiSurface(e) && num(id)) downloads?.startDrag(id, e.sender)
+})
 onSurface('download:clear', () => {
   downloads?.clearFinished()
 })

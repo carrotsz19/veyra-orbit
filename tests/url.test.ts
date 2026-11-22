@@ -49,6 +49,9 @@ test('custom search engines build search URLs without breaking URL detection', (
   assert.equal(toUrl('orbit://settings', ddg), 'orbit://settings')
   assert.equal(isInternalUrl('orbit://settings'), true)
   assert.equal(isAllowedUrl('orbit://settings'), false)
+  assert.equal(toUrl('orbit://downloads', ddg), 'orbit://downloads')
+  assert.equal(isInternalUrl('orbit://downloads'), true)
+  assert.equal(isAllowedUrl('orbit://downloads'), false)
 })
 
 test('only blank start-page tabs auto-focus the address bar on activation', () => {

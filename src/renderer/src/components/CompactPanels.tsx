@@ -26,6 +26,8 @@ export function CompactSidebarWindow(): React.JSX.Element {
   const [state, setState] = useState<BrowserState>(INITIAL_STATE)
   const [downloads, setDownloads] = useState<DownloadInfo[]>([])
   const [downloadsOpen, setDownloadsOpen] = useState(false)
+  const [hasUnseenDownloads, setHasUnseenDownloads] = useState(false)
+  const [downloadPulseTick, setDownloadPulseTick] = useState(0)
   const [update, setUpdate] = useState<UpdateState | null>(null)
   const [dismissedUpdateVer, setDismissedUpdateVer] = useState<string | null>(null)
   const [sidebarEditing, setSidebarEditing] = useState(false)
@@ -33,6 +35,8 @@ export function CompactSidebarWindow(): React.JSX.Element {
   const [newWorkspaceTick, setNewWorkspaceTick] = useState(0)
   const [visible, setVisible] = useState(false)
   const maxDownloadId = useRef(0)
+  const downloadsOpenRef = useRef(false)
+  downloadsOpenRef.current = downloadsOpen
   const panel = window.veyraCompactPanel!
 
   useEffect(() => {
@@ -46,12 +50,19 @@ export function CompactSidebarWindow(): React.JSX.Element {
         const newest = items.reduce((m, d) => Math.max(m, d.id), 0)
         if (newest > maxDownloadId.current) {
           maxDownloadId.current = newest
-          setDownloadsOpen(true)
+          setDownloadPulseTick((n) => n + 1)
+          if (!downloadsOpenRef.current) setHasUnseenDownloads(true)
         } else if (items.length === 0) {
           setDownloadsOpen(false)
+          setHasUnseenDownloads(false)
         }
       }),
-      api.onToggleDownloads(() => setDownloadsOpen((v) => !v)),
+      api.onToggleDownloads(() => {
+        setDownloadsOpen((v) => {
+          if (!v) setHasUnseenDownloads(false)
+          return !v
+        })
+      }),
       panel.onVisible(setVisible),
       panel.onNewWorkspace(() => setNewWorkspaceTick((n) => n + 1))
     ]
@@ -80,6 +91,14 @@ export function CompactSidebarWindow(): React.JSX.Element {
           state={state}
           downloads={downloads}
           downloadsOpen={downloadsOpen}
+          hasUnseenDownloads={hasUnseenDownloads}
+          downloadPulseTick={downloadPulseTick}
+          onToggleDownloads={() => {
+            setDownloadsOpen((v) => {
+              if (!v) setHasUnseenDownloads(false)
+              return !v
+            })
+          }}
           onCloseDownloads={() => setDownloadsOpen(false)}
           update={showUpdateNote ? update : null}
           onDismissUpdate={() => setDismissedUpdateVer(updateKey)}

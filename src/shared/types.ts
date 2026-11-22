@@ -321,6 +321,8 @@ export interface VeyraApi {
   cancelDownload(id: number): void
   openDownload(id: number): void
   showDownload(id: number): void
+  removeDownload(id: number): void
+  dragDownload(id: number): void
   clearFinishedDownloads(): void
   getSettings(): Promise<import('./settings').SettingsView | null>
   updateSettings(patch: import('./settings').SettingsPatch): Promise<import('./settings').SettingsView | null>

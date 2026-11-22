@@ -6,6 +6,7 @@ import {
   Clock,
   Code,
   Compass,
+  Download,
   EyeOff,
   FlaskConical,
   Globe,
@@ -30,7 +31,7 @@ import {
 import type { BrowserState, DownloadInfo, SplitGroup, TabInfo, UpdateState, WorkspaceAccentId, WorkspaceIconId, WorkspaceInfo } from '@shared/types'
 import { WORKSPACE_ACCENTS, WORKSPACE_ICONS, isBuiltInWorkspaceIcon } from '@shared/workspaces'
 import { displayUrl } from '@shared/url'
-import { Downloads } from './Downloads'
+import { DownloadTriggerButton, Downloads } from './Downloads'
 
 const api = window.veyra
 
@@ -76,6 +77,7 @@ function Favicon({ tab }: { tab: TabInfo }): React.JSX.Element {
   if (tab.loading) return <LoaderCircle className="fav spin" size={16} strokeWidth={2} />
   if (tab.url === 'orbit://history') return <Clock className="fav fav-glyph" size={15} strokeWidth={1.75} />
   if (tab.url === 'orbit://bookmarks') return <Bookmark className="fav fav-glyph" size={15} strokeWidth={1.75} />
+  if (tab.url === 'orbit://downloads') return <Download className="fav fav-glyph" size={15} strokeWidth={1.75} />
   if (tab.url === 'orbit://settings') return <Settings className="fav fav-glyph" size={15} strokeWidth={1.75} />
   if (tab.favicon && broken !== tab.favicon) return <img className="fav" src={tab.favicon} alt="" onError={() => setBroken(tab.favicon!)} />
   return <Globe className="fav fav-glyph" size={15} strokeWidth={1.65} />
@@ -95,6 +97,9 @@ interface Props {
   state: BrowserState
   downloads: DownloadInfo[]
   downloadsOpen: boolean
+  hasUnseenDownloads?: boolean
+  downloadPulseTick?: number
+  onToggleDownloads: () => void
   onCloseDownloads: () => void
   update: UpdateState | null
   onDismissUpdate: () => void
@@ -108,6 +113,9 @@ export function Sidebar({
   state,
   downloads,
   downloadsOpen,
+  hasUnseenDownloads = false,
+  downloadPulseTick = 0,
+  onToggleDownloads,
   onCloseDownloads,
   update,
   onDismissUpdate,
@@ -618,6 +626,14 @@ export function Sidebar({
       )}
 
       <div className="ws-bar" role="tablist" aria-label="Workspaces">
+        <DownloadTriggerButton
+          items={downloads}
+          open={downloadsOpen}
+          hasUnseen={hasUnseenDownloads}
+          pulseTick={downloadPulseTick}
+          onToggle={onToggleDownloads}
+        />
+        <span className="ws-bar-sep" aria-hidden />
         <div className="ws-dots">
           {state.workspaces.map((ws, idx) => {
             const isActive = ws.id === state.activeWorkspaceId
