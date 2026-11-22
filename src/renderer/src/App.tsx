@@ -29,7 +29,9 @@ import './import-private.css'
 import './extensions.css'
 import { applyResolvedAppearance } from './applyAppearance'
 import { Sidebar } from './components/Sidebar'
+import { TopTabBar } from './components/TopTabBar'
 import { TitleBar } from './components/TitleBar'
+import { Downloads } from './components/Downloads'
 import { BookmarkBar } from './components/BookmarkBar'
 import { StartPage } from './components/StartPage'
 import { ErrorPage } from './components/ErrorPage'
@@ -296,6 +298,7 @@ export function App(): React.JSX.Element {
     extInstallAsks.length,
     !!update?.justUpdated,
     findOpen,
+    appearance.tabLayout,
     appearance.sidebarSide,
     appearance.sidebarWidth,
     sidebarHidden,
@@ -479,16 +482,17 @@ export function App(): React.JSX.Element {
 
   // In compact mode, the main window always keeps the page full-size; sidebar and titlebar
   // float above the page in dedicated overlay windows so the page never jumps or resizes.
-  const compactClasses = compact.enabled ? 'compact' : ''
-  const sideCollapsed = !compact.enabled && !pageFullscreen && sidebarHidden
+  const isTopTabs = appearance.tabLayout === 'top'
+  const compactClasses = compact.enabled && !isTopTabs ? 'compact' : ''
+  const sideCollapsed = isTopTabs || (!compact.enabled && !pageFullscreen && sidebarHidden)
 
   return (
     <div
-      className={`shell ${pageFullscreen ? 'fullscreen' : ''} ${compactClasses} ${sideCollapsed ? 'side-hidden' : ''} ${resizingSidebar ? 'resizing-side' : ''}`}
+      className={`shell ${pageFullscreen ? 'fullscreen' : ''} ${compactClasses} ${isTopTabs ? 'tabs-top' : ''} ${!isTopTabs && sideCollapsed ? 'side-hidden' : ''} ${resizingSidebar ? 'resizing-side' : ''}`}
       data-ws-accent={activeWorkspace?.accent ?? 'clay'}
       data-ws-private={activeWorkspace?.private ? 'true' : undefined}
     >
-      {compact.enabled && !pageFullscreen && (
+      {compact.enabled && !isTopTabs && !pageFullscreen && (
         <>
           <div
             className={`compact-edge ${appearance.sidebarSide === 'right' ? 'compact-edge-right' : 'compact-edge-left'}`}
@@ -510,13 +514,31 @@ export function App(): React.JSX.Element {
         winState={winState}
         onPageShot={setShots}
         onEditingChange={setOmniboxEditing}
-        onPointerEdge={compact.enabled ? (inside) => api.setCompactHover('toolbar', inside) : undefined}
+        onPointerEdge={compact.enabled && !isTopTabs ? (inside) => api.setCompactHover('toolbar', inside) : undefined}
         onNewWorkspace={handleNewWorkspace}
         onOpenSettingsSection={handleOpenSettingsSection}
-        onToggleSidebar={() => setSidebarHidden((v) => !v)}
+        onToggleSidebar={isTopTabs ? undefined : () => setSidebarHidden((v) => !v)}
         sidebarHidden={sidebarHidden}
         onCustomizeToolbar={() => setToolbarSheetOpen(true)}
       />
+      {isTopTabs && !pageFullscreen && (
+        <TopTabBar
+          state={state}
+          settings={settings}
+          downloads={downloads}
+          downloadsOpen={downloadsOpen}
+          hasUnseenDownloads={hasUnseenDownloads}
+          downloadPulseTick={downloadPulseTick}
+          onToggleDownloads={() => {
+            setDownloadsOpen((v) => {
+              if (!v) setHasUnseenDownloads(false)
+              return !v
+            })
+          }}
+          onDragTabChange={setDragTabId}
+          onNewWorkspace={handleNewWorkspace}
+        />
+      )}
       {!sideCollapsed && (
         <Sidebar
           state={state}
@@ -668,6 +690,11 @@ export function App(): React.JSX.Element {
           )}
         </div>
       </main>
+      {isTopTabs && downloadsOpen && !pageFullscreen && (
+        <div className="top-dl-popover">
+          <Downloads items={downloads} onClose={() => setDownloadsOpen(false)} />
+        </div>
+      )}
       {toolbarSheetOpen && (
         <ToolbarCustomizeSheet
           items={appearance.toolbarItems}

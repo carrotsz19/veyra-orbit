@@ -317,6 +317,10 @@
 .set-switch.on:hover {
   background: var(--tint-hover);
 }
+.set-switch:disabled {
+  opacity: 0.42;
+  pointer-events: none;
+}
 .set-switch-thumb {
   width: 18px;
   height: 18px;
@@ -325,7 +329,11 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
   transition: transform var(--t-base) var(--ease-sheet);
 }
-.set-switch.on .set-switch-thumb {
+.set-switch.on .set-switch:disabled {
+  opacity: 0.42;
+  pointer-events: none;
+}
+.set-switch-thumb {
   transform: translateX(16px);
 }
 

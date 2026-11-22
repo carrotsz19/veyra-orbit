@@ -273,6 +273,7 @@ export function TitleBar({
         workspaces: state.workspaces.map((w) => ({ id: w.id, name: w.name, private: w.private })),
         activeWorkspaceId: state.activeWorkspaceId,
         compactMode: !!settings?.compactMode,
+        tabLayout: settings?.appearance.tabLayout,
         bookmarkBarVisible: shouldShowBookmarkBar(
           settings?.appearance.bookmarkBar ?? 'start-page',
           !!tab && !tab.url && !tab.error,
@@ -290,7 +291,7 @@ export function TitleBar({
         updateReadyVersion: update?.status === 'ready' ? (update.availableVersion ?? '') : null,
         shortcuts: settings?.shortcuts
       }),
-    [tab, activeSplitGroup, state.workspaces, state.activeWorkspaceId, state.canReopenClosed, settings?.compactMode, settings?.appearance.bookmarkBar, settings?.shortcuts, winState.fullscreen, history, bookmarks, update?.status, update?.availableVersion]
+    [tab, activeSplitGroup, state.workspaces, state.activeWorkspaceId, state.canReopenClosed, settings?.compactMode, settings?.appearance.tabLayout, settings?.appearance.bookmarkBar, settings?.shortcuts, winState.fullscreen, history, bookmarks, update?.status, update?.availableVersion]
   )
 
   const recentUrls = useMemo(() => recentHistoryItems(history.map((h) => ({ url: h.url, title: h.title }))), [history])
@@ -305,7 +306,7 @@ export function TitleBar({
 
   const runAction = useCallback(
     (id: string): void => {
-      if (id.startsWith('bmbar:') || id.startsWith('submenu:bmbar-folder:')) return
+      if (id.startsWith('bmbar:') || id.startsWith('submenu:bmbar-folder:') || id.startsWith('toptab-ws:') || id.startsWith('ws-ctx:')) return
       if (!liveRef.current.openTarget && (id.startsWith('submenu:') || id === 'submenu-back')) return
       if (id.startsWith('submenu:')) {
         const subId = id.slice('submenu:'.length) as MenuId

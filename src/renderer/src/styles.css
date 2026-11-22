@@ -353,6 +353,268 @@ html[data-sidebar-side='right'] .shell:not(.fullscreen):not(.compact) .find {
   margin-left: var(--gap);
   margin-right: var(--gap);
 }
+
+/* ---- Vivaldi-style horizontal top tab strip (TopTabBar.tsx) ------------ */
+.shell.tabs-top {
+  grid-template-columns: 1fr;
+  grid-template-rows: var(--bar) var(--top-tabs-h, 36px) minmax(0, 1fr);
+}
+html[data-sidebar-side='right'] .shell.tabs-top:not(.fullscreen):not(.compact) {
+  grid-template-columns: 1fr;
+}
+html[data-sidebar-side='right'] .shell.tabs-top:not(.fullscreen):not(.compact) .main {
+  grid-column: 1;
+  grid-row: 3;
+}
+.shell.tabs-top .page,
+.shell.tabs-top .bm-bar,
+.shell.tabs-top .perm,
+.shell.tabs-top .updated-toast,
+.shell.tabs-top .find {
+  margin-left: var(--gap);
+  margin-right: var(--gap);
+}
+.shell.fullscreen .top-tabbar {
+  display: none;
+}
+.top-tabbar {
+  grid-column: 1 / -1;
+  height: var(--top-tabs-h, 36px);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--gap);
+  min-width: 0;
+  user-select: none;
+}
+.top-ws-btn {
+  flex: none;
+  height: 28px;
+  max-width: 150px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border-radius: var(--r-sm);
+  background: var(--fill-tertiary);
+  border: 1px solid var(--hairline);
+  color: var(--label-primary);
+  font-size: 12px;
+  font-weight: 550;
+  transition: background-color var(--t-fast) var(--ease-state), border-color var(--t-fast) var(--ease-state);
+}
+.top-ws-btn:hover,
+.top-ws-btn.open {
+  background: var(--fill-hover);
+  border-color: var(--hairline-strong);
+}
+.top-ws-btn.private {
+  background: var(--tint-soft);
+  color: var(--tint-text, var(--tint));
+}
+.top-ws-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.top-ws-caret {
+  flex: none;
+  color: var(--label-tertiary);
+}
+.top-pins {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding-right: 6px;
+  border-right: 1px solid var(--hairline);
+}
+.top-pin {
+  position: relative;
+  width: 30px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+  background: var(--fill-tertiary);
+  transition: background-color var(--t-fast) var(--ease-state);
+}
+.top-pin:hover {
+  background: var(--fill-hover);
+}
+.top-pin.on {
+  background: var(--bg-surface-raised);
+  box-shadow: inset 0 0 0 1px var(--hairline-strong), var(--shadow-1);
+}
+.top-pin.sleeping {
+  opacity: 0.54;
+}
+.top-pin.dragging {
+  opacity: 0.45;
+}
+.top-pin-audio {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  background: var(--bg-surface-raised);
+  border: 1px solid var(--hairline);
+  color: var(--label-secondary);
+}
+.top-tabs-track {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.top-tabs-track::-webkit-scrollbar {
+  height: 0;
+}
+.top-tab {
+  flex: 0 1 200px;
+  min-width: 92px;
+  max-width: 220px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px 0 8px;
+  border-radius: var(--r-sm);
+  color: var(--label-secondary);
+  font-size: calc(12.5px * var(--ui-scale));
+  font-weight: 450;
+  transition: background-color var(--t-fast) var(--ease-state), color var(--t-fast) var(--ease-state);
+}
+.top-tab:hover {
+  background: var(--fill-hover);
+  color: var(--label-primary);
+}
+.top-tab.on {
+  background: var(--bg-surface-raised);
+  color: var(--label-primary);
+  font-weight: 500;
+  box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow-1);
+}
+.top-tab.sleeping {
+  opacity: 0.56;
+}
+.top-tab.dragging {
+  opacity: 0.45;
+}
+.top-tab-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.top-tab-audio,
+.top-tab-close {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--label-tertiary);
+}
+.top-tab-close {
+  display: none;
+}
+.top-tab:hover .top-tab-close,
+.top-tab.on .top-tab-close,
+.top-tab:focus-within .top-tab-close,
+html[data-tab-close='always'] .top-tab .top-tab-close {
+  display: grid;
+}
+.top-tab-close:hover,
+.top-tab-audio:hover {
+  background: var(--fill-hover);
+  color: var(--label-primary);
+}
+.top-split-group {
+  flex: 0 1 320px;
+  min-width: 168px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px;
+  gap: 1px;
+  border-radius: var(--r-sm);
+  background: var(--fill-tertiary);
+  border: 1px solid var(--hairline);
+}
+.top-split-group.on {
+  border-color: color-mix(in srgb, var(--tint) 42%, var(--hairline));
+  background: var(--tint-soft);
+}
+.top-split-pane {
+  flex: 1 1 0;
+  min-width: 68px;
+  height: 24px;
+  border-radius: calc(var(--r-sm) - 2px);
+  padding: 0 5px 0 6px;
+}
+.top-split-pane + .top-split-pane {
+  border-left: 1px solid var(--hairline);
+}
+.top-split-unsplit {
+  flex: none;
+  width: 20px;
+  height: 22px;
+  display: none;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--label-tertiary);
+}
+.top-split-group:hover .top-split-unsplit {
+  display: grid;
+}
+.top-split-unsplit:hover {
+  background: var(--fill-hover);
+  color: var(--label-primary);
+}
+.top-tab-new {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+  color: var(--label-secondary);
+  transition: background-color var(--t-fast) var(--ease-state), color var(--t-fast) var(--ease-state);
+}
+.top-tab-new:hover {
+  background: var(--fill-hover);
+  color: var(--label-primary);
+}
+.top-tabbar-end {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+.top-dl-popover {
+  position: fixed;
+  top: calc(var(--bar) + var(--top-tabs-h, 36px) + 6px);
+  right: 12px;
+  width: 310px;
+  z-index: 120;
+  background: var(--bg-float);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3);
+  padding: 6px;
+}
 .shell.fullscreen {
   grid-template-columns: 1fr;
   grid-template-rows: minmax(0, 1fr);

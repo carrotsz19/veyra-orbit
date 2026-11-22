@@ -10,6 +10,7 @@ import type {
   SettingsView,
   SidebarSide,
   TabCloseButtonsMode,
+  TabLayout,
   ThemeSource,
   UiDensity
 } from '@shared/types'
@@ -17,6 +18,7 @@ import {
   ACCENT_SWATCHES,
   APPEARANCE_LIMITS,
   DEFAULT_APPEARANCE,
+  SIDEBAR_WIDTH_PRESETS,
   THEME_PRESETS,
   deriveAccentTokens,
   getThemePreset,
@@ -43,6 +45,11 @@ const MOTIONS: readonly SegmentedOption<MotionMode>[] = [
   { value: 'full', label: 'Full' },
   { value: 'reduced', label: 'Reduced' },
   { value: 'off', label: 'Off' }
+]
+
+const TAB_LAYOUT_OPTIONS: readonly SegmentedOption<TabLayout>[] = [
+  { value: 'sidebar', label: 'Sidebar (vertical)' },
+  { value: 'top', label: 'Top bar (horizontal)' }
 ]
 
 const SIDEBAR_SIDES: readonly SegmentedOption<SidebarSide>[] = [
@@ -397,75 +404,106 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
         </div>
       </div>
 
-      {/* Sidebar */}
-      <h3 className="set-subhead">Sidebar</h3>
+      {/* Tabs & sidebar */}
+      <h3 className="set-subhead">Tabs &amp; sidebar</h3>
       <div className="set-card">
         <div className="set-row">
           <div className="set-row-info">
-            <div className="set-label">Sidebar position</div>
-            <div className="set-desc">Place vertical tabs on the left or right edge of the window.</div>
+            <div className="set-label">Tab layout</div>
+            <div className="set-desc">Keep vertical tabs in the sidebar or use a classic horizontal tab strip on top.</div>
           </div>
           <SegmentedControl
-            options={SIDEBAR_SIDES}
-            value={app.sidebarSide}
-            onChange={(side) => patchApp({ sidebarSide: side })}
-            ariaLabel="Sidebar position"
+            options={TAB_LAYOUT_OPTIONS}
+            value={app.tabLayout}
+            onChange={(layout) => patchApp({ tabLayout: layout })}
+            ariaLabel="Tab layout"
           />
         </div>
 
         <div className="set-row">
           <div className="set-row-info">
-            <div className="set-label">Sidebar width</div>
-            <div className="set-desc">You can also drag the inner edge of the sidebar to resize it live.</div>
-          </div>
-          <div className="set-slider-wrap">
-            <input
-              type="range"
-              className="set-slider"
-              aria-label="Sidebar width"
-              min={APPEARANCE_LIMITS.sidebarWidth.min}
-              max={APPEARANCE_LIMITS.sidebarWidth.max}
-              step={4}
-              value={app.sidebarWidth}
-              onChange={(e) => patchApp({ sidebarWidth: Number(e.target.value) })}
-            />
-            <span className="set-slider-val">{app.sidebarWidth} px</span>
-          </div>
-        </div>
-
-        <div className="set-row">
-          <div className="set-row-info">
-            <div className="set-label">Translucent sidebar</div>
-            <div className="set-desc">
-              {settings.supportsAcrylic
-                ? 'Subtle Windows 11 acrylic backdrop behind the sidebar and title bar.'
-                : 'Uses a solid theme surface on systems without acrylic backdrop support.'}
-            </div>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={app.translucentSidebar}
-            aria-label="Translucent sidebar"
-            className={`set-switch ${app.translucentSidebar ? 'on' : ''}`}
-            onClick={() => patchApp({ translucentSidebar: !app.translucentSidebar })}
-          >
-            <span className="set-switch-thumb" />
-          </button>
-        </div>
-
-        <div className="set-row">
-          <div className="set-row-info">
-            <div className="set-label">Tab close buttons</div>
+            <div className="set-label">Show tab close buttons</div>
             <div className="set-desc">Show the close button only on hover and active tabs, or on every tab.</div>
           </div>
           <SegmentedControl
             options={TAB_CLOSE_OPTIONS}
             value={app.tabCloseButtons}
             onChange={(mode) => patchApp({ tabCloseButtons: mode })}
-            ariaLabel="Tab close buttons"
+            ariaLabel="Show tab close buttons"
           />
         </div>
+
+        {app.tabLayout === 'sidebar' && (
+          <>
+            <div className="set-row">
+              <div className="set-row-info">
+                <div className="set-label">Sidebar position</div>
+                <div className="set-desc">Place vertical tabs on the left or right edge of the window.</div>
+              </div>
+              <SegmentedControl
+                options={SIDEBAR_SIDES}
+                value={app.sidebarSide}
+                onChange={(side) => patchApp({ sidebarSide: side })}
+                ariaLabel="Sidebar position"
+              />
+            </div>
+
+            <div className="set-row stack">
+              <div className="set-row-top">
+                <div className="set-row-info">
+                  <div className="set-label">Sidebar width</div>
+                  <div className="set-desc">Choose a preset or drag the inner edge of the sidebar to resize it live.</div>
+                </div>
+                <div className="set-pills" role="group" aria-label="Sidebar width presets">
+                  {SIDEBAR_WIDTH_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      className={`set-pill ${app.sidebarWidth === preset.width ? 'on' : ''}`}
+                      onClick={() => patchApp({ sidebarWidth: preset.width })}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="set-slider-wrap">
+                <input
+                  type="range"
+                  className="set-slider"
+                  aria-label="Sidebar width"
+                  min={APPEARANCE_LIMITS.sidebarWidth.min}
+                  max={APPEARANCE_LIMITS.sidebarWidth.max}
+                  step={4}
+                  value={app.sidebarWidth}
+                  onChange={(e) => patchApp({ sidebarWidth: Number(e.target.value) })}
+                />
+                <span className="set-slider-val">{app.sidebarWidth} px</span>
+              </div>
+            </div>
+
+            <div className="set-row">
+              <div className="set-row-info">
+                <div className="set-label">Translucent sidebar</div>
+                <div className="set-desc">
+                  {settings.supportsAcrylic
+                    ? 'Subtle Windows 11 acrylic backdrop behind the sidebar and title bar.'
+                    : 'Uses a solid theme surface on systems without acrylic backdrop support.'}
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={app.translucentSidebar}
+                aria-label="Translucent sidebar"
+                className={`set-switch ${app.translucentSidebar ? 'on' : ''}`}
+                onClick={() => patchApp({ translucentSidebar: !app.translucentSidebar })}
+              >
+                <span className="set-switch-thumb" />
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Toolbar & Window */}
@@ -529,13 +567,17 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
             <div className="set-desc">
               Hide the sidebar and toolbar so the page fills the window. Move to the edge to reveal them (<kbd>Ctrl+Shift+S</kbd>).
             </div>
+            {app.tabLayout === 'top' && (
+              <div className="set-note">Compact mode is available when tabs are in the sidebar.</div>
+            )}
           </div>
           <button
             type="button"
             role="switch"
-            aria-checked={settings.compactMode}
+            disabled={app.tabLayout === 'top'}
+            aria-checked={app.tabLayout !== 'top' && settings.compactMode}
             aria-label="Compact mode"
-            className={`set-switch ${settings.compactMode ? 'on' : ''}`}
+            className={`set-switch ${app.tabLayout !== 'top' && settings.compactMode ? 'on' : ''}`}
             onClick={() => onPatch({ compactMode: !settings.compactMode })}
           >
             <span className="set-switch-thumb" />

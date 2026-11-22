@@ -4,6 +4,7 @@
  */
 
 import type { WindowButtonsStyle } from './settings.ts'
+import type { TabLayout } from './appearance.ts'
 import type { SplitOrientation } from './split.ts'
 import { displayUrl, isInternalUrl } from './url.ts'
 import { formatShortcutLabel, resolveShortcuts, type ShortcutId, type ShortcutOverrides } from './shortcuts.ts'
@@ -89,6 +90,7 @@ export interface MenuBuildContext {
   workspaces: readonly MenuWorkspaceContext[]
   activeWorkspaceId: string
   compactMode: boolean
+  tabLayout?: TabLayout
   bookmarkBarVisible?: boolean
   isSplit?: boolean
   splitPaneCount?: number
@@ -172,7 +174,7 @@ export function buildMenus(ctx: MenuBuildContext): MenuSection[] {
 
   const viewItems: MenuEntry[] = [
     { kind: 'item', id: 'view:palette', label: 'Command bar', keys: k('command-palette') },
-    { kind: 'item', id: 'view:compact', label: 'Compact mode', keys: k('compact-mode'), checked: ctx.compactMode },
+    { kind: 'item', id: 'view:compact', label: 'Compact mode', keys: k('compact-mode'), checked: ctx.compactMode && ctx.tabLayout !== 'top', disabled: ctx.tabLayout === 'top' },
     { kind: 'item', id: 'view:bookmark-bar', label: 'Bookmark bar', keys: k('bookmark-bar'), checked: !!ctx.bookmarkBarVisible },
     {
       kind: 'item',

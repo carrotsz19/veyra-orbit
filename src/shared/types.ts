@@ -152,6 +152,7 @@ export type {
   ResolvedAppearance,
   SidebarSide,
   TabCloseButtonsMode,
+  TabLayout,
   ThemePresetId,
   UiDensity
 } from './appearance'

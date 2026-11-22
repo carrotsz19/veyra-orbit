@@ -25,12 +25,19 @@ export const THEME_PRESET_IDS = [
 
 export type ThemePresetId = (typeof THEME_PRESET_IDS)[number]
 export type UiDensity = 'compact' | 'comfortable' | 'spacious'
+export type TabLayout = 'sidebar' | 'top'
 export type SidebarSide = 'left' | 'right'
 export type TabCloseButtonsMode = 'hover' | 'always'
 export type AddressBarAlign = 'center' | 'left'
 export type MenuBarStyle = 'full' | 'hamburger'
 export type BookmarkBarMode = 'always' | 'start-page' | 'never'
 export type MotionMode = 'full' | 'reduced' | 'off'
+
+export const SIDEBAR_WIDTH_PRESETS = Object.freeze([
+  { id: 'narrow', label: 'Narrow', width: 204 },
+  { id: 'default', label: 'Default', width: 248 },
+  { id: 'wide', label: 'Wide', width: 308 }
+] as const)
 
 export interface AppearanceSettings {
   /** Named colour palette (full light + dark token set). */
@@ -43,6 +50,8 @@ export interface AppearanceSettings {
   density: UiDensity
   /** Root UI text scale percentage (90..120). */
   textScale: number
+  /** Tab strip layout: vertical sidebar (default) or horizontal top tab bar. */
+  tabLayout: TabLayout
   /** Which side of the window the vertical tab sidebar sits on. */
   sidebarSide: SidebarSide
   /** Sidebar width in CSS pixels (200..360). */
@@ -91,6 +100,7 @@ export const DEFAULT_APPEARANCE: Readonly<AppearanceSettings> = Object.freeze({
   cornerRadius: 10,
   density: 'comfortable',
   textScale: 100,
+  tabLayout: 'sidebar',
   sidebarSide: 'left',
   sidebarWidth: 248,
   translucentSidebar: true,
@@ -550,6 +560,7 @@ export const THEME_PRESETS: readonly ThemePresetDefinition[] = [
 
 const PRESET_MAP = new Map<string, ThemePresetDefinition>(THEME_PRESETS.map((p) => [p.id, p]))
 const DENSITIES = new Set<string>(['compact', 'comfortable', 'spacious'])
+const TAB_LAYOUTS = new Set<string>(['sidebar', 'top'])
 const SIDEBAR_SIDES = new Set<string>(['left', 'right'])
 const TAB_CLOSE_MODES = new Set<string>(['hover', 'always'])
 const ADDR_ALIGNS = new Set<string>(['center', 'left'])
@@ -565,6 +576,10 @@ export function isThemePresetId(v: unknown): v is ThemePresetId {
 
 export function isUiDensity(v: unknown): v is UiDensity {
   return typeof v === 'string' && DENSITIES.has(v)
+}
+
+export function isTabLayout(v: unknown): v is TabLayout {
+  return typeof v === 'string' && TAB_LAYOUTS.has(v)
 }
 
 export function isSidebarSide(v: unknown): v is SidebarSide {
@@ -642,6 +657,7 @@ export function sanitizeAppearance(raw: unknown): AppearanceSettings {
     cornerRadius: clampInt(raw.cornerRadius, APPEARANCE_LIMITS.cornerRadius.min, APPEARANCE_LIMITS.cornerRadius.max, DEFAULT_APPEARANCE.cornerRadius),
     density: isUiDensity(raw.density) ? raw.density : DEFAULT_APPEARANCE.density,
     textScale: clampInt(raw.textScale, APPEARANCE_LIMITS.textScale.min, APPEARANCE_LIMITS.textScale.max, DEFAULT_APPEARANCE.textScale),
+    tabLayout: isTabLayout(raw.tabLayout) ? raw.tabLayout : DEFAULT_APPEARANCE.tabLayout,
     sidebarSide: isSidebarSide(raw.sidebarSide) ? raw.sidebarSide : DEFAULT_APPEARANCE.sidebarSide,
     sidebarWidth: clampInt(raw.sidebarWidth, APPEARANCE_LIMITS.sidebarWidth.min, APPEARANCE_LIMITS.sidebarWidth.max, DEFAULT_APPEARANCE.sidebarWidth),
     translucentSidebar: typeof raw.translucentSidebar === 'boolean' ? raw.translucentSidebar : DEFAULT_APPEARANCE.translucentSidebar,
@@ -680,6 +696,7 @@ export function mergeAppearance(current: AppearanceSettings, patch: unknown): Ap
   if (own('textScale') && typeof patch.textScale === 'number' && Number.isFinite(patch.textScale)) {
     next.textScale = clampInt(patch.textScale, APPEARANCE_LIMITS.textScale.min, APPEARANCE_LIMITS.textScale.max, next.textScale)
   }
+  if (own('tabLayout') && isTabLayout(patch.tabLayout)) next.tabLayout = patch.tabLayout
   if (own('sidebarSide') && isSidebarSide(patch.sidebarSide)) next.sidebarSide = patch.sidebarSide
   if (own('sidebarWidth') && typeof patch.sidebarWidth === 'number' && Number.isFinite(patch.sidebarWidth)) {
     next.sidebarWidth = clampInt(patch.sidebarWidth, APPEARANCE_LIMITS.sidebarWidth.min, APPEARANCE_LIMITS.sidebarWidth.max, next.sidebarWidth)
@@ -1049,6 +1066,7 @@ export function resolveAppearanceTokens(
     material: effectiveMaterial,
     density: appearance.density,
     motion: effectiveMotion,
+    tabLayout: appearance.tabLayout,
     sidebarSide: appearance.sidebarSide,
     tabClose: appearance.tabCloseButtons,
     addrAlign: appearance.addressBarAlign

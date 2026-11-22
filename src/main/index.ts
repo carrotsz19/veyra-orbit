@@ -541,6 +541,7 @@ function sendSettings(): void {
 
 function toggleCompactMode(): void {
   if (!settings) return
+  if (settings.get().appearance.tabLayout === 'top') return
   settings.update({ compactMode: !settings.get().compactMode })
   sendSettings()
   syncCompactMode()
@@ -1927,7 +1928,11 @@ handle('settings:update', (patch) => {
     safePatch.startPage = sp
   }
   const prev = settings.get()
-  const view = settings.update(safePatch)
+  let view = settings.update(safePatch)
+  // Compact mode is only active with vertical sidebar tabs; disable cleanly when switching to top tabs.
+  if (view.appearance.tabLayout === 'top' && view.compactMode) {
+    view = settings.update({ compactMode: false })
+  }
   if (view.theme !== prev.theme) nativeTheme.themeSource = view.theme
   if (view.compactMode !== prev.compactMode) syncCompactMode()
   if (view.sleepAfterMinutes !== prev.sleepAfterMinutes || view.sleepPinnedTabs !== prev.sleepPinnedTabs) {
@@ -1978,11 +1983,12 @@ handle('settings:import-theme', async () => {
     if (!parsed.ok) return { ok: false, error: parsed.error }
     const patchObj: Record<string, unknown> = { appearance: parsed.appearance }
     if (parsed.theme) patchObj.theme = parsed.theme
+    if (parsed.appearance.tabLayout === 'top') patchObj.compactMode = false
     const view = settings.update(patchObj)
     if (parsed.theme) nativeTheme.themeSource = view.theme
     sendSettings()
     applyWindowAppearance()
-    if (view.compactMode) syncCompactPanels()
+    syncCompactMode()
     return { ok: true, settings: view }
   } catch {
     return { ok: false, error: 'Could not read the selected theme file.' }
