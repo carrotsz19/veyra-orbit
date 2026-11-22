@@ -1,5 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, type IpcMainEvent, type IpcMainInvokeEvent, type Session } from 'electron'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, webContents, type IpcMainEvent, type IpcMainInvokeEvent, type Session } from 'electron'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { release } from 'node:os'
 import type {
@@ -2029,4 +2029,93 @@ app.on('activate', () => {
 const smokeExitMs = Number(process.env.VEYRA_TEST_EXIT_MS)
 if (!app.isPackaged && Number.isFinite(smokeExitMs) && smokeExitMs > 0) {
   setTimeout(() => app.exit(0), Math.min(smokeExitMs, 120_000))
+}
+
+// Dev-only memory measurement hook for tools/measure-memory.mjs. Never runs in packaged builds.
+if (!app.isPackaged && process.env.VEYRA_MEASURE_IPC_DIR) {
+  const ipcDir = process.env.VEYRA_MEASURE_IPC_DIR
+  const reqFile = join(ipcDir, 'req.json')
+  const collectMeasureSnapshot = (label: string): Record<string, unknown> => {
+    const metrics = app.getAppMetrics()
+    const wcByPid = new Map<number, string[]>()
+    for (const wc of webContents.getAllWebContents()) {
+      if (wc.isDestroyed()) continue
+      const pid = wc.getOSProcessId()
+      const url = wc.getURL()
+      let desc = url
+      if (url.includes('index.html')) {
+        try {
+          const view = new URL(url).searchParams.get('view')
+          desc = view ? `floating:${view}` : 'main-ui'
+        } catch {
+          desc = 'orbit-ui'
+        }
+      } else if (url.length > 80) {
+        desc = url.slice(0, 77) + '...'
+      }
+      const list = wcByPid.get(pid) ?? []
+      list.push(desc || '(blank)')
+      wcByPid.set(pid, list)
+    }
+
+    const processes = metrics.map((m) => ({
+      pid: m.pid,
+      type: m.type,
+      name: m.name ?? m.serviceName ?? '',
+      workingSetKB: m.memory.workingSetSize ?? 0,
+      privateKB: m.memory.privateBytes ?? 0,
+      peakWorkingSetKB: m.memory.peakWorkingSetSize ?? 0,
+      targets: wcByPid.get(m.pid) ?? []
+    }))
+
+    const allTabs = tabs?.allTabs() ?? []
+    const totalWorkingSetKB = processes.reduce((s, p) => s + p.workingSetKB, 0)
+    const totalPrivateKB = processes.reduce((s, p) => s + p.privateKB, 0)
+    return {
+      label,
+      timestamp: Date.now(),
+      windowCount: BrowserWindow.getAllWindows().length,
+      webContentsCount: webContents.getAllWebContents().filter((w) => !w.isDestroyed()).length,
+      tabs: {
+        total: allTabs.length,
+        loading: allTabs.filter((t) => t.loading).length,
+        sleeping: allTabs.filter((t) => t.sleeping).length
+      },
+      processCount: processes.length,
+      totalWorkingSetKB,
+      totalPrivateKB,
+      processes
+    }
+  }
+
+  const measurePoll = setInterval(() => {
+    if (!existsSync(reqFile)) return
+    let req: { id?: string; cmd?: string; label?: string } | null = null
+    try {
+      req = JSON.parse(readFileSync(reqFile, 'utf8')) as { id?: string; cmd?: string; label?: string }
+      unlinkSync(reqFile)
+    } catch {
+      return
+    }
+    if (!req?.cmd) return
+    if (req.cmd === 'quit') {
+      clearInterval(measurePoll)
+      app.exit(0)
+      return
+    }
+    if (req.cmd === 'metrics' && req.id) {
+      const snap = collectMeasureSnapshot(req.label ?? '')
+      try {
+        mkdirSync(ipcDir, { recursive: true })
+        const tmp = join(ipcDir, `res-${req.id}.tmp`)
+        const out = join(ipcDir, `res-${req.id}.json`)
+        writeFileSync(tmp, JSON.stringify(snap), 'utf8')
+        renameSync(tmp, out)
+      } catch {
+        /* ignore */
+      }
+    }
+  }, 80)
+  measurePoll.unref()
+  app.on('will-quit', () => clearInterval(measurePoll))
 }
