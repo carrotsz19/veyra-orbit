@@ -4,6 +4,7 @@ All notable changes to Veyra Orbit are documented here.
 
 ## Unreleased
 
+- Compact mode: the sidebar slides away again after you use a tab's right-click menu (for example Duplicate), instead of staying stuck open.
 - Downloads now live in the bottom-left of the sidebar with a circular progress ring and count badge while files download. Click it (or press Ctrl+J) to expand recent downloads with pause, resume, cancel, show in folder, remove, drag-out to other apps, and "Show all" (`orbit://downloads`).
 - Split view now supports top/bottom stacked panes in addition to left/right: drag a tab onto any of the four page edges, rotate between left/right and top/bottom from the tab right-click menu or View menu, drag tabs out of the compact-mode sidebar to split, and drag the active tab onto the page to split it with your most recently used tab.
 - Automatic updates are now easier to see and control: choose "Automatic (recommended)" or "Notify only" in Settings → Updates, restart from a quiet toolbar pill or the Help menu once an update is ready, check automatically after waking from sleep or returning to Orbit after 4 hours, and see a small dismissible "Updated to … — What's new" notice after updating.

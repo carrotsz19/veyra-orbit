@@ -120,6 +120,7 @@ const panelApi: VeyraCompactPanelApi = {
   ready: () => ipcRenderer.send('compact-panel:ready'),
   onVisible: (cb) => listen<boolean>('compact-panel:visible', cb),
   onNewWorkspace: (cb) => listen<void>('ui:new-workspace', () => cb()),
+  onResetTransient: (cb) => listen<void>('compact-panel:reset-transient', () => cb()),
   requestNewWorkspace: () => ipcRenderer.send('compact-panel:new-workspace'),
   openSettingsSection: (sectionId) => ipcRenderer.send('compact-panel:settings-section', sectionId),
   setOmniboxOpen: (open) => ipcRenderer.send('compact-panel:omnibox-open', open),

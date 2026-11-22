@@ -245,6 +245,8 @@ export interface VeyraCompactPanelApi {
   ready(): void
   onVisible(cb: (visible: boolean) => void): () => void
   onNewWorkspace(cb: () => void): () => void
+  /** Main says a native menu closed or a drag finished: forget stale hover/drag state. */
+  onResetTransient(cb: () => void): () => void
   requestNewWorkspace(): void
   openSettingsSection(sectionId: string): void
   setOmniboxOpen(open: boolean): void
