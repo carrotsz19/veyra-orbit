@@ -1523,6 +1523,20 @@ html[data-platform='darwin'] .titlebar {
 .omni-icon.warn {
   color: var(--warning);
 }
+.omni-engine-chip {
+  flex: none;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: var(--tint-soft);
+  border: 1px solid color-mix(in srgb, var(--tint) 32%, transparent);
+  color: var(--tint-text, var(--tint));
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
 .zoom-pill {
   flex: none;
   height: 24px;

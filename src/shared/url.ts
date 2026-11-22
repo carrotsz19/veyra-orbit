@@ -1,10 +1,11 @@
 /** What the address bar does with what you type: go to a site, or search for it. */
+import { buildEngineSearchUrl, parseKeywordSearch, type SearchEngine } from './search.ts'
 
 export const SEARCH_URL = 'https://www.google.com/search?q='
 
-/** Builds a search URL for `query` using the given search URL prefix (default Google). */
+/** Builds a search URL for `query` using the given search URL template (`%s`) or prefix (default Google). */
 export function buildSearchUrl(query: string, searchUrl: string = SEARCH_URL): string {
-  return searchUrl + encodeURIComponent(query)
+  return buildEngineSearchUrl(query, searchUrl)
 }
 
 const SCHEME = /^([a-z][a-z0-9+.-]*):/i
@@ -40,11 +41,21 @@ export function isInternalUrl(url: string): url is InternalUrl {
 }
 
 /** Turns address bar input into a URL to load. Empty input gives null. */
-export function toUrl(input: string, searchUrl: string = SEARCH_URL): string | null {
+export function toUrl(
+  input: string,
+  searchUrl: string = SEARCH_URL,
+  engines?: readonly SearchEngine[]
+): string | null {
   const text = input.trim()
   if (!text) return null
   const internal = text.toLowerCase().replace(/\/$/, '')
   if (isInternalUrl(internal)) return internal
+  if (engines && engines.length > 0) {
+    const kw = parseKeywordSearch(input, engines)
+    if (kw && kw.query) {
+      return buildEngineSearchUrl(kw.query, kw.engine)
+    }
+  }
   if (!/\s/.test(text)) {
     const host = HOSTLIKE.exec(text)
     if (host) {

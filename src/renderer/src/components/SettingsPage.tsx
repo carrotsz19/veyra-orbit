@@ -11,7 +11,6 @@ import type {
   UpdateMode,
   UpdateState
 } from '@shared/types'
-import { SEARCH_ENGINES } from '@shared/settings'
 import { SLEEP_MINUTES_OPTIONS } from '@shared/sleep'
 import { pickActiveSection } from '@shared/compact'
 import { permissionName } from '@shared/permissions'
@@ -20,6 +19,7 @@ import { SegmentedControl, type SegmentedOption } from './SegmentedControl'
 import { SettingsAppearance } from './SettingsAppearance'
 import { SettingsExtensions } from './SettingsExtensions'
 import { SettingsPerformanceMemory } from './SettingsPerformance'
+import { SettingsSearch } from './SettingsSearch'
 import { SettingsShortcuts } from './SettingsShortcuts'
 
 const api = window.veyra
@@ -59,11 +59,6 @@ const PERM_OPTIONS: readonly SegmentedOption<'allow' | 'block'>[] = [
   { value: 'block', label: 'Block', tone: 'block' }
 ]
 
-const ENGINE_OPTIONS = SEARCH_ENGINES.map((engine) => ({
-  value: engine.id,
-  label: engine.name
-}))
-
 const UPDATE_MODE_OPTIONS: readonly SegmentedOption<UpdateMode>[] = [
   { value: 'automatic', label: 'Automatic (recommended)' },
   { value: 'notify', label: 'Notify only' }
@@ -71,6 +66,7 @@ const UPDATE_MODE_OPTIONS: readonly SegmentedOption<UpdateMode>[] = [
 
 const SETTING_SECTIONS = [
   { id: 'set-general', label: 'General' },
+  { id: 'set-search', label: 'Search' },
   { id: 'set-import', label: 'Import data' },
   { id: 'set-appearance', label: 'Appearance' },
   { id: 'set-shortcuts', label: 'Keyboard shortcuts' },
@@ -279,25 +275,7 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
           ))}
         </nav>
         <div className="set-content">
-          <section className="set-section" id="set-general" aria-labelledby="set-search-h">
-            <h2 id="set-search-h">Search engine</h2>
-            <div className="set-card">
-              <div className="set-row stack">
-                <div className="set-row-info">
-                  <div className="set-label">Address bar search</div>
-                  <div className="set-desc">Used when you search from the address bar, start page, or right-click menu.</div>
-                </div>
-                <SegmentedControl
-                  options={ENGINE_OPTIONS}
-                  value={settings.searchEngine}
-                  onChange={(id) => patch({ searchEngine: id })}
-                  ariaLabel="Search engine"
-                />
-              </div>
-            </div>
-          </section>
-
-          <section className="set-section" aria-labelledby="set-startup-h">
+          <section className="set-section" id="set-general" aria-labelledby="set-startup-h">
             <h2 id="set-startup-h">On start</h2>
             <div className="set-card" role="radiogroup" aria-label="On start">
               {STARTUP_OPTIONS.map((opt) => (
@@ -338,6 +316,9 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
               ))}
             </div>
           </section>
+
+          <SettingsSearch settings={settings} onPatch={patch} />
+
           <ImportSection />
 
           <SettingsAppearance settings={settings} onPatch={patch} onSettingsReplaced={setSettings} />

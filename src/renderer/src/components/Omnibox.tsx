@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AppWindow, Bookmark, Clock, Globe, Lock, Search, Star, TriangleAlert } from 'lucide-react'
-import type { Suggestion, TabInfo } from '@shared/types'
+import type { SearchEngine, Suggestion, TabInfo } from '@shared/types'
 import { displayUrl, isInternalUrl, resolveOmniboxSync } from '@shared/url'
+import { DEFAULT_SEARCH_ENGINES, parseKeywordSearch } from '@shared/search'
 
 const api = window.veyra
 
@@ -15,7 +16,8 @@ export function Omnibox({
   onEditingChange,
   onOpenChange,
   useOverlay = true,
-  showStar = true
+  showStar = true,
+  searchEngines
 }: {
   tab?: TabInfo
   onPageShot: (shots: Record<number, string> | null) => void
@@ -23,6 +25,7 @@ export function Omnibox({
   onOpenChange?: (open: boolean) => void
   useOverlay?: boolean
   showStar?: boolean
+  searchEngines?: readonly SearchEngine[]
 }): React.JSX.Element {
   const input = useRef<HTMLInputElement>(null)
   const [editing, setEditing] = useState(false)
@@ -131,6 +134,11 @@ export function Omnibox({
   const secure = url.startsWith('https://') && !tab?.error
   const insecure = certError || (url.startsWith('http://') && !/^http:\/\/(localhost|127\.0\.0\.1)/.test(url))
   const canStar = !!tab && /^https?:/.test(url) && !tab.error
+  const enginesList = searchEngines && searchEngines.length > 0 ? searchEngines : DEFAULT_SEARCH_ENGINES
+  const activeKeywordMatch = useMemo(
+    () => (editing ? parseKeywordSearch(text, enginesList) : null),
+    [editing, text, enginesList]
+  )
 
   return (
     <div className={`omni-wrap ${open ? 'open' : ''}`}>
@@ -166,6 +174,14 @@ export function Omnibox({
         >
           {editing || !url ? <Search size={14} /> : secure ? <Lock size={13} /> : insecure ? <TriangleAlert size={14} /> : isInternalUrl(url) ? <AppWindow size={14} /> : <Search size={14} />}
         </span>
+        {activeKeywordMatch && (
+          <span
+            className="omni-engine-chip"
+            title={`Searching ${activeKeywordMatch.engine.name} (${activeKeywordMatch.trigger})`}
+          >
+            {activeKeywordMatch.engine.name}
+          </span>
+        )}
         <input
           ref={input}
           value={text}
@@ -248,7 +264,7 @@ function Row({ s }: { s: Suggestion }): React.JSX.Element {
       <>
         <Search size={15} className="omni-row-icon" />
         <span className="omni-row-main">{s.text}</span>
-        <span className="omni-row-side">Search</span>
+        <span className="omni-row-side">{s.engineName ? `Search ${s.engineName}` : 'Search'}</span>
       </>
     )
   if (s.kind === 'url')

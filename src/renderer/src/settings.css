@@ -1021,6 +1021,100 @@
   gap: 8px;
 }
 
+/* ---- Search engines editor (SettingsSearch.tsx) -------------------------- */
+.se-select {
+  height: 30px;
+  min-width: 164px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--hairline-strong);
+  background: var(--bg-grouped);
+  color: var(--label-primary);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.se-row {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.se-name-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.se-kw {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.se-default-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--tint-soft);
+  color: var(--tint-text, var(--tint));
+  font-size: 11px;
+  font-weight: 600;
+}
+.se-url {
+  margin-top: 2px;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  color: var(--label-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.se-form {
+  background: var(--bg-grouped);
+}
+.se-form-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--label-primary);
+}
+.se-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 140px;
+  gap: 10px;
+}
+.se-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--label-secondary);
+}
+.se-field input {
+  height: 30px;
+  padding: 0 9px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--hairline-strong);
+  background: var(--bg-elevated);
+  color: var(--label-primary);
+  font-size: 12.5px;
+  outline: none;
+  user-select: text;
+}
+.dark .se-field input {
+  background: var(--bg-surface-raised);
+}
+.se-field input:focus {
+  border-color: color-mix(in srgb, var(--tint) 55%, transparent);
+  box-shadow: 0 0 0 3px var(--tint-ring);
+}
+.se-field-url {
+  grid-column: 1 / -1;
+}
+.se-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 @media (max-width: 900px) {
   .settings {
     display: block;

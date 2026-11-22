@@ -72,8 +72,10 @@ export interface TabHooks {
   title(url: string, title: string): void
   isBookmarked(url: string): boolean
   toggleBookmark(url: string, title: string): void
-  /** Current search engine URL prefix. */
+  /** Current search engine URL template/prefix. */
   searchUrl(): string
+  /** Configured search engines for keyword and !bang shortcuts. */
+  searchEngines?(): readonly import('../shared/search').SearchEngine[]
   /** A page tried to open an allowlisted external app scheme (mailto:, zoommtg:, ...). */
   externalApp(tabId: number, pageUrl: string, targetUrl: string): void
   /** Ensures a session partition has the full security, compat and downloads setup. */
@@ -805,7 +807,7 @@ export class Tabs {
 
   navigate(id: number, input: string, typed = false): void {
     const tab = this.get(id)
-    const url = toUrl(input, this.hooks.searchUrl())
+    const url = toUrl(input, this.hooks.searchUrl(), this.hooks.searchEngines?.())
     if (!tab || !url) return
     tab.pendingUrl = undefined
     tab.info.sleeping = false

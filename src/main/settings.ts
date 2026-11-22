@@ -70,6 +70,7 @@ export class SettingsStore {
   get(): Settings {
     return {
       ...this.data,
+      searchEngines: this.data.searchEngines.map((e) => ({ ...e })),
       appearance: {
         ...this.data.appearance,
         toolbarItems: [...this.data.appearance.toolbarItems],
@@ -84,8 +85,12 @@ export class SettingsStore {
     }
   }
 
+  searchEngines() {
+    return this.data.searchEngines.map((e) => ({ ...e }))
+  }
+
   searchUrl(): string {
-    return searchUrlFor(this.data.searchEngine)
+    return searchUrlFor(this.data.searchEngine, this.data.searchEngines)
   }
 
   effectiveDownloadsDir(): string {

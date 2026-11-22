@@ -119,6 +119,7 @@ export type {
   AppearancePatch,
   AppearanceSettings,
   NewTabBehavior,
+  SearchEngine,
   SearchEngineId,
   Settings,
   SettingsPatch,

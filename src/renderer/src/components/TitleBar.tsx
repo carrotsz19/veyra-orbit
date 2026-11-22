@@ -887,6 +887,7 @@ export function TitleBar({
             onOpenChange={onOmniboxOpenChange}
             useOverlay={useOmniboxOverlay}
             showStar={false}
+            searchEngines={settings?.searchEngines}
           />
         )
     }

@@ -23,6 +23,13 @@ import {
   sanitizeShortcutOverrides,
   type ShortcutOverrides
 } from './shortcuts.ts'
+import {
+  DEFAULT_SEARCH_ENGINES,
+  cloneDefaultSearchEngines,
+  findDefaultSearchEngine,
+  sanitizeSearchEngines,
+  type SearchEngine
+} from './search.ts'
 
 export const SEARCH_ENGINES = [
   { id: 'google', name: 'Google', url: 'https://www.google.com/search?q=' },
@@ -32,16 +39,18 @@ export const SEARCH_ENGINES = [
   { id: 'ecosia', name: 'Ecosia', url: 'https://www.ecosia.org/search?q=' }
 ] as const
 
-export type SearchEngineId = (typeof SEARCH_ENGINES)[number]['id']
+export type SearchEngineId = string
 export type ThemeSource = 'system' | 'light' | 'dark'
 export type StartupBehavior = 'restore' | 'new-tab'
 export type NewTabBehavior = 'start-page' | 'command-bar'
 export type WindowButtonsStyle = 'windows' | 'dots'
 export type UpdateMode = 'automatic' | 'notify'
-export type { SleepMinutes, AppearanceSettings, AppearancePatch, StartPageSettings, StartPagePatch, ShortcutOverrides }
+export type { SleepMinutes, AppearanceSettings, AppearancePatch, StartPageSettings, StartPagePatch, ShortcutOverrides, SearchEngine }
 
 export interface Settings {
   searchEngine: SearchEngineId
+  /** Configured search engines with !bang / keyword shortcuts (https:// + %s only). */
+  searchEngines: SearchEngine[]
   theme: ThemeSource
   startup: StartupBehavior
   /** What Ctrl+T / New tab opens: the start page or the floating Ctrl+K command bar. */
@@ -92,6 +101,7 @@ export interface SettingsView extends Settings {
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   searchEngine: 'google',
+  searchEngines: DEFAULT_SEARCH_ENGINES as unknown as SearchEngine[],
   theme: 'system',
   startup: 'restore',
   newTabBehavior: 'start-page',
@@ -115,8 +125,8 @@ const SLEEP_SET = new Set<number>(SLEEP_MINUTES_OPTIONS)
 const WINDOW_BUTTONS = new Set<string>(['windows', 'dots'])
 const UPDATE_MODES = new Set<string>(['automatic', 'notify'])
 
-export function isSearchEngineId(v: unknown): v is SearchEngineId {
-  return typeof v === 'string' && ENGINE_MAP.has(v)
+export function isSearchEngineId(v: unknown, engines: readonly SearchEngine[] = DEFAULT_SEARCH_ENGINES): v is SearchEngineId {
+  return typeof v === 'string' && engines.some((e) => e.id === v)
 }
 
 export function isThemeSource(v: unknown): v is ThemeSource {
@@ -143,8 +153,11 @@ export function isUpdateMode(v: unknown): v is UpdateMode {
   return typeof v === 'string' && UPDATE_MODES.has(v)
 }
 
-/** Returns the search URL prefix for an engine, falling back to Google. */
-export function searchUrlFor(engine: SearchEngineId): string {
+/** Returns the search URL template/prefix for an engine, falling back to Google. */
+export function searchUrlFor(engine: SearchEngineId, engines?: readonly SearchEngine[]): string {
+  if (engines && engines.length > 0) {
+    return findDefaultSearchEngine(engines, engine).urlTemplate
+  }
   return ENGINE_MAP.get(engine) ?? SEARCH_ENGINES[0].url
 }
 
@@ -161,13 +174,17 @@ export function sanitizeSettings(raw: unknown): Settings {
   if (!isPlainObject(raw)) {
     return {
       ...DEFAULT_SETTINGS,
+      searchEngines: cloneDefaultSearchEngines(),
       appearance: { ...DEFAULT_APPEARANCE },
       startPage: sanitizeStartPage(null),
       shortcuts: {}
     }
   }
+  const searchEngines = sanitizeSearchEngines(raw.searchEngines)
+  const searchEngine = isSearchEngineId(raw.searchEngine, searchEngines) ? raw.searchEngine : searchEngines[0].id
   return {
-    searchEngine: isSearchEngineId(raw.searchEngine) ? raw.searchEngine : DEFAULT_SETTINGS.searchEngine,
+    searchEngine,
+    searchEngines,
     theme: isThemeSource(raw.theme) ? raw.theme : DEFAULT_SETTINGS.theme,
     startup: isStartupBehavior(raw.startup) ? raw.startup : DEFAULT_SETTINGS.startup,
     newTabBehavior: isNewTabBehavior(raw.newTabBehavior) ? raw.newTabBehavior : DEFAULT_SETTINGS.newTabBehavior,
@@ -188,13 +205,21 @@ export function sanitizeSettings(raw: unknown): Settings {
 export function mergeSettings(current: Settings, patch: unknown): Settings {
   const next: Settings = {
     ...current,
+    searchEngines: sanitizeSearchEngines(current.searchEngines),
     appearance: { ...current.appearance },
     startPage: sanitizeStartPage(current.startPage),
     shortcuts: sanitizeShortcutOverrides(current.shortcuts)
   }
   if (!isPlainObject(patch)) return next
   const own = (k: string): boolean => Object.prototype.hasOwnProperty.call(patch, k)
-  if (own('searchEngine') && isSearchEngineId(patch.searchEngine)) next.searchEngine = patch.searchEngine
+  if (own('searchEngines') && Array.isArray(patch.searchEngines)) {
+    next.searchEngines = sanitizeSearchEngines(patch.searchEngines)
+  }
+  if (own('searchEngine') && isSearchEngineId(patch.searchEngine, next.searchEngines)) {
+    next.searchEngine = patch.searchEngine
+  } else if (!isSearchEngineId(next.searchEngine, next.searchEngines)) {
+    next.searchEngine = next.searchEngines[0].id
+  }
   if (own('theme') && isThemeSource(patch.theme)) next.theme = patch.theme
   if (own('startup') && isStartupBehavior(patch.startup)) next.startup = patch.startup
   if (own('newTabBehavior') && isNewTabBehavior(patch.newTabBehavior)) next.newTabBehavior = patch.newTabBehavior

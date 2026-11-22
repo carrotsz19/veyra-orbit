@@ -8,6 +8,7 @@
  * toUrl() + isAllowedUrl()/isInternalUrl().
  */
 import { SEARCH_URL, buildSearchUrl, displayUrl, isAllowedUrl, isInternalUrl, toUrl } from './url.ts'
+import { buildEngineSearchUrl, parseKeywordSearch, type SearchEngine } from './search.ts'
 import { score, scoreCommand, type Candidate } from './suggest.ts'
 import { clampPopupBounds, type BoundsRect } from './menu.ts'
 import type { ThemeSource } from './settings.ts'
@@ -153,6 +154,7 @@ export interface PaletteContext {
   canReopenClosed: boolean
   theme: ThemeSource
   searchUrl?: string
+  searchEngines?: readonly SearchEngine[]
   shortcuts?: ShortcutOverrides
   now?: number
   maxItems?: number
@@ -171,7 +173,8 @@ interface CommandDef {
 }
 
 const SETTINGS_SECTIONS: readonly { id: string; label: string; keywords: string }[] = [
-  { id: 'set-general', label: 'General & search settings', keywords: 'search engine startup new tab command bar start page' },
+  { id: 'set-general', label: 'General & startup settings', keywords: 'startup new tab command bar start page behavior' },
+  { id: 'set-search', label: 'Search engines & shortcuts', keywords: 'search engine bang keyword custom google duckduckgo wikipedia' },
   { id: 'set-appearance', label: 'Appearance settings', keywords: 'theme light dark compact mode window buttons dots' },
   { id: 'set-shortcuts', label: 'Keyboard shortcuts', keywords: 'hotkeys keybindings rebind shortcuts keys' },
   { id: 'set-performance', label: 'Performance & sleeping tabs', keywords: 'memory sleep inactive tabs pinned' },
@@ -503,8 +506,10 @@ export function buildPaletteResults(
   }
 
   // Non-empty query: score everything with suggest.ts scoring.
-  const target = toUrl(input, searchUrl)
-  const isDirectUrl = !!target && !target.startsWith(searchUrl) && (isAllowedUrl(target) || isInternalUrl(target))
+  const kwMatch = ctx.searchEngines?.length ? parseKeywordSearch(rawInput, ctx.searchEngines) : null
+  const target = toUrl(rawInput, searchUrl, ctx.searchEngines)
+  const defaultSearchUrl = buildSearchUrl(input, searchUrl)
+  const isDirectUrl = !kwMatch?.query && !!target && target !== defaultSearchUrl && (isAllowedUrl(target) || isInternalUrl(target))
 
   const scored: ScoredRow[] = []
   const seenUrls = new Set<string>()
@@ -638,16 +643,20 @@ export function buildPaletteResults(
 
   scored.sort((a, b) => b.score - a.score)
 
-  const searchActionUrl = buildSearchUrl(input, searchUrl)
+  const searchActionUrl =
+    kwMatch && kwMatch.query ? buildEngineSearchUrl(kwMatch.query, kwMatch.engine) : buildSearchUrl(input, searchUrl)
   const searchRow: ScoredRow = {
     score: 0,
     item: {
       id: 'search:web',
       kind: 'search',
       group: 'Web',
-      label: `Search the web for “${input}”`,
+      label:
+        kwMatch && kwMatch.query
+          ? `Search ${kwMatch.engine.name} for “${kwMatch.query}”`
+          : `Search the web for “${input}”`,
       icon: 'search',
-      badge: ctx.mode === 'new-tab' ? 'New tab' : 'Search',
+      badge: kwMatch && kwMatch.query ? kwMatch.engine.name : ctx.mode === 'new-tab' ? 'New tab' : 'Search',
       canOpenInNewTab: true
     },
     action: { type: 'navigate', url: searchActionUrl }
@@ -706,9 +715,13 @@ export function validatePalettePick(actions: ReadonlyMap<string, PaletteAction>,
  * Validates raw typed text submitted from the palette window, ensuring it passes
  * through toUrl() and isAllowedUrl()/isInternalUrl() (never file:/javascript:/data:).
  */
-export function resolveTypedPaletteText(text: unknown, searchUrl = SEARCH_URL): string | null {
+export function resolveTypedPaletteText(
+  text: unknown,
+  searchUrl = SEARCH_URL,
+  searchEngines?: readonly SearchEngine[]
+): string | null {
   if (typeof text !== 'string' || text.length > 4096) return null
-  const url = toUrl(text, searchUrl)
+  const url = toUrl(text, searchUrl, searchEngines)
   if (!url) return null
   return isAllowedUrl(url) || isInternalUrl(url) ? url : null
 }

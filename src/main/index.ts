@@ -632,6 +632,7 @@ function buildPaletteContext(query: string, mode: PaletteMode): PaletteContext |
     canReopenClosed: st.canReopenClosed,
     theme: settings.get().theme,
     searchUrl: settings.searchUrl(),
+    searchEngines: settings.searchEngines(),
     shortcuts: settings.get().shortcuts
   }
 }
@@ -1018,6 +1019,7 @@ function createWindow(): void {
       dataChanged()
     },
     searchUrl: () => s.searchUrl(),
+    searchEngines: () => s.searchEngines(),
     externalApp: (tabId, pageUrl, targetUrl) => {
       ext.request(tabId, pageUrl, targetUrl)
     },
@@ -1605,7 +1607,7 @@ onSurface('tab:new', (t, input?: unknown) => {
     openOrTogglePalette('new-tab')
     return
   }
-  t.create((str(input) && toUrl(input, settings?.searchUrl())) || '')
+  t.create((str(input) && toUrl(input, settings?.searchUrl(), settings?.searchEngines())) || '')
 })
 onSurface('tab:close', (t, id: unknown) => num(id) && t.close(id))
 onSurface('tab:reopen', (t) => t.reopenClosed())
@@ -1714,7 +1716,7 @@ ipcMain.on('palette:pick', (e, id: unknown, openInNewTab: unknown) => {
 })
 ipcMain.on('palette:submit-text', (e, text: unknown, openInNewTab: unknown) => {
   if (!fromPalette(e) || !palettePopup || !settings) return
-  const url = resolveTypedPaletteText(text, settings.searchUrl())
+  const url = resolveTypedPaletteText(text, settings.searchUrl(), settings.searchEngines())
   palettePopup.close()
   if (url) executePaletteAction({ type: 'navigate', url }, openInNewTab === true)
 })
@@ -1897,7 +1899,7 @@ handleSurface('suggest', (input) => {
     .suggestableTabs()
     .filter((t) => /^https?:/.test(t.url))
     .map((t) => ({ url: t.url, title: t.title, visits: 0, typed: 0, last: 0, bookmarked: t.bookmarked, tabId: t.id }))
-  return suggest(input, [...open, ...store.candidates(input)], Date.now(), 7, settings?.searchUrl())
+  return suggest(input, [...open, ...store.candidates(input)], Date.now(), 7, settings?.searchUrl(), settings?.searchEngines())
 })
 handle('overlay', (open) => tabs?.setOverlay(open === true) ?? null)
 on('overlay:hide', (t) => t.hidePageForOverlay())
