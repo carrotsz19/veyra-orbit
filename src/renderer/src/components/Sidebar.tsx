@@ -520,9 +520,9 @@ export function Sidebar({
                 className="ws-emoji-input"
                 type="text"
                 maxLength={8}
-                placeholder="😀"
-                aria-label="Custom emoji"
-                title="Or type an emoji"
+                placeholder="Aa"
+                aria-label="Custom symbol"
+                title="Or type a custom character"
                 value={isBuiltInWorkspaceIcon(editor.icon) ? '' : editor.icon}
                 onChange={(e) => {
                   const val = e.target.value.trim()

@@ -153,20 +153,20 @@
 .ext-store-input {
   flex: 1;
   min-width: 0;
-  height: 32px;
-  padding: 0 11px;
+  height: 30px;
+  padding: 0 10px;
   border-radius: var(--r-sm);
   border: 1px solid var(--hairline-strong);
   background: var(--bg-surface-raised);
   color: var(--label-primary);
   font-size: 12.5px;
-  transition: border-color var(--t-fast) ease, box-shadow var(--t-base) var(--ease-out);
+  transition: border-color var(--t-fast) var(--ease-state), box-shadow var(--t-base) var(--ease-state);
 }
 
 .ext-store-input:focus {
   outline: none;
-  border-color: color-mix(in srgb, var(--tint) 70%, transparent);
-  box-shadow: 0 0 0 3px var(--tint-soft);
+  border-color: color-mix(in srgb, var(--tint) 65%, transparent);
+  box-shadow: 0 0 0 3px var(--tint-ring);
 }
 
 .ext-item.disabled {
@@ -213,9 +213,9 @@
 
 .ext-tag {
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: 550;
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: 5px;
   background: var(--fill-secondary);
   color: var(--label-secondary);
 }
@@ -223,8 +223,8 @@
 .ext-mem {
   font-size: 11px;
   font-weight: 500;
-  padding: 1px 7px;
-  border-radius: 999px;
+  padding: 1px 6px;
+  border-radius: 5px;
   background: var(--fill-tertiary);
   color: var(--label-secondary);
   font-variant-numeric: tabular-nums;

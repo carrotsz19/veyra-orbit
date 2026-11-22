@@ -11,6 +11,7 @@ import type {
   UiDensity
 } from '@shared/types'
 import { START_PAGE_LIMITS, WIDGET_LABELS, reorderList } from '@shared/startpage'
+import { SegmentedControl, type SegmentedOption } from './SegmentedControl'
 
 interface Props {
   open: boolean
@@ -24,22 +25,32 @@ interface Props {
   onOpenAppearance: () => void
 }
 
-const BG_OPTIONS: { id: StartBackgroundMode; label: string }[] = [
-  { id: 'solid', label: 'Default' },
-  { id: 'tinted', label: 'Tinted' },
-  { id: 'image', label: 'Image' }
+const BG_OPTIONS: readonly SegmentedOption<StartBackgroundMode>[] = [
+  { value: 'solid', label: 'Default' },
+  { value: 'tinted', label: 'Tinted' },
+  { value: 'image', label: 'Image' }
 ]
 
-const DENSITY_OPTIONS: { id: UiDensity; label: string }[] = [
-  { id: 'compact', label: 'Compact' },
-  { id: 'comfortable', label: 'Default' },
-  { id: 'spacious', label: 'Spacious' }
+const LAYOUT_OPTIONS: readonly SegmentedOption<StartLayout>[] = [
+  { value: 'centered', label: 'Centred' },
+  { value: 'wide', label: 'Wide' }
 ]
 
-const LINK_SIZE_OPTIONS: { id: QuickLinkSize; label: string }[] = [
-  { id: 'sm', label: 'S' },
-  { id: 'md', label: 'M' },
-  { id: 'lg', label: 'L' }
+const DENSITY_OPTIONS: readonly SegmentedOption<UiDensity>[] = [
+  { value: 'compact', label: 'Compact' },
+  { value: 'comfortable', label: 'Default' },
+  { value: 'spacious', label: 'Spacious' }
+]
+
+const CLOCK_OPTIONS: readonly SegmentedOption<ClockFormat>[] = [
+  { value: '12h', label: '12-hour' },
+  { value: '24h', label: '24-hour' }
+]
+
+const LINK_SIZE_OPTIONS: readonly SegmentedOption<QuickLinkSize>[] = [
+  { value: 'sm', label: 'S' },
+  { value: 'md', label: 'M' },
+  { value: 'lg', label: 'L' }
 ]
 
 export function StartCustomizeDrawer({
@@ -116,21 +127,14 @@ export function StartCustomizeDrawer({
             <h3>Background</h3>
             <div className="sp-sheet-group">
               <div className="sp-sheet-row stack">
-                <div className="set-seg sp-seg-full" role="radiogroup" aria-label="Start page background">
-                  {BG_OPTIONS.map(({ id, label }) => (
-                    <button
-                      key={id}
-                      type="button"
-                      role="radio"
-                      aria-checked={config.background === id}
-                      tabIndex={open ? 0 : -1}
-                      className={`set-seg-btn ${config.background === id ? 'on' : ''}`}
-                      onClick={() => onPatch({ background: id })}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+                <SegmentedControl
+                  fullWidth
+                  options={BG_OPTIONS}
+                  value={config.background}
+                  onChange={(id) => onPatch({ background: id })}
+                  ariaLabel="Start page background"
+                  tabIndex={open ? 0 : -1}
+                />
               </div>
 
               {config.background === 'image' && (
@@ -205,39 +209,25 @@ export function StartCustomizeDrawer({
             <div className="sp-sheet-group">
               <div className="sp-sheet-row">
                 <span>Width</span>
-                <div className="set-seg compact" role="radiogroup" aria-label="Start page layout">
-                  {(['centered', 'wide'] as StartLayout[]).map((id) => (
-                    <button
-                      key={id}
-                      type="button"
-                      role="radio"
-                      aria-checked={config.layout === id}
-                      tabIndex={open ? 0 : -1}
-                      className={`set-seg-btn ${config.layout === id ? 'on' : ''}`}
-                      onClick={() => onPatch({ layout: id })}
-                    >
-                      {id === 'centered' ? 'Centred' : 'Wide'}
-                    </button>
-                  ))}
-                </div>
+                <SegmentedControl
+                  compact
+                  options={LAYOUT_OPTIONS}
+                  value={config.layout}
+                  onChange={(id) => onPatch({ layout: id })}
+                  ariaLabel="Start page layout"
+                  tabIndex={open ? 0 : -1}
+                />
               </div>
               <div className="sp-sheet-row">
                 <span>Density</span>
-                <div className="set-seg compact" role="radiogroup" aria-label="Start page density">
-                  {DENSITY_OPTIONS.map((d) => (
-                    <button
-                      key={d.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={config.density === d.id}
-                      tabIndex={open ? 0 : -1}
-                      className={`set-seg-btn ${config.density === d.id ? 'on' : ''}`}
-                      onClick={() => onPatch({ density: d.id })}
-                    >
-                      {d.label}
-                    </button>
-                  ))}
-                </div>
+                <SegmentedControl
+                  compact
+                  options={DENSITY_OPTIONS}
+                  value={config.density}
+                  onChange={(id) => onPatch({ density: id })}
+                  ariaLabel="Start page density"
+                  tabIndex={open ? 0 : -1}
+                />
               </div>
             </div>
           </section>
@@ -263,21 +253,14 @@ export function StartCustomizeDrawer({
               </label>
               <div className="sp-sheet-row">
                 <span>Time format</span>
-                <div className="set-seg compact" role="radiogroup" aria-label="Clock format">
-                  {(['12h', '24h'] as ClockFormat[]).map((fmt) => (
-                    <button
-                      key={fmt}
-                      type="button"
-                      role="radio"
-                      aria-checked={config.clockFormat === fmt}
-                      tabIndex={open ? 0 : -1}
-                      className={`set-seg-btn ${config.clockFormat === fmt ? 'on' : ''}`}
-                      onClick={() => onPatch({ clockFormat: fmt })}
-                    >
-                      {fmt === '12h' ? '12-hour' : '24-hour'}
-                    </button>
-                  ))}
-                </div>
+                <SegmentedControl
+                  compact
+                  options={CLOCK_OPTIONS}
+                  value={config.clockFormat}
+                  onChange={(fmt) => onPatch({ clockFormat: fmt })}
+                  ariaLabel="Clock format"
+                  tabIndex={open ? 0 : -1}
+                />
               </div>
               <div className="sp-sheet-row">
                 <span>Show seconds</span>
@@ -302,21 +285,14 @@ export function StartCustomizeDrawer({
             <div className="sp-sheet-group">
               <div className="sp-sheet-row">
                 <span>Icon size</span>
-                <div className="set-seg compact" role="radiogroup" aria-label="Quick link tile size">
-                  {LINK_SIZE_OPTIONS.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={config.quickLinkSize === s.id}
-                      tabIndex={open ? 0 : -1}
-                      className={`set-seg-btn ${config.quickLinkSize === s.id ? 'on' : ''}`}
-                      onClick={() => onPatch({ quickLinkSize: s.id })}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
+                <SegmentedControl
+                  compact
+                  options={LINK_SIZE_OPTIONS}
+                  value={config.quickLinkSize}
+                  onChange={(id) => onPatch({ quickLinkSize: id })}
+                  ariaLabel="Quick link tile size"
+                  tabIndex={open ? 0 : -1}
+                />
               </div>
               <label className="sp-sheet-row">
                 <span>Per row</span>

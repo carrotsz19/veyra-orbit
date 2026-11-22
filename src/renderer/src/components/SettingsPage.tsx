@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { FolderOpen, RefreshCw, RotateCcw, Shield, Trash2 } from 'lucide-react'
+import { RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
 import type {
   ClearDataRange,
   NewTabBehavior,
@@ -15,6 +15,7 @@ import { SLEEP_MINUTES_OPTIONS } from '@shared/sleep'
 import { pickActiveSection } from '@shared/compact'
 import { permissionName } from '@shared/permissions'
 import { ImportSection } from './ImportCard'
+import { SegmentedControl, type SegmentedOption } from './SegmentedControl'
 import { SettingsAppearance } from './SettingsAppearance'
 import { SettingsExtensions } from './SettingsExtensions'
 import { SettingsPerformanceMemory } from './SettingsPerformance'
@@ -40,10 +41,20 @@ const SLEEP_LABELS: Record<SleepMinutes, string> = {
   120: '120 min'
 }
 
-const CLEAR_RANGES: { id: ClearDataRange; label: string }[] = [
-  { id: 'hour', label: 'Last hour' },
-  { id: 'day', label: 'Last day' },
-  { id: 'all', label: 'All time' }
+const CLEAR_RANGES: readonly SegmentedOption<ClearDataRange>[] = [
+  { value: 'hour', label: 'Last hour' },
+  { value: 'day', label: 'Last day' },
+  { value: 'all', label: 'All time' }
+]
+
+const SLEEP_OPTIONS: readonly SegmentedOption<SleepMinutes>[] = SLEEP_MINUTES_OPTIONS.map((mins) => ({
+  value: mins,
+  label: SLEEP_LABELS[mins]
+}))
+
+const PERM_OPTIONS: readonly SegmentedOption<'allow' | 'block'>[] = [
+  { value: 'allow', label: 'Allow', tone: 'allow' },
+  { value: 'block', label: 'Block', tone: 'block' }
 ]
 
 const SETTING_SECTIONS = [
@@ -331,19 +342,12 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
                     Discard background tabs to free memory after they sit unused. Active tabs, audio, camera/mic/screen capture, unsaved form text, prompts, find, and full-screen tabs never sleep.
                   </div>
                 </div>
-                <div className="set-pills" role="radiogroup" aria-label="Sleep inactive tabs after">
-                  {SLEEP_MINUTES_OPTIONS.map((mins) => (
-                    <button
-                      key={mins}
-                      role="radio"
-                      aria-checked={settings.sleepAfterMinutes === mins}
-                      className={`set-pill ${settings.sleepAfterMinutes === mins ? 'on' : ''}`}
-                      onClick={() => patch({ sleepAfterMinutes: mins })}
-                    >
-                      {SLEEP_LABELS[mins]}
-                    </button>
-                  ))}
-                </div>
+                <SegmentedControl
+                  options={SLEEP_OPTIONS}
+                  value={settings.sleepAfterMinutes}
+                  onChange={(mins) => patch({ sleepAfterMinutes: mins })}
+                  ariaLabel="Sleep inactive tabs after"
+                />
               </div>
               <div className="set-row">
                 <div className="set-row-info">
@@ -382,9 +386,8 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
                       <RotateCcw size={14} />
                     </button>
                   )}
-                  <button className="btn set-icon-btn" onClick={chooseFolder} disabled={settings.downloadsOverridden}>
-                    <FolderOpen size={14} aria-hidden />
-                    <span>Choose…</span>
+                  <button className="btn" onClick={chooseFolder} disabled={settings.downloadsOverridden}>
+                    Choose…
                   </button>
                 </div>
               </div>
@@ -416,22 +419,15 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
                     <div className="set-label">Clear browsing data</div>
                     <div className="set-desc">Remove history, cookies, site storage, or cached files from this profile.</div>
                   </div>
-                  <div className="set-seg" role="radiogroup" aria-label="Time range">
-                    {CLEAR_RANGES.map((r) => (
-                      <button
-                        key={r.id}
-                        role="radio"
-                        aria-checked={range === r.id}
-                        className={`set-seg-btn ${range === r.id ? 'on' : ''}`}
-                        onClick={() => {
-                          setRange(r.id)
-                          setClearDone(false)
-                        }}
-                      >
-                        {r.label}
-                      </button>
-                    ))}
-                  </div>
+                  <SegmentedControl
+                    options={CLEAR_RANGES}
+                    value={range}
+                    onChange={(next) => {
+                      setRange(next)
+                      setClearDone(false)
+                    }}
+                    ariaLabel="Time range"
+                  />
                 </div>
 
                 <div className="set-checks">
@@ -506,8 +502,7 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
             <div className="set-card">
               {savedPerms.length === 0 ? (
                 <div className="set-empty">
-                  <Shield size={16} aria-hidden />
-                  <span>No saved site permissions yet. Answers you remember from the permission bar show up here.</span>
+                  No saved site permissions yet. Remembered decisions from permission prompts appear here.
                 </div>
               ) : (
                 <ul className="set-perms">
@@ -520,24 +515,13 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
                         <div className="set-desc">{permissionName(p.permission)}</div>
                       </div>
                       <div className="set-row-actions">
-                        <div className="set-seg compact" role="radiogroup" aria-label={`${permissionName(p.permission)} for ${displayOrigin(p.origin)}`}>
-                          <button
-                            role="radio"
-                            aria-checked={p.allow}
-                            className={`set-seg-btn ${p.allow ? 'on allow' : ''}`}
-                            onClick={() => void api.setSavedPermission(p.origin, p.permission, true)}
-                          >
-                            Allow
-                          </button>
-                          <button
-                            role="radio"
-                            aria-checked={!p.allow}
-                            className={`set-seg-btn ${!p.allow ? 'on block' : ''}`}
-                            onClick={() => void api.setSavedPermission(p.origin, p.permission, false)}
-                          >
-                            Block
-                          </button>
-                        </div>
+                        <SegmentedControl
+                          compact
+                          options={PERM_OPTIONS}
+                          value={p.allow ? 'allow' : 'block'}
+                          onChange={(val) => void api.setSavedPermission(p.origin, p.permission, val === 'allow')}
+                          ariaLabel={`${permissionName(p.permission)} for ${displayOrigin(p.origin)}`}
+                        />
                         <button
                           className="icon-btn small"
                           aria-label={`Remove ${permissionName(p.permission)} permission for ${displayOrigin(p.origin)}`}
