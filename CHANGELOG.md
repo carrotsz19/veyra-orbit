@@ -4,6 +4,8 @@ All notable changes to Veyra Orbit are documented here.
 
 ## Unreleased
 
+## 26.11.6 — 2026-11-22
+
 - Google sign-in: Orbit's sign-in fix now switches on properly from the very first launch, so a brand-new install should sign in first time.
 - The address bar shows the right address when you switch to Settings, History or Bookmarks, and no longer selects the previous tab's address.
 - Adding an extension: the confirmation is now a compact bar (long permission lists scroll inside it), and the Chrome Web Store no longer scrolls sideways.
