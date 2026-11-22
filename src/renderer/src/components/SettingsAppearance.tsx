@@ -689,7 +689,7 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
             <div className="set-desc">
               {systemReducedMotion && app.motion === 'full'
                 ? 'Reduced automatically because your OS prefers reduced motion.'
-                : 'Controls micro-transitions and ambient start-page animation.'}
+                : 'Controls interface transitions and animations.'}
             </div>
           </div>
           <div className="set-seg" role="radiogroup" aria-label="Motion">

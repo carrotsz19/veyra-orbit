@@ -1,7 +1,7 @@
 /* =====================================================================
-   RICH START PAGE (StartPage.tsx & StartCustomizeDrawer.tsx)
-   Pure CSS ambient aurora (transform/opacity only), app-owned custom
-   background with auto readability scrim, modular widgets, and drawer.
+   START PAGE (StartPage.tsx & StartCustomizeDrawer.tsx)
+   Calm plain or subtly tinted surface, app-owned custom background with
+   readability scrim, unboxed Safari-style sections, and customize sheet.
    ===================================================================== */
 
 .sp-root {
@@ -12,95 +12,8 @@
   background: var(--bg-elevated);
   color: var(--label-primary);
 }
-
-/* ---- Ambient aurora gradient (pure CSS transform/opacity only) -------- */
-.sp-ambient {
-  position: absolute;
-  inset: -12%;
-  pointer-events: none;
-  overflow: hidden;
-  z-index: 0;
-}
-.sp-blob {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(76px);
-  opacity: 0.22;
-  will-change: transform, opacity;
-}
-.dark .sp-blob {
-  opacity: 0.20;
-}
-.sp-blob-1 {
-  width: 56%;
-  height: 56%;
-  left: -8%;
-  top: -12%;
-  background: radial-gradient(circle, var(--tint) 0%, transparent 72%);
-  animation: sp-drift-1 26s ease-in-out infinite alternate;
-}
-.sp-blob-2 {
-  width: 52%;
-  height: 52%;
-  right: -10%;
-  top: 10%;
-  background: radial-gradient(circle, var(--ws-accent) 0%, transparent 72%);
-  animation: sp-drift-2 32s ease-in-out infinite alternate;
-}
-.sp-blob-3 {
-  width: 48%;
-  height: 48%;
-  left: 24%;
-  bottom: -16%;
-  background: radial-gradient(circle, var(--positive) 0%, transparent 74%);
-  opacity: 0.14;
-  animation: sp-drift-3 36s ease-in-out infinite alternate;
-}
-
-@keyframes sp-drift-1 {
-  0% {
-    transform: translate3d(0, 0, 0) scale(1);
-    opacity: 0.20;
-  }
-  100% {
-    transform: translate3d(8%, 7%, 0) scale(1.1);
-    opacity: 0.27;
-  }
-}
-@keyframes sp-drift-2 {
-  0% {
-    transform: translate3d(0, 0, 0) scale(1.04);
-    opacity: 0.18;
-  }
-  100% {
-    transform: translate3d(-9%, 8%, 0) scale(0.95);
-    opacity: 0.24;
-  }
-}
-@keyframes sp-drift-3 {
-  0% {
-    transform: translate3d(0, 0, 0) scale(0.96);
-  }
-  100% {
-    transform: translate3d(7%, -8%, 0) scale(1.08);
-  }
-}
-
-/* Pause ambient motion when page hidden, reduced motion, or motion off. */
-.sp-root[data-paused='true'] .sp-blob {
-  animation-play-state: paused !important;
-  will-change: auto;
-}
-html[data-motion='reduced'] .sp-blob,
-html[data-motion='off'] .sp-blob {
-  animation: none !important;
-  will-change: auto;
-}
-@media (prefers-reduced-motion: reduce) {
-  .sp-blob {
-    animation: none !important;
-    will-change: auto;
-  }
+.sp-root[data-bg='tinted'] {
+  background: var(--bg-grouped);
 }
 
 /* ---- Custom image background + auto readability scrim ----------------- */

@@ -138,9 +138,6 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
   const [pageHidden, setPageHidden] = useState(
     () => typeof document !== 'undefined' && (document.hidden || document.visibilityState !== 'visible')
   )
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  )
   const [noteDraft, setNoteDraft] = useState(config.focusNote)
   const [linkEditor, setLinkEditor] = useState<LinkEditorState | null>(null)
   const [dragLinkIdx, setDragLinkIdx] = useState<number | null>(null)
@@ -152,16 +149,12 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
     void api.updateSettings({ startPage: patch })
   }, [])
 
-  // Pause ambient animation and clock work when window/document is hidden or prefers-reduced-motion is active.
+  // Pause clock timer when window/document is hidden.
   useEffect(() => {
     const onVis = (): void => setPageHidden(document.hidden || document.visibilityState !== 'visible')
     document.addEventListener('visibilitychange', onVis)
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const onMotion = (): void => setPrefersReducedMotion(mq.matches)
-    mq.addEventListener('change', onMotion)
     return () => {
       document.removeEventListener('visibilitychange', onVis)
-      mq.removeEventListener('change', onMotion)
     }
   }, [])
 
@@ -715,7 +708,6 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
       className={`sp-root layout-${config.layout} density-${config.density}`}
       data-bg={config.background}
       data-has-photo={hasPhoto ? 'true' : undefined}
-      data-paused={pageHidden || prefersReducedMotion ? 'true' : undefined}
       style={
         {
           '--sp-dim': `${config.backgroundDim / 100}`,
@@ -724,13 +716,6 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
       }
     >
       {/* Background layer */}
-      {config.background === 'ambient' && (
-        <div className="sp-ambient" aria-hidden>
-          <span className="sp-blob sp-blob-1" />
-          <span className="sp-blob sp-blob-2" />
-          <span className="sp-blob sp-blob-3" />
-        </div>
-      )}
       {hasPhoto && bgDataUrl && (
         <div className="sp-photo-wrap" aria-hidden>
           <img className="sp-photo-img" src={bgDataUrl} alt="" decoding="async" />

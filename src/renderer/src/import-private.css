@@ -218,7 +218,7 @@
 }
 
 .start.private-start {
-  background: radial-gradient(circle at 50% 0%, var(--private-surface-soft), transparent 62%);
+  background: color-mix(in srgb, var(--private-surface-soft) 42%, var(--bg-elevated));
 }
 .start-private-emblem {
   width: 44px;

@@ -5,8 +5,6 @@ import {
   GripVertical,
   Image as ImageIcon,
   Palette,
-  Sparkles,
-  Square,
   Trash2,
   X
 } from 'lucide-react'
@@ -34,10 +32,10 @@ interface Props {
   onOpenAppearance: () => void
 }
 
-const BG_OPTIONS: { id: StartBackgroundMode; label: string; icon: typeof Sparkles }[] = [
-  { id: 'ambient', label: 'Ambient', icon: Sparkles },
-  { id: 'solid', label: 'Solid', icon: Square },
-  { id: 'image', label: 'Image', icon: ImageIcon }
+const BG_OPTIONS: { id: StartBackgroundMode; label: string }[] = [
+  { id: 'solid', label: 'Default' },
+  { id: 'tinted', label: 'Tinted' },
+  { id: 'image', label: 'Image' }
 ]
 
 const DENSITY_OPTIONS: { id: UiDensity; label: string }[] = [
@@ -127,7 +125,7 @@ export function StartCustomizeDrawer({
           <section className="sp-dsec">
             <h3>Background</h3>
             <div className="set-seg sp-seg-full" role="radiogroup" aria-label="Start page background">
-              {BG_OPTIONS.map(({ id, label, icon: Icon }) => (
+              {BG_OPTIONS.map(({ id, label }) => (
                 <button
                   key={id}
                   type="button"
@@ -137,7 +135,6 @@ export function StartCustomizeDrawer({
                   className={`set-seg-btn ${config.background === id ? 'on' : ''}`}
                   onClick={() => onPatch({ background: id })}
                 >
-                  <Icon size={13} aria-hidden />
                   <span>{label}</span>
                 </button>
               ))}

@@ -117,6 +117,15 @@ test('sanitizeStartPage and mergeStartPage clamp ranges, sanitize strings, and p
   assert.equal(merged.backgroundDim, 40)
   assert.equal(merged.userName, 'Alex')
   assert.deepEqual(sanitizeStartPage(null), DEFAULT_START_PAGE)
+
+  // Legacy 'ambient' background setting migrates cleanly to the calm default surface.
+  const migrated = sanitizeStartPage({ background: 'ambient' })
+  assert.equal(migrated.background, DEFAULT_START_PAGE.background)
+  assert.equal(migrated.background, 'solid')
+
+  // Calm tinted mode is accepted and preserved.
+  const tinted = sanitizeStartPage({ background: 'tinted' })
+  assert.equal(tinted.background, 'tinted')
 })
 
 test('reorderList and quoteForDate work deterministically', () => {
