@@ -114,6 +114,7 @@ export class Tabs {
   private activeId: number | null = null
   private nextId = 1
   private bounds: Rect | null = null
+  private pageRadius = 10
   /** The tab whose page asked for full screen (a video, a slideshow); its page fills the window. */
   private fullscreenTab: Tab | null = null
   /** True when Orbit put the window into full screen for the page (vs the user pressing F11 first). */
@@ -364,7 +365,7 @@ export class Tabs {
       }
     })
     view.setBackgroundColor('#ffffffff')
-    this.radius(view, 10)
+    this.radius(view, this.pageRadius)
     if (tab.info.muted) view.webContents.setAudioMuted(true)
     attachPageCompat(view.webContents, tab.info.url || tab.pendingUrl)
     this.wire(tab, view)
@@ -1138,6 +1139,13 @@ export class Tabs {
     this.layout()
   }
 
+  setPageRadius(r: number): void {
+    const next = Math.min(24, Math.max(0, Math.round(r)))
+    if (this.pageRadius === next) return
+    this.pageRadius = next
+    this.layout()
+  }
+
   /** A tab shows its page once it has one that loaded; otherwise the UI shows the start or error page. */
   private showsPage(tab: Tab): boolean {
     return !!tab.info.url && !tab.info.error && !isInternalUrl(tab.info.url)
@@ -1164,7 +1172,7 @@ export class Tabs {
           const tab = vis[i]
           const slot = splitLayout.panes[i]
           if (slot && tab.view && !tab.view.webContents.isDestroyed() && this.showsPage(tab)) {
-            desired.set(tab.view, { rect: slot.view, radius: 10 })
+            desired.set(tab.view, { rect: slot.view, radius: this.pageRadius })
           }
         }
       }

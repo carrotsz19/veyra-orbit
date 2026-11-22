@@ -5,7 +5,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import {
-  DEFAULT_SETTINGS,
   mergeSettings,
   sanitizeSettings,
   searchUrlFor,
@@ -19,6 +18,7 @@ export class SettingsStore {
   private readonly defaultDownloadsDir: string
   private readonly envDownloadsDir: string
   private readonly supportsWindowButtons: boolean
+  private readonly supportsAcrylic: boolean
   private activeWindowButtons: WindowButtonsStyle
   private data: Settings
 
@@ -26,12 +26,14 @@ export class SettingsStore {
     file: string,
     defaultDownloadsDir: string,
     envDownloadsDir = '',
-    supportsWindowButtons = process.platform === 'win32'
+    supportsWindowButtons = process.platform === 'win32',
+    supportsAcrylic = false
   ) {
     this.file = file
     this.defaultDownloadsDir = defaultDownloadsDir
     this.envDownloadsDir = envDownloadsDir
     this.supportsWindowButtons = supportsWindowButtons
+    this.supportsAcrylic = supportsAcrylic
     this.data = this.load()
     this.activeWindowButtons = supportsWindowButtons ? this.data.windowButtons : 'windows'
   }
@@ -41,7 +43,7 @@ export class SettingsStore {
       const raw = JSON.parse(readFileSync(this.file, 'utf8')) as unknown
       return sanitizeSettings(raw)
     } catch {
-      return { ...DEFAULT_SETTINGS }
+      return sanitizeSettings(null)
     }
   }
 
@@ -55,7 +57,7 @@ export class SettingsStore {
   }
 
   get(): Settings {
-    return { ...this.data }
+    return { ...this.data, appearance: { ...this.data.appearance } }
   }
 
   searchUrl(): string {
@@ -70,13 +72,19 @@ export class SettingsStore {
     return this.activeWindowButtons
   }
 
+  acrylicSupported(): boolean {
+    return this.supportsAcrylic
+  }
+
   view(): SettingsView {
     return {
       ...this.data,
+      appearance: { ...this.data.appearance },
       effectiveDownloadsDir: this.effectiveDownloadsDir(),
       downloadsOverridden: !!this.envDownloadsDir,
       activeWindowButtons: this.activeWindowButtons,
-      supportsWindowButtons: this.supportsWindowButtons
+      supportsWindowButtons: this.supportsWindowButtons,
+      supportsAcrylic: this.supportsAcrylic
     }
   }
 

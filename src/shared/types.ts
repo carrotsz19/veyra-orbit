@@ -110,15 +110,28 @@ export interface Bookmark {
 
 export type { Suggestion } from './suggest'
 export type {
+  AppearancePatch,
+  AppearanceSettings,
   NewTabBehavior,
   SearchEngineId,
   Settings,
+  SettingsPatch,
   SettingsView,
   SleepMinutes,
   StartupBehavior,
   ThemeSource,
   WindowButtonsStyle
 } from './settings'
+export type {
+  AddressBarAlign,
+  MenuBarStyle,
+  MotionMode,
+  ResolvedAppearance,
+  SidebarSide,
+  TabCloseButtonsMode,
+  ThemePresetId,
+  UiDensity
+} from './appearance'
 export type { UpdateState, UpdateStatus } from './updates'
 export type { WorkspaceAccentId, WorkspaceCreateInput, WorkspaceIconId, WorkspaceInfo, WorkspaceUpdateInput } from './workspaces'
 export type { CompactRevealState } from './compact'
@@ -171,6 +184,7 @@ export interface MenuBridgeApi {
 export interface VeyraMenuWindowApi {
   ready(): void
   onRender(cb: (spec: import('./menu').MenuPopupSpec) => void): () => void
+  onAppearance(cb: (tokens: import('./appearance').ResolvedAppearance) => void): () => void
   size(width: number, height: number): void
   pick(id: string): void
   step(by: -1 | 1): void
@@ -182,6 +196,7 @@ export interface VeyraPaletteWindowApi {
   ready(): void
   onOpen(cb: (init: import('./palette').PaletteOpenState) => void): () => void
   onResults(cb: (payload: import('./palette').PaletteResultsPayload) => void): () => void
+  onAppearance(cb: (tokens: import('./appearance').ResolvedAppearance) => void): () => void
   query(text: string): void
   pick(id: string, openInNewTab: boolean): void
   submitText(text: string, openInNewTab: boolean): void
@@ -193,6 +208,7 @@ export interface VeyraPaletteWindowApi {
 export interface VeyraPeekWindowApi {
   ready(): void
   onState(cb: (state: import('./peek').PeekState) => void): () => void
+  onAppearance(cb: (tokens: import('./appearance').ResolvedAppearance) => void): () => void
   action(act: import('./peek').PeekAction): void
 }
 
@@ -224,6 +240,7 @@ export interface VeyraApi {
   onPermission(cb: (asks: PermissionAsk[]) => void): () => void
   onExternalApps(cb: (asks: ExternalAppAsk[]) => void): () => void
   onSettings(cb: (s: import('./settings').SettingsView) => void): () => void
+  onAppearance(cb: (tokens: import('./appearance').ResolvedAppearance) => void): () => void
   onSavedPermissions(cb: (list: SitePermission[]) => void): () => void
   onDownloads(cb: (items: DownloadInfo[]) => void): () => void
   onToggleDownloads(cb: () => void): () => void
@@ -279,8 +296,10 @@ export interface VeyraApi {
   showDownload(id: number): void
   clearFinishedDownloads(): void
   getSettings(): Promise<import('./settings').SettingsView | null>
-  updateSettings(patch: Partial<import('./settings').Settings>): Promise<import('./settings').SettingsView | null>
+  updateSettings(patch: import('./settings').SettingsPatch): Promise<import('./settings').SettingsView | null>
   chooseDownloadsDir(): Promise<import('./settings').SettingsView | null>
+  exportAppearanceTheme(): Promise<{ ok: boolean; canceled?: boolean; error?: string }>
+  importAppearanceTheme(): Promise<{ ok: boolean; canceled?: boolean; settings?: import('./settings').SettingsView; error?: string }>
   savedPermissions(): Promise<SitePermission[]>
   setSavedPermission(origin: string, permission: string, allow: boolean): Promise<boolean>
   removeSavedPermission(origin: string, permission: string): Promise<void>

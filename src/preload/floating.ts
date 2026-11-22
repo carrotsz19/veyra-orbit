@@ -1,7 +1,7 @@
 // Minimal preload bridge for the floating menu window only.
 // Exposes no Node APIs, no browser state, and no general IPC channels.
 import { contextBridge, ipcRenderer } from 'electron'
-import type { MenuPopupSpec, VeyraMenuWindowApi } from '../shared/types'
+import type { MenuPopupSpec, ResolvedAppearance, VeyraMenuWindowApi } from '../shared/types'
 
 const api: VeyraMenuWindowApi = {
   ready: () => ipcRenderer.send('menu:ready'),
@@ -9,6 +9,11 @@ const api: VeyraMenuWindowApi = {
     const h = (_e: Electron.IpcRendererEvent, spec: MenuPopupSpec): void => cb(spec)
     ipcRenderer.on('menu:render', h)
     return () => ipcRenderer.off('menu:render', h)
+  },
+  onAppearance: (cb) => {
+    const h = (_e: Electron.IpcRendererEvent, tokens: ResolvedAppearance): void => cb(tokens)
+    ipcRenderer.on('appearance:tokens', h)
+    return () => ipcRenderer.off('appearance:tokens', h)
   },
   size: (width, height) => ipcRenderer.send('menu:size', width, height),
   pick: (id) => ipcRenderer.send('menu:pick', id),

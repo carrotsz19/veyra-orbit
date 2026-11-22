@@ -165,10 +165,18 @@ export function TitleBar({
 
   const activeWindowButtons: WindowButtonsStyle = settings?.activeWindowButtons ?? INITIAL_BUTTONS
   const isWin = INITIAL_PLATFORM === 'win32'
-  const collapsed = shouldCollapseMenus(windowWidth, {
-    windowButtons: activeWindowButtons,
-    isDev: __CHANNEL__ === 'dev'
-  })
+  const appCfg = settings?.appearance
+  const menuStyle = appCfg?.menuBarStyle ?? 'full'
+  const addressBarAlign = appCfg?.addressBarAlign ?? 'center'
+  const showNavButtons = appCfg?.showNavButtons ?? true
+  const showBookmarkStar = appCfg?.showBookmarkStar ?? true
+  const showExtensions = appCfg?.showExtensions ?? true
+  const collapsed =
+    menuStyle === 'hamburger' ||
+    shouldCollapseMenus(windowWidth, {
+      windowButtons: activeWindowButtons,
+      isDev: __CHANNEL__ === 'dev'
+    })
 
   useEffect(() => {
     const onResize = (): void => setWindowWidth(window.innerWidth)
@@ -589,7 +597,8 @@ export function TitleBar({
   const titlebarClasses = [
     'titlebar',
     isWin && activeWindowButtons === 'windows' && !inCompactPanel ? 'native-buttons' : '',
-    isWin && activeWindowButtons === 'dots' ? 'dots-buttons' : ''
+    isWin && activeWindowButtons === 'dots' ? 'dots-buttons' : '',
+    addressBarAlign === 'left' ? 'addr-left' : ''
   ]
     .filter(Boolean)
     .join(' ')
@@ -667,47 +676,49 @@ export function TitleBar({
         </nav>
       </div>
 
-      <div className="tb-drag" />
+      {addressBarAlign === 'center' && <div className="tb-drag" />}
 
       <div className="tb-center">
-        <div className="nav">
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label="Back"
-            title="Back (Alt+Left)"
-            disabled={!tab?.canGoBack}
-            onClick={() => api.back()}
-          >
-            <ArrowLeft size={15} strokeWidth={1.75} />
-          </button>
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label="Forward"
-            title="Forward (Alt+Right)"
-            disabled={!tab?.canGoForward}
-            onClick={() => api.forward()}
-          >
-            <ArrowRight size={15} strokeWidth={1.75} />
-          </button>
-          {tab?.loading ? (
-            <button type="button" className="icon-btn" aria-label="Stop" title="Stop" onClick={() => api.stop()}>
-              <X size={15} strokeWidth={1.75} />
-            </button>
-          ) : (
+        {showNavButtons && (
+          <div className="nav">
             <button
               type="button"
               className="icon-btn"
-              aria-label="Reload"
-              title="Reload (Ctrl+R)"
-              disabled={!tab?.url || isInternalUrl(tab.url)}
-              onClick={() => api.reload()}
+              aria-label="Back"
+              title="Back (Alt+Left)"
+              disabled={!tab?.canGoBack}
+              onClick={() => api.back()}
             >
-              <RotateCw size={14} strokeWidth={1.75} />
+              <ArrowLeft size={15} strokeWidth={1.75} />
             </button>
-          )}
-        </div>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Forward"
+              title="Forward (Alt+Right)"
+              disabled={!tab?.canGoForward}
+              onClick={() => api.forward()}
+            >
+              <ArrowRight size={15} strokeWidth={1.75} />
+            </button>
+            {tab?.loading ? (
+              <button type="button" className="icon-btn" aria-label="Stop" title="Stop" onClick={() => api.stop()}>
+                <X size={15} strokeWidth={1.75} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="Reload"
+                title="Reload (Ctrl+R)"
+                disabled={!tab?.url || isInternalUrl(tab.url)}
+                onClick={() => api.reload()}
+              >
+                <RotateCw size={14} strokeWidth={1.75} />
+              </button>
+            )}
+          </div>
+        )}
 
         <Omnibox
           tab={tab}
@@ -715,6 +726,7 @@ export function TitleBar({
           onEditingChange={onEditingChange}
           onOpenChange={onOmniboxOpenChange}
           useOverlay={useOmniboxOverlay}
+          showStar={showBookmarkStar}
         />
         {state.workspaces.find((w) => w.id === state.activeWorkspaceId)?.private && (
           <span className="private-pill" title="Private workspace — history, cookies and site data are not saved">
@@ -733,13 +745,15 @@ export function TitleBar({
             {tab.zoom}%
           </button>
         )}
-        <ExtensionToolbar
-          actions={extActions}
-          compact={collapsed}
-          overflowOpen={openTarget === 'extensions'}
-          puzzleBtnRef={(el) => void btnRefs.current.set('extensions', el)}
-          onToggleOverflow={(e) => handleMenuBtnMouseDown(e, 'extensions')}
-        />
+        {showExtensions && (
+          <ExtensionToolbar
+            actions={extActions}
+            compact={collapsed}
+            overflowOpen={openTarget === 'extensions'}
+            puzzleBtnRef={(el) => void btnRefs.current.set('extensions', el)}
+            onToggleOverflow={(e) => handleMenuBtnMouseDown(e, 'extensions')}
+          />
+        )}
       </div>
 
       <div className="tb-drag" />
