@@ -653,7 +653,8 @@ function createWindow(): void {
     minHeight: 480,
     show: false,
     title: APP_NAME,
-    icon: join(__dirname, `../../resources/${__CHANNEL__ === 'dev' ? 'icon-dev.png' : 'icon.png'}`),
+    // Windows picks the right hand-tuned size from the .ico; a 1024 px PNG gets shrunk badly.
+    icon: join(__dirname, `../../resources/${__CHANNEL__ === 'dev' ? 'icon-dev' : 'icon'}.${isWin ? 'ico' : 'png'}`),
     autoHideMenuBar: true,
     ...(acrylic ? { backgroundColor: '#00000000', backgroundMaterial: 'acrylic' as const } : { backgroundColor: nativeTheme.shouldUseDarkColors ? '#15140f' : '#f3f1ec' }),
     ...(isWin
