@@ -39,9 +39,13 @@ function roundMb(kb: number): number {
   return Math.round((kb / 1024) * 10) / 10
 }
 
+/**
+ * Prefers private memory (what the process alone holds, like Chrome's "memory footprint").
+ * Working set also counts shared pages once per process, so summing it overstates the total.
+ */
 function processKb(p: ProcessMetricInput): number {
-  if (Number.isFinite(p.workingSetKB) && p.workingSetKB > 0) return p.workingSetKB
   if (p.privateKB !== undefined && Number.isFinite(p.privateKB) && p.privateKB > 0) return p.privateKB
+  if (Number.isFinite(p.workingSetKB) && p.workingSetKB > 0) return p.workingSetKB
   return 0
 }
 

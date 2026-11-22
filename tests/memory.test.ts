@@ -42,7 +42,7 @@ test('computeMemorySnapshot splits shared tab PIDs, attributes extensions and UI
   }
 })
 
-test('computeMemorySnapshot falls back to privateKB when workingSetKB is 0 and avoids double-counting shared tab/ext PIDs', () => {
+test('computeMemorySnapshot prefers privateKB, falls back to workingSetKB, and avoids double-counting shared tab/ext PIDs', () => {
   const snap = computeMemorySnapshot(
     [
       { pid: 10, workingSetKB: 0, privateKB: 20_480 }, // 20 MB UI
@@ -56,4 +56,9 @@ test('computeMemorySnapshot falls back to privateKB when workingSetKB is 0 and a
   assert.equal(snap.uiMB, 20)
   assert.equal(snap.extensionsMB, 0)
   assert.equal(snap.tabs[0].memoryMB, 40)
+})
+
+test('computeMemorySnapshot uses privateKB over a larger workingSetKB', () => {
+  const snap = computeMemorySnapshot([{ pid: 10, workingSetKB: 102_400, privateKB: 30_720 }], [], [], 0)
+  assert.equal(snap.totalMB, 30)
 })
