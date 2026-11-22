@@ -11,7 +11,14 @@ import type {
   UpdateState,
   WindowState
 } from '@shared/types'
-import { DEFAULT_SPLIT_RATIO, computeSplitLayout, findSplitGroup, ratioFromPointer } from '@shared/split'
+import {
+  DEFAULT_SPLIT_RATIO,
+  computeSplitLayout,
+  dropPlacementFromPoint,
+  findSplitGroup,
+  ratioFromPointer,
+  type SplitPlacement
+} from '@shared/split'
 import { APPEARANCE_LIMITS, DEFAULT_APPEARANCE } from '@shared/appearance'
 import './library.css'
 import './settings.css'
@@ -86,7 +93,9 @@ export function App(): React.JSX.Element {
   const [shots, setShots] = useState<Record<number, string> | null>(null)
   const [pageSize, setPageSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 })
   const [dragTabId, setDragTabId] = useState<number | null>(null)
-  const [dropSide, setDropSide] = useState<'left' | 'right' | null>(null)
+  const [dropSide, setDropSide] = useState<SplitPlacement | null>(null)
+  const [compactDragTabId, setCompactDragTabId] = useState<number | null>(null)
+  const [compactDropSide, setCompactDropSide] = useState<SplitPlacement | null>(null)
   const [resizingKind, setResizingKind] = useState<'col' | 'row' | null>(null)
   const [resizingSidebar, setResizingSidebar] = useState(false)
   const pageRef = useRef<HTMLDivElement>(null)
@@ -96,8 +105,10 @@ export function App(): React.JSX.Element {
   downloadsOpenRef.current = downloadsOpen
   const dragOverlayActive = useRef(false)
   const dragTabRef = useRef<number | null>(null)
+  const compactDragRef = useRef<number | null>(null)
   const lastTokensRef = useRef<import('@shared/types').ResolvedAppearance | null>(null)
   dragTabRef.current = dragTabId
+  compactDragRef.current = compactDragTabId
 
   useEffect(() => {
     const mqMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -154,6 +165,26 @@ export function App(): React.JSX.Element {
       }),
       api.onFindClose(() => setFindOpen(false)),
       api.onPageFullscreen(setPageFullscreen),
+      api.onCompactTabDrag((drag) => {
+        if (drag.active && drag.tabId !== null) {
+          compactDragRef.current = drag.tabId
+          setCompactDragTabId(drag.tabId)
+          setCompactDropSide(drag.placement)
+          if (drag.shots !== undefined) {
+            setShots(drag.shots)
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => {
+                if (compactDragRef.current !== null) api.hidePageForOverlay()
+              })
+            )
+          }
+        } else {
+          compactDragRef.current = null
+          setCompactDragTabId(null)
+          setCompactDropSide(null)
+          setShots(null)
+        }
+      }),
       api.onNewWorkspaceRequest(() => setNewWorkspaceTick((n) => n + 1)),
       api.onOpenSettingsSection((sectionId) => {
         sessionStorage.setItem('orbit.settingsSection', sectionId)
@@ -262,7 +293,7 @@ export function App(): React.JSX.Element {
     return computeSplitLayout(
       { x: 0, y: 0, width: pageSize.width, height: pageSize.height },
       visiblePanes.length,
-      { colRatio: activeSplit.colRatio, rowRatio: activeSplit.rowRatio }
+      { colRatio: activeSplit.colRatio, rowRatio: activeSplit.rowRatio, orientation: activeSplit.orientation }
     )
   }, [isSplitView, activeSplit, pageSize.width, pageSize.height, visiblePanes.length])
 
@@ -309,30 +340,57 @@ export function App(): React.JSX.Element {
     window.addEventListener('pointercancel', onUp)
   }
 
+  const hasOtherUnpinnedTab = useMemo(
+    () => state.tabs.some((t) => !t.pinned && t.id !== state.activeId),
+    [state.tabs, state.activeId]
+  )
+
   const handlePageDragOver = (e: React.DragEvent<HTMLDivElement>): void => {
-    if (dragTabId === null || state.activeId === null) return
-    if (dragTabId === state.activeId && !activeSplit) return
+    const effectiveDragId = dragTabId ?? compactDragTabId
+    if (effectiveDragId === null || state.activeId === null) return
+    if (effectiveDragId === state.activeId && !activeSplit && !hasOtherUnpinnedTab) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
     const rect = e.currentTarget.getBoundingClientRect()
-    const side: 'left' | 'right' = e.clientX - rect.left < rect.width / 2 ? 'left' : 'right'
-    if (side !== dropSide) setDropSide(side)
+    const side = dropPlacementFromPoint(e.clientX, e.clientY, {
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height
+    })
+    if (dragTabId !== null && side !== dropSide) setDropSide(side)
+    if (compactDragTabId !== null && side !== compactDropSide) setCompactDropSide(side)
   }
 
   const handlePageDrop = (e: React.DragEvent<HTMLDivElement>): void => {
     e.preventDefault()
     const raw = e.dataTransfer.getData('text/x-orbit-tab')
-    const droppedId = dragTabId ?? (raw ? Number(raw) : null)
-    const side = dropSide ?? 'right'
+    const droppedId = dragTabId ?? compactDragTabId ?? (raw ? Number(raw) : null)
+    const rect = e.currentTarget.getBoundingClientRect()
+    const fallbackSide = dropPlacementFromPoint(e.clientX, e.clientY, {
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height
+    })
+    const side: SplitPlacement = dropSide ?? compactDropSide ?? fallbackSide ?? 'right'
     setDropSide(null)
     setDragTabId(null)
+    setCompactDropSide(null)
+    setCompactDragTabId(null)
     if (droppedId === null || !Number.isFinite(droppedId) || state.activeId === null) return
-    if (droppedId === state.activeId) {
-      if (activeSplit) api.swapSplit(activeSplit.id)
-      return
-    }
-    api.splitWith(state.activeId, droppedId, side)
+    api.splitDrop(droppedId, side)
   }
+
+  const activeDropSide = dragTabId !== null ? dropSide : compactDragTabId !== null ? compactDropSide : null
+  const dropZoneLabel =
+    activeDropSide === 'left'
+      ? 'Split left'
+      : activeDropSide === 'right'
+        ? 'Split right'
+        : activeDropSide === 'top'
+          ? 'Split top'
+          : 'Split bottom'
 
   const startSidebarResize = (e: React.PointerEvent<HTMLDivElement>): void => {
     if (e.button !== 0) return
@@ -536,10 +594,10 @@ export function App(): React.JSX.Element {
             active && renderTabSurface(active, settings, update, downloads, () => handleOpenSettingsSection('set-appearance'), shots?.[active.id], !!activeWorkspace?.private)
           )}
 
-          {dragTabId !== null && dropSide && (
-            <div className={`split-drop-zone ${dropSide}`} aria-hidden>
+          {activeDropSide && (
+            <div className={`split-drop-zone ${activeDropSide}`} aria-hidden>
               <div className="split-drop-card">
-                <span>{dropSide === 'left' ? 'Split left' : 'Split right'}</span>
+                <span>{dropZoneLabel}</span>
               </div>
             </div>
           )}

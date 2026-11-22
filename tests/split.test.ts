@@ -10,10 +10,15 @@ import {
   clampSplitRatio,
   computeSplitLayout,
   dissolveSplitGroup,
+  dropPlacementFromPoint,
+  isSplitOrientation,
+  isSplitPlacement,
   joinSplitGroup,
   keepSplitGroupsContiguous,
+  pickRecentSplitPartner,
   ratioFromPointer,
   removeTabFromSplit,
+  rotateSplitGroup,
   updateSplitGroupRatio,
   type SplitGroup
 } from '../src/shared/split.ts'
@@ -131,4 +136,85 @@ test('keepSplitGroupsContiguous groups split tabs adjacent to each other', () =>
     ordered.map((t) => t.id),
     [1, 3, 2, 4]
   )
+})
+
+test('computeSplitLayout places 2 stacked panes top/bottom with horizontal divider and rowRatio', () => {
+  const box = { x: 100, y: 40, width: 1000, height: 608 }
+  const layout = computeSplitLayout(box, 2, { rowRatio: 0.4, orientation: 'stacked' })
+  assert.equal(layout.panes.length, 2)
+  assert.equal(layout.dividers.length, 1)
+
+  const [top, bottom] = layout.panes
+  const [div] = layout.dividers
+  // Usable height is 608 - 8 = 600 -> 240 + 360
+  assert.deepEqual(top.frame, { x: 100, y: 40, width: 1000, height: 240 })
+  assert.deepEqual(bottom.frame, { x: 100, y: 288, width: 1000, height: 360 })
+  assert.equal(div.kind, 'row')
+  assert.equal(div.orientation, 'horizontal')
+  assert.deepEqual(div.rect, { x: 100, y: 280, width: 1000, height: SPLIT_GAP })
+  assert.deepEqual(top.view, {
+    x: 100 + SPLIT_RING_INSET,
+    y: 40 + SPLIT_RING_INSET,
+    width: 1000 - SPLIT_RING_INSET * 2,
+    height: 240 - SPLIT_RING_INSET * 2
+  })
+})
+
+test('dropPlacementFromPoint picks whichever edge the pointer is closest to', () => {
+  const rect = { x: 200, y: 50, width: 1000, height: 600 }
+  assert.equal(dropPlacementFromPoint(250, 350, rect), 'left')
+  assert.equal(dropPlacementFromPoint(1150, 350, rect), 'right')
+  assert.equal(dropPlacementFromPoint(700, 80, rect), 'top')
+  assert.equal(dropPlacementFromPoint(700, 620, rect), 'bottom')
+  assert.equal(dropPlacementFromPoint(100, 350, rect), null)
+  assert.equal(dropPlacementFromPoint(700, 700, rect), null)
+})
+
+test('joinSplitGroup and rotateSplitGroup handle top/bottom placement and orientation', () => {
+  assert.equal(isSplitPlacement('top'), true)
+  assert.equal(isSplitPlacement('bottom'), true)
+  assert.equal(isSplitPlacement('center'), false)
+  assert.equal(isSplitOrientation('stacked'), true)
+  assert.equal(isSplitOrientation('diagonal'), false)
+
+  const topJoin = joinSplitGroup([], 1, 2, 'top', () => 'g1')
+  assert.deepEqual(topJoin.group?.tabIds, [2, 1])
+  assert.equal(topJoin.group?.orientation, 'stacked')
+
+  const botJoin = joinSplitGroup([], 1, 2, 'bottom', () => 'g1')
+  assert.deepEqual(botJoin.group?.tabIds, [1, 2])
+  assert.equal(botJoin.group?.orientation, 'stacked')
+
+  // Rotating toggles stacked <-> side-by-side for 2-pane splits
+  const rotated = rotateSplitGroup(botJoin.groups, 'g1')
+  assert.equal(rotated[0].orientation, 'side-by-side')
+  const rotatedBack = rotateSplitGroup(rotated, 'g1')
+  assert.equal(rotatedBack[0].orientation, 'stacked')
+
+  // Re-dropping an existing split member onto 'left' switches orientation and order
+  const movedLeft = joinSplitGroup(botJoin.groups, 1, 2, 'left')
+  assert.deepEqual(movedLeft.group?.tabIds, [2, 1])
+  assert.equal(movedLeft.group?.orientation, 'side-by-side')
+})
+
+test('pickRecentSplitPartner picks highest lastActiveAt other non-pinned tab in same workspace', () => {
+  const tabs = [
+    { id: 1, workspaceId: 'personal', pinned: false, lastActiveAt: 1000 },
+    { id: 2, workspaceId: 'personal', pinned: false, lastActiveAt: 500 },
+    { id: 3, workspaceId: 'personal', pinned: false, lastActiveAt: 900 },
+    { id: 4, workspaceId: 'personal', pinned: true, lastActiveAt: 2000 },
+    { id: 5, workspaceId: 'work', pinned: false, lastActiveAt: 3000 }
+  ]
+  // Dragging active tab 1 pairs with tab 3 (highest non-pinned in same workspace, ignoring pinned 4 & other ws 5)
+  assert.equal(pickRecentSplitPartner(tabs, 1, 'personal'), 3)
+
+  // Only pinned other tabs in workspace -> returns null (never unexpectedly unpins)
+  const pinnedOnly = [
+    { id: 1, workspaceId: 'personal', pinned: false, lastActiveAt: 1000 },
+    { id: 2, workspaceId: 'personal', pinned: true, lastActiveAt: 900 }
+  ]
+  assert.equal(pickRecentSplitPartner(pinnedOnly, 1, 'personal'), null)
+
+  // Single tab in workspace -> returns null
+  assert.equal(pickRecentSplitPartner([{ id: 1, workspaceId: 'personal', pinned: false, lastActiveAt: 1000 }], 1, 'personal'), null)
 })

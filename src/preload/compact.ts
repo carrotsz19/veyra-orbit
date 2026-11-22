@@ -12,6 +12,8 @@ import type {
   Rect,
   ResolvedAppearance,
   SettingsView,
+  SplitOrientation,
+  SplitPlacement,
   UpdateState,
   VeyraCompactPanelApi,
   WindowState,
@@ -52,10 +54,14 @@ const uiSubset = {
   toggleMute: (id: number) => ipcRenderer.send('tab:mute', id),
   sleepTab: (id: number) => ipcRenderer.send('tab:sleep', id),
   tabMenu: (id: number) => ipcRenderer.send('tab:menu', id),
-  splitWith: (anchorId: number, otherId: number, placement?: 'left' | 'right') =>
+  splitWith: (anchorId: number, otherId: number, placement?: SplitPlacement) =>
     ipcRenderer.send('split:with', anchorId, otherId, placement),
-  splitWithNext: () => ipcRenderer.send('split:next'),
+  splitDrop: (draggedTabId: number, placement: SplitPlacement) =>
+    ipcRenderer.send('split:drop', draggedTabId, placement),
+  splitWithNext: (orientation?: SplitOrientation) => ipcRenderer.send('split:next', orientation),
+  rotateSplit: (groupId?: string) => ipcRenderer.send('split:rotate', groupId),
   unsplit: (tabId?: number) => ipcRenderer.send('split:unsplit', tabId),
+  swapSplit: (groupId: string) => ipcRenderer.send('split:swap', groupId),
   switchWorkspace: (id: string) => ipcRenderer.send('workspace:switch', id),
   createWorkspace: (input: WorkspaceCreateInput) => ipcRenderer.invoke('workspace:create', input),
   updateWorkspace: (id: string, patch: WorkspaceUpdateInput) => ipcRenderer.invoke('workspace:update', id, patch),
@@ -112,7 +118,9 @@ const panelApi: VeyraCompactPanelApi = {
   setOmniboxOpen: (open) => ipcRenderer.send('compact-panel:omnibox-open', open),
   startWindowDrag: () => ipcRenderer.send('compact-panel:drag-start'),
   moveWindowDrag: () => ipcRenderer.send('compact-panel:drag-move'),
-  endWindowDrag: () => ipcRenderer.send('compact-panel:drag-end')
+  endWindowDrag: () => ipcRenderer.send('compact-panel:drag-end'),
+  startTabDrag: (tabId: number) => ipcRenderer.send('compact-panel:tab-drag-start', tabId),
+  endTabDrag: () => ipcRenderer.send('compact-panel:tab-drag-end')
 }
 
 contextBridge.exposeInMainWorld('veyra', uiSubset)

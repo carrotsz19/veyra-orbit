@@ -35,6 +35,7 @@ import {
   type PaletteMode
 } from '../shared/palette'
 import { PEEK_TAB_ID, isPeekAction } from '../shared/peek'
+import { dropPlacementFromPoint, isSplitOrientation, isSplitPlacement, type SplitPlacement } from '../shared/split'
 import { shouldLoadExtensionsForPartition } from '../shared/extensions'
 import {
   DEFAULT_APPEARANCE,
@@ -151,6 +152,12 @@ let compactDrag: {
   startBounds: WindowBounds
   wasMaximized: boolean
   moved: boolean
+} | null = null
+let compactTabDrag: {
+  tabId: number
+  placement: SplitPlacement | null
+  timer: NodeJS.Timeout | null
+  overlayRequested: boolean
 } | null = null
 let lastNormalBounds: WindowBounds = { x: 100, y: 100, width: 1360, height: 860 }
 let lastPolledCursor: { x: number; y: number } | null = null
@@ -435,9 +442,59 @@ function startCompactPoller(): void {
   }
 }
 
+function resolveCompactTabDragPlacement(): SplitPlacement | null {
+  if (!win || win.isDestroyed() || !tabs) return null
+  const pageRect = tabs.currentBounds()
+  if (!pageRect) return null
+  const cursor = screen.getCursorScreenPoint()
+  const sideBounds = compactSidebar?.getBounds()
+  if (
+    sideBounds &&
+    cursor.x >= sideBounds.x &&
+    cursor.x <= sideBounds.x + sideBounds.width &&
+    cursor.y >= sideBounds.y &&
+    cursor.y <= sideBounds.y + sideBounds.height
+  ) {
+    return null
+  }
+  const cb = win.getContentBounds()
+  const z = win.webContents.getZoomFactor() || 1
+  const cssX = (cursor.x - cb.x) / z
+  const cssY = (cursor.y - cb.y) / z
+  return dropPlacementFromPoint(cssX, cssY, pageRect)
+}
+
+function finishCompactTabDrag(commitDrop: boolean): void {
+  const drag = compactTabDrag
+  if (!drag) return
+  compactTabDrag = null
+  if (drag.timer) {
+    clearInterval(drag.timer)
+    drag.timer = null
+  }
+  const finalPlacement = commitDrop ? (resolveCompactTabDragPlacement() ?? drag.placement) : null
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('compact:tab-drag', { active: false, tabId: null, placement: null })
+  }
+  if (drag.overlayRequested) {
+    void tabs?.setOverlay(false)
+  }
+  if (finalPlacement && tabs) {
+    tabs.splitFromDrop(drag.tabId, finalPlacement)
+    if (settings?.get().compactMode) {
+      compactHover.sidebar = false
+      compactPins.sidebar = false
+      compactState = { ...compactState, sidebar: false }
+      broadcastUi('compact:state', compactState)
+      syncCompactPanels()
+    }
+  }
+}
+
 function syncCompactMode(): void {
   const enabled = !!settings?.get().compactMode
   if (!enabled) {
+    finishCompactTabDrag(false)
     stopCompactPoller()
     compactDrag = null
     compactHover = { sidebar: false, toolbar: false }
@@ -1170,6 +1227,7 @@ function createWindow(): void {
   })
   w.on('close', () => t.save())
   w.on('closed', () => {
+    finishCompactTabDrag(false)
     if (paletteWarmTimer) {
       clearTimeout(paletteWarmTimer)
       paletteWarmTimer = null
@@ -1430,6 +1488,37 @@ ipcMain.on('compact-panel:drag-end', (e) => {
   sendWinState()
   if (settings?.get().compactMode) pollCompactCursor()
 })
+ipcMain.on('compact-panel:tab-drag-start', (e, tabId: unknown) => {
+  if (!compactSidebar?.isSender(e.sender) || !num(tabId) || !tabs || !win || win.isDestroyed()) return
+  finishCompactTabDrag(false)
+  if (!tabs.canDropSplit(tabId)) return
+  const dragState = { tabId, placement: null as SplitPlacement | null, timer: null as NodeJS.Timeout | null, overlayRequested: true }
+  compactTabDrag = dragState
+  void tabs.setOverlay(true).then((shots) => {
+    if (compactTabDrag !== dragState || !win || win.isDestroyed()) {
+      if (compactTabDrag !== dragState) void tabs?.setOverlay(false)
+      return
+    }
+    win.webContents.send('compact:tab-drag', {
+      active: true,
+      tabId,
+      placement: dragState.placement,
+      shots
+    })
+  })
+  dragState.timer = setInterval(() => {
+    if (compactTabDrag !== dragState || !win || win.isDestroyed()) return
+    const next = resolveCompactTabDragPlacement()
+    if (next !== dragState.placement) {
+      dragState.placement = next
+      win.webContents.send('compact:tab-drag', { active: true, tabId, placement: next })
+    }
+  }, 25)
+})
+ipcMain.on('compact-panel:tab-drag-end', (e) => {
+  if (!compactSidebar?.isSender(e.sender)) return
+  finishCompactTabDrag(true)
+})
 
 onSurface('tab:new', (t, input?: unknown) => {
   if (input === undefined && settings?.get().newTabBehavior === 'command-bar') {
@@ -1602,20 +1691,34 @@ ipcMain.on('peek:action', (e, act: unknown) => {
 })
 onSurface('tab:mute', (t, id: unknown) => num(id) && t.toggleMute(id))
 onSurface('tab:sleep', (t, id: unknown) => num(id) && t.sleepTab(id, true))
-onSurface('tab:menu', (t, id: unknown) => num(id) && t.tabMenu(id))
+ipcMain.on('tab:menu', (e, id: unknown) => {
+  if (!fromUiSurface(e) || !tabs || !num(id)) return
+  const popupWin = BrowserWindow.fromWebContents(e.sender) ?? undefined
+  tabs.tabMenu(id, popupWin)
+})
 onSurface('split:with', (t, anchorId: unknown, otherId: unknown, placement?: unknown) => {
   if (!num(anchorId) || !num(otherId)) return
-  const side = placement === 'left' ? 'left' : 'right'
+  const side: SplitPlacement = isSplitPlacement(placement) ? placement : 'right'
   t.splitTabs(anchorId, otherId, side, otherId)
 })
-onSurface('split:next', (t) => t.splitWithNext())
+onSurface('split:drop', (t, draggedTabId: unknown, placement: unknown) => {
+  if (!num(draggedTabId) || !isSplitPlacement(placement)) return
+  finishCompactTabDrag(false)
+  t.splitFromDrop(draggedTabId, placement)
+})
+onSurface('split:next', (t, orientation?: unknown) => {
+  t.splitWithNext(isSplitOrientation(orientation) ? orientation : 'side-by-side')
+})
+onSurface('split:rotate', (t, groupId?: unknown) => {
+  t.rotateSplit(str(groupId) ? groupId : undefined)
+})
 onSurface('split:unsplit', (t, tabId?: unknown) => t.unsplit(num(tabId) ? tabId : undefined))
 on('split:ratio', (t, groupId: unknown, kind: unknown, ratio: unknown) => {
   if (str(groupId) && (kind === 'col' || kind === 'row') && num(ratio)) {
     t.setSplitRatio(groupId, kind, ratio)
   }
 })
-on('split:swap', (t, groupId: unknown) => {
+onSurface('split:swap', (t, groupId: unknown) => {
   if (str(groupId)) t.swapSplit(groupId)
 })
 onSurface('workspace:switch', (t, id: unknown) => str(id) && t.switchWorkspace(id))

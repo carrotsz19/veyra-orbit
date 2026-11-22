@@ -30,9 +30,13 @@ import {
   findSplitGroup,
   joinSplitGroup,
   keepSplitGroupsContiguous,
+  pickRecentSplitPartner,
   removeTabFromSplit,
+  rotateSplitGroup,
   updateSplitGroupRatio,
-  type SplitGroup
+  type SplitGroup,
+  type SplitOrientation,
+  type SplitPlacement
 } from '../shared/split'
 import { FORM_DIRTY_CHECK_SCRIPT, canSleepTab, isTypingKeyInput, type SleepPolicy } from '../shared/sleep'
 import { shouldPeekWindowOpen } from '../shared/peek'
@@ -942,8 +946,32 @@ export class Tabs {
 
   // ---- split view ---------------------------------------------------------
 
+  currentBounds(): Rect | null {
+    return this.bounds ? { ...this.bounds } : null
+  }
+
+  /** Returns true when dragging `draggedTabId` onto the page can produce a split or reorder. */
+  canDropSplit(draggedTabId: number): boolean {
+    const tab = this.get(draggedTabId)
+    const active = this.active
+    if (!tab || !active || tab.info.workspaceId !== active.info.workspaceId) return false
+    if (draggedTabId !== active.info.id) return true
+    if (this.splitGroupOf(active.info.id)) return true
+    const partner = pickRecentSplitPartner(
+      this.tabs.map((t) => ({
+        id: t.info.id,
+        workspaceId: t.info.workspaceId,
+        pinned: t.info.pinned,
+        lastActiveAt: t.lastActiveAt
+      })),
+      draggedTabId,
+      active.info.workspaceId
+    )
+    return partner !== null
+  }
+
   /** Splits `anchorId` with `otherId` (or adds `otherId` to `anchorId`'s split group, up to 4 panes). */
-  splitTabs(anchorId: number, otherId: number, placement: 'left' | 'right' = 'right', focusId = otherId): boolean {
+  splitTabs(anchorId: number, otherId: number, placement: SplitPlacement = 'right', focusId = otherId): boolean {
     const anchor = this.get(anchorId)
     const other = this.get(otherId)
     if (!anchor || !other || anchorId === otherId) return false
@@ -965,8 +993,45 @@ export class Tabs {
     return true
   }
 
+  /**
+   * Handles dropping a dragged tab onto one of the 4 page edges.
+   * Dragging the active tab pairs it with the most recently used other non-pinned tab in the
+   * same workspace (or repositions/rotates if already split).
+   */
+  splitFromDrop(draggedTabId: number, placement: SplitPlacement): boolean {
+    const dragged = this.get(draggedTabId)
+    const active = this.active
+    if (!dragged || !active || dragged.info.workspaceId !== active.info.workspaceId) return false
+    if (draggedTabId !== active.info.id) {
+      return this.splitTabs(active.info.id, draggedTabId, placement, draggedTabId)
+    }
+
+    const activeGroup = this.splitGroupOf(active.info.id)
+    if (activeGroup) {
+      if (activeGroup.tabIds.length === 2) {
+        const otherId = activeGroup.tabIds.find((id) => id !== draggedTabId)
+        if (otherId !== undefined) return this.splitTabs(otherId, draggedTabId, placement, draggedTabId)
+      }
+      this.swapSplit(activeGroup.id)
+      return true
+    }
+
+    const partnerId = pickRecentSplitPartner(
+      this.tabs.map((t) => ({
+        id: t.info.id,
+        workspaceId: t.info.workspaceId,
+        pinned: t.info.pinned,
+        lastActiveAt: t.lastActiveAt
+      })),
+      draggedTabId,
+      active.info.workspaceId
+    )
+    if (partnerId === null) return false
+    return this.splitTabs(partnerId, draggedTabId, placement, draggedTabId)
+  }
+
   /** Ctrl+Shift+\: splits the active tab with the next tab in the workspace, or unsplits if already split. */
-  splitWithNext(): void {
+  splitWithNext(orientation: SplitOrientation = 'side-by-side'): void {
     const active = this.active
     if (!active) return
     if (this.splitGroupOf(active.info.id)) {
@@ -989,7 +1054,24 @@ export class Tabs {
         partner = this.get(createdId)
       }
     }
-    if (partner) this.splitTabs(active.info.id, partner.info.id, 'right', partner.info.id)
+    const placement: SplitPlacement = orientation === 'stacked' ? 'bottom' : 'right'
+    if (partner) this.splitTabs(active.info.id, partner.info.id, placement, partner.info.id)
+  }
+
+  /** Toggles a 2-pane split between left/right and top/bottom (or starts a stacked split when unsplit). */
+  rotateSplit(groupId?: string): void {
+    const wsId = this.activeWorkspaceId
+    const prev = this.workspaceSplits(wsId)
+    const target = groupId ? prev.find((g) => g.id === groupId) : this.splitGroupOf(this.activeId)
+    if (!target) {
+      if (!groupId) this.splitWithNext('stacked')
+      return
+    }
+    if (target.tabIds.length !== 2) return
+    this.setWorkspaceSplits(wsId, rotateSplitGroup(prev, target.id))
+    this.layout()
+    this.workspaceSwitchDir = 0
+    this.changed()
   }
 
   /** Dissolves the split group containing `tabId` (or the active tab). */
@@ -1277,7 +1359,7 @@ export class Tabs {
         const splitLayout = computeSplitLayout(
           this.bounds,
           vis.length,
-          group ? { colRatio: group.colRatio, rowRatio: group.rowRatio } : {}
+          group ? { colRatio: group.colRatio, rowRatio: group.rowRatio, orientation: group.orientation } : {}
         )
         for (let i = 0; i < vis.length; i++) {
           const tab = vis[i]
@@ -1395,7 +1477,7 @@ export class Tabs {
   }
 
   /** The right-click menu for a tab in the sidebar. */
-  tabMenu(id: number): void {
+  tabMenu(id: number, popupWindow?: BrowserWindow): void {
     const tab = this.get(id)
     if (!tab) return
     const wsTabs = this.workspaceTabs(tab.info.workspaceId)
@@ -1423,6 +1505,12 @@ export class Tabs {
       })
     }
     if (tabGroup) {
+      if (tabGroup.tabIds.length === 2) {
+        splitItems.push({
+          label: tabGroup.orientation === 'stacked' ? 'Split left/right' : 'Split top/bottom',
+          click: () => this.rotateSplit(tabGroup.id)
+        })
+      }
       splitItems.push({ label: 'Swap panes', click: () => this.swapSplit(tabGroup.id) })
       if (tabGroup.tabIds.length > 2) {
         splitItems.push({ label: 'Remove from split', click: () => this.removeFromSplit(id) })
@@ -1431,6 +1519,7 @@ export class Tabs {
     }
 
     this.hooks.onMenuOpen?.(true)
+    const targetWin = popupWindow && !popupWindow.isDestroyed() ? popupWindow : this.win
     Menu.buildFromTemplate([
       { label: 'New tab', click: () => this.create('', { workspaceId: tab.info.workspaceId }) },
       { type: 'separator' },
@@ -1457,7 +1546,7 @@ export class Tabs {
       },
       { label: 'Reopen closed tab', accelerator: 'CmdOrCtrl+Shift+T', enabled: this.closed.length > 0, click: () => this.reopenClosed() }
     ]).popup({
-      window: this.win,
+      window: targetWin,
       callback: () => this.hooks.onMenuOpen?.(false)
     })
   }
@@ -2016,7 +2105,14 @@ export class Tabs {
         const indices = group.tabIds
           .map((tid) => indexById.get(tid))
           .filter((idx): idx is number => idx !== undefined && !kept[idx].info.pinned)
-        if (indices.length >= 2) splits.push({ tabs: indices, colRatio: group.colRatio, rowRatio: group.rowRatio })
+        if (indices.length >= 2) {
+          splits.push({
+            tabs: indices,
+            colRatio: group.colRatio,
+            rowRatio: group.rowRatio,
+            ...(group.orientation ? { orientation: group.orientation } : {})
+          })
+        }
       }
       return {
         tabs: kept.map((t) => ({
@@ -2071,7 +2167,8 @@ export class Tabs {
               id: `split-${this.nextSplitId++}`,
               tabIds,
               colRatio: sp.colRatio,
-              rowRatio: sp.rowRatio
+              rowRatio: sp.rowRatio,
+              ...(sp.orientation ? { orientation: sp.orientation } : {})
             })
           }
         }

@@ -340,10 +340,11 @@ export function Sidebar({
           {openRows.map((row) => {
             if (row.kind === 'split') {
               const groupActive = row.tabs.some((t) => t.id === state.activeId)
+              const isStacked = row.tabs.length === 2 && row.group.orientation === 'stacked'
               return (
                 <div
                   key={row.group.id}
-                  className={`split-row ${groupActive ? 'on' : ''} ${row.tabs.length > 2 ? 'grid' : ''}`}
+                  className={`split-row ${groupActive ? 'on' : ''} ${row.tabs.length > 2 ? 'grid' : ''} ${isStacked ? 'stacked' : ''}`}
                   role="group"
                   aria-label="Split tabs"
                 >

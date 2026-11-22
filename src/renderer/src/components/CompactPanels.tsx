@@ -104,7 +104,11 @@ export function CompactSidebarWindow(): React.JSX.Element {
           onDismissUpdate={() => setDismissedUpdateVer(updateKey)}
           onEditorOpenChange={setSidebarEditing}
           onPointerEdge={(inside) => api.setCompactHover('sidebar', inside)}
-          onDragTabChange={(id) => setDraggingTab(id !== null)}
+          onDragTabChange={(id) => {
+            setDraggingTab(id !== null)
+            if (id !== null) panel.startTabDrag(id)
+            else panel.endTabDrag()
+          }}
           openNewWorkspaceTick={newWorkspaceTick}
         />
       </div>

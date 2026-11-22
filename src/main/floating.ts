@@ -731,6 +731,12 @@ export class CompactPanel {
     return this.lastOffset
   }
 
+  getBounds(): BoundsRect | null {
+    const w = this.floating.getBrowserWindow()
+    if (!w || !w.isVisible()) return null
+    return w.getBounds()
+  }
+
   markReady(beforeFlush?: () => void): void {
     this.floating.markReady(beforeFlush)
   }

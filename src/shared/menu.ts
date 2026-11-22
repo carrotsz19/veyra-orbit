@@ -4,6 +4,7 @@
  */
 
 import type { WindowButtonsStyle } from './settings.ts'
+import type { SplitOrientation } from './split.ts'
 import { displayUrl, isInternalUrl } from './url.ts'
 
 export type MenuId = 'file' | 'edit' | 'view' | 'history' | 'bookmarks' | 'workspaces' | 'help'
@@ -88,6 +89,8 @@ export interface MenuBuildContext {
   activeWorkspaceId: string
   compactMode: boolean
   isSplit?: boolean
+  splitPaneCount?: number
+  splitOrientation?: SplitOrientation
   isFullscreen: boolean
   canReopenClosed: boolean
   history: readonly MenuHistoryContext[]
@@ -171,6 +174,12 @@ export function buildMenus(ctx: MenuBuildContext): MenuSection[] {
       keys: 'Ctrl+Shift+\\',
       checked: ctx.isSplit ? true : undefined,
       disabled: !tab
+    },
+    {
+      kind: 'item',
+      id: 'view:split-rotate',
+      label: ctx.isSplit && ctx.splitOrientation === 'stacked' ? 'Split left/right' : 'Split top/bottom',
+      disabled: !tab || (!!ctx.isSplit && (ctx.splitPaneCount ?? 2) !== 2)
     },
     SEP,
     { kind: 'item', id: 'view:zoom-in', label: 'Zoom in', keys: 'Ctrl+=', disabled: !webPage },

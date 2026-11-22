@@ -1,7 +1,7 @@
 /*
- * Split view model, layout geometry (2 to 4 panes in a side-by-side or 2x2 grid),
- * ratio clamping, and pane group operations.
- * Pure, so it is shared between main, renderer, and node:test unit tests.
+ * Split view model, layout geometry (2 to 4 panes in side-by-side, stacked top/bottom,
+ * or 2x2 grid), ratio clamping, 4-edge drop detection, recent-partner selection, and
+ * pane group operations. Pure, so it is shared between main, renderer, and node:test.
  */
 
 export const MAX_SPLIT_PANES = 4
@@ -12,6 +12,20 @@ export const DEFAULT_SPLIT_RATIO = 0.5
 export const SPLIT_GAP = 8
 /** Inset inside each pane frame so the focused pane accent ring shows cleanly around the native WebContentsView. */
 export const SPLIT_RING_INSET = 2
+
+export type SplitPlacement = 'left' | 'right' | 'top' | 'bottom'
+export type SplitOrientation = 'side-by-side' | 'stacked'
+
+const PLACEMENTS = new Set<string>(['left', 'right', 'top', 'bottom'])
+const ORIENTATIONS = new Set<string>(['side-by-side', 'stacked'])
+
+export function isSplitPlacement(v: unknown): v is SplitPlacement {
+  return typeof v === 'string' && PLACEMENTS.has(v)
+}
+
+export function isSplitOrientation(v: unknown): v is SplitOrientation {
+  return typeof v === 'string' && ORIENTATIONS.has(v)
+}
 
 export interface SplitRect {
   x: number
@@ -26,8 +40,10 @@ export interface SplitGroup {
   tabIds: number[]
   /** Horizontal split ratio for the vertical divider (0.2..0.8). */
   colRatio: number
-  /** Vertical split ratio for the horizontal divider when 3 or 4 panes are open (0.2..0.8). */
+  /** Vertical split ratio for the horizontal divider when stacked or 3–4 panes are open (0.2..0.8). */
   rowRatio: number
+  /** Arrangement for 2-pane splits: 'side-by-side' (default, left/right) or 'stacked' (top/bottom). */
+  orientation?: SplitOrientation
 }
 
 export interface SplitPaneLayout {
@@ -65,19 +81,52 @@ function insetRect(r: SplitRect, inset: number): SplitRect {
 }
 
 /**
+ * Decides which of the four page edges ('left' | 'right' | 'top' | 'bottom') a pointer
+ * is closest to inside `rect` (using normalised distances so all four edge zones scale
+ * evenly across aspect ratios). Returns null when the pointer lies outside `rect`.
+ */
+export function dropPlacementFromPoint(x: number, y: number, rect: SplitRect): SplitPlacement | null {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || rect.width <= 0 || rect.height <= 0) return null
+  if (x < rect.x || x > rect.x + rect.width || y < rect.y || y > rect.y + rect.height) return null
+
+  const nx = (x - rect.x) / rect.width
+  const ny = (y - rect.y) / rect.height
+  const dLeft = nx
+  const dRight = 1 - nx
+  const dTop = ny
+  const dBottom = 1 - ny
+
+  let best: SplitPlacement = 'left'
+  let min = dLeft
+  if (dRight < min) {
+    min = dRight
+    best = 'right'
+  }
+  if (dTop < min) {
+    min = dTop
+    best = 'top'
+  }
+  if (dBottom < min) {
+    best = 'bottom'
+  }
+  return best
+}
+
+/**
  * Computes pixel-aligned pane frames, inset WebContentsView rects, and gap divider rects
  * for 1..4 panes inside `container`.
  *
  * Layout:
  * - 1 pane: full container, no inset, no dividers
- * - 2 panes: [left, right] split vertically by colRatio
+ * - 2 panes ('side-by-side'): [left, right] split vertically by colRatio
+ * - 2 panes ('stacked'): [top, bottom] split horizontally by rowRatio
  * - 3 panes: [left (full height), topRight, bottomRight] split by colRatio and rowRatio on the right
  * - 4 panes: [topLeft, topRight, bottomLeft, bottomRight] 2x2 grid split by colRatio and rowRatio
  */
 export function computeSplitLayout(
   container: SplitRect,
   paneCount: number,
-  ratios: { colRatio?: number; rowRatio?: number } = {},
+  ratios: { colRatio?: number; rowRatio?: number; orientation?: SplitOrientation } = {},
   opts: { gap?: number; ringInset?: number } = {}
 ): SplitLayout {
   const count = Math.max(0, Math.min(MAX_SPLIT_PANES, Math.trunc(paneCount)))
@@ -103,6 +152,28 @@ export function computeSplitLayout(
   const ring = Math.max(0, Math.round(opts.ringInset ?? SPLIT_RING_INSET))
   const colRatio = clampSplitRatio(ratios.colRatio ?? DEFAULT_SPLIT_RATIO)
   const rowRatio = clampSplitRatio(ratios.rowRatio ?? DEFAULT_SPLIT_RATIO)
+  const orientation: SplitOrientation = ratios.orientation === 'stacked' ? 'stacked' : 'side-by-side'
+
+  if (count === 2 && orientation === 'stacked') {
+    const availH = Math.max(2, base.height - gap)
+    const topH = Math.max(1, Math.min(availH - 1, Math.round(availH * rowRatio)))
+    const botH = Math.max(1, availH - topH)
+    const botY = base.y + topH + gap
+    const f0: SplitRect = { x: base.x, y: base.y, width: base.width, height: topH }
+    const f1: SplitRect = { x: base.x, y: botY, width: base.width, height: botH }
+    const rowDivider: SplitDividerLayout = {
+      kind: 'row',
+      orientation: 'horizontal',
+      rect: { x: base.x, y: base.y + topH, width: base.width, height: gap }
+    }
+    return {
+      panes: [
+        { index: 0, frame: f0, view: insetRect(f0, ring) },
+        { index: 1, frame: f1, view: insetRect(f1, ring) }
+      ],
+      dividers: [rowDivider]
+    }
+  }
 
   const availW = Math.max(2, base.width - gap)
   const leftW = Math.max(1, Math.min(availW - 1, Math.round(availW * colRatio)))
@@ -186,6 +257,33 @@ export function findSplitGroup(groups: readonly SplitGroup[], tabId: number | nu
   return groups.find((g) => g.tabIds.includes(tabId))
 }
 
+export interface SplitPartnerCandidate {
+  id: number
+  workspaceId: string
+  pinned: boolean
+  lastActiveAt: number
+}
+
+/**
+ * Picks the most recently used other non-pinned tab in the same workspace to partner with
+ * when the user drags the active tab onto the page. Skips pinned tabs so pinned tabs are
+ * never unexpectedly unpinned; returns null if no suitable partner exists.
+ */
+export function pickRecentSplitPartner(
+  tabs: readonly SplitPartnerCandidate[],
+  draggedTabId: number,
+  workspaceId: string
+): number | null {
+  let best: SplitPartnerCandidate | null = null
+  for (const t of tabs) {
+    if (t.id === draggedTabId || t.workspaceId !== workspaceId || t.pinned) continue
+    if (!best || t.lastActiveAt > best.lastActiveAt) {
+      best = t
+    }
+  }
+  return best ? best.id : null
+}
+
 /**
  * Reorders a workspace's tab IDs so every split group's tabs sit contiguously in group order,
  * anchored at the earliest position of any tab in that group.
@@ -232,19 +330,22 @@ export function joinSplitGroup(
   groups: readonly SplitGroup[],
   anchorTabId: number,
   otherTabId: number,
-  placement: 'left' | 'right' = 'right',
+  placement: SplitPlacement = 'right',
   newId: () => string = () => `split-${anchorTabId}-${otherTabId}`
 ): { groups: SplitGroup[]; group: SplitGroup | null } {
   if (anchorTabId === otherTabId) return { groups: groups.map((g) => ({ ...g, tabIds: [...g.tabIds] })), group: null }
 
+  const isFirst = placement === 'left' || placement === 'top'
+  const nextOrientation: SplitOrientation = placement === 'top' || placement === 'bottom' ? 'stacked' : 'side-by-side'
+
   const anchorExisting = groups.find((g) => g.tabIds.includes(anchorTabId))
-  // Already in the same split group: reorder if requested for a 2-pane split.
+  // Already in the same split group: reorder and update orientation for 2-pane splits.
   if (anchorExisting && anchorExisting.tabIds.includes(otherTabId)) {
     const next = groups.map((g) => {
       if (g.id !== anchorExisting.id) return { ...g, tabIds: [...g.tabIds] }
       const rest = g.tabIds.filter((id) => id !== otherTabId)
-      const tabIds = placement === 'left' ? [otherTabId, ...rest] : [...rest, otherTabId]
-      return { ...g, tabIds }
+      const tabIds = isFirst ? [otherTabId, ...rest] : [...rest, otherTabId]
+      return { ...g, tabIds, ...(tabIds.length === 2 ? { orientation: nextOrientation } : {}) }
     })
     return { groups: next, group: next.find((g) => g.id === anchorExisting.id) ?? null }
   }
@@ -266,18 +367,28 @@ export function joinSplitGroup(
 
   if (anchorExisting) {
     const target = cleaned.find((g) => g.id === anchorExisting.id)!
-    target.tabIds = placement === 'left' ? [otherTabId, ...target.tabIds] : [...target.tabIds, otherTabId]
+    target.tabIds = isFirst ? [otherTabId, ...target.tabIds] : [...target.tabIds, otherTabId]
     return { groups: cleaned, group: target }
   }
 
   const created: SplitGroup = {
     id: newId(),
-    tabIds: placement === 'left' ? [otherTabId, anchorTabId] : [anchorTabId, otherTabId],
+    tabIds: isFirst ? [otherTabId, anchorTabId] : [anchorTabId, otherTabId],
     colRatio: DEFAULT_SPLIT_RATIO,
-    rowRatio: DEFAULT_SPLIT_RATIO
+    rowRatio: DEFAULT_SPLIT_RATIO,
+    orientation: nextOrientation
   }
   cleaned.push(created)
   return { groups: cleaned, group: created }
+}
+
+/** Toggles a 2-pane split group between side-by-side (left/right) and stacked (top/bottom). */
+export function rotateSplitGroup(groups: readonly SplitGroup[], groupId: string): SplitGroup[] {
+  return groups.map((g) => {
+    if (g.id !== groupId || g.tabIds.length !== 2) return { ...g, tabIds: [...g.tabIds] }
+    const next: SplitOrientation = g.orientation === 'stacked' ? 'side-by-side' : 'stacked'
+    return { ...g, tabIds: [...g.tabIds], orientation: next }
+  })
 }
 
 /** Removes one tab from its split group, dissolving the group if fewer than 2 tabs remain. */

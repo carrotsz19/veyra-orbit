@@ -212,6 +212,11 @@ export function TitleBar({
     }
   }, [collapsed, openTarget])
 
+  const activeSplitGroup = useMemo(
+    () => (tab ? state.splits.find((g) => g.tabIds.includes(tab.id)) : undefined),
+    [tab, state.splits]
+  )
+
   const sections = useMemo(
     () =>
       buildMenus({
@@ -229,7 +234,9 @@ export function TitleBar({
         workspaces: state.workspaces.map((w) => ({ id: w.id, name: w.name, private: w.private })),
         activeWorkspaceId: state.activeWorkspaceId,
         compactMode: !!settings?.compactMode,
-        isSplit: !!tab && state.splits.some((g) => g.tabIds.includes(tab.id)),
+        isSplit: !!activeSplitGroup,
+        splitPaneCount: activeSplitGroup?.tabIds.length,
+        splitOrientation: activeSplitGroup?.orientation,
         isFullscreen: winState.fullscreen,
         canReopenClosed: state.canReopenClosed,
         history: history.map((h) => ({ url: h.url, title: h.title })),
@@ -237,7 +244,7 @@ export function TitleBar({
         appVersion: INITIAL_VERSION,
         isDev: __CHANNEL__ === 'dev'
       }),
-    [tab, state.workspaces, state.activeWorkspaceId, state.splits, state.canReopenClosed, settings?.compactMode, winState.fullscreen, history, bookmarks]
+    [tab, activeSplitGroup, state.workspaces, state.activeWorkspaceId, state.canReopenClosed, settings?.compactMode, winState.fullscreen, history, bookmarks]
   )
 
   const recentUrls = useMemo(() => recentHistoryItems(history.map((h) => ({ url: h.url, title: h.title }))), [history])
@@ -366,6 +373,9 @@ export function TitleBar({
           return
         case 'view:split':
           api.splitWithNext()
+          return
+        case 'view:split-rotate':
+          api.rotateSplit()
           return
         case 'view:zoom-in':
           api.zoomIn()

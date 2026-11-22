@@ -148,7 +148,7 @@ export type { UpdateState, UpdateStatus } from './updates'
 export type { WorkspaceAccentId, WorkspaceCreateInput, WorkspaceIconId, WorkspaceInfo, WorkspaceUpdateInput } from './workspaces'
 export type { CompactRevealState } from './compact'
 export type { MenuEntry, MenuId, MenuItemEntry, MenuPopupHeader, MenuPopupSpec, MenuSection } from './menu'
-export type { SplitGroup } from './split'
+export type { SplitGroup, SplitOrientation, SplitPlacement } from './split'
 export type { PaletteItem, PaletteMode, PaletteOpenState, PaletteResultsPayload } from './palette'
 export type { PeekAction, PeekState } from './peek'
 export type { InternalUrl } from './url'
@@ -225,6 +225,13 @@ export interface VeyraPeekWindowApi {
   action(act: import('./peek').PeekAction): void
 }
 
+export interface CompactTabDragState {
+  active: boolean
+  tabId: number | null
+  placement: import('./split').SplitPlacement | null
+  shots?: Record<number, string> | null
+}
+
 /** Minimal bridge exposed ONLY to the floating compact-mode sidebar / titlebar windows. */
 export interface VeyraCompactPanelApi {
   ready(): void
@@ -236,6 +243,8 @@ export interface VeyraCompactPanelApi {
   startWindowDrag(): void
   moveWindowDrag(): void
   endWindowDrag(): void
+  startTabDrag(tabId: number): void
+  endTabDrag(): void
 }
 
 export type ClearDataRange = 'hour' | 'day' | 'all'
@@ -296,15 +305,20 @@ export interface VeyraApi {
   /** Opens the right-click menu for a tab in the sidebar. */
   tabMenu(id: number): void
   /** Splits `anchorTabId` with `otherTabId` (or adds `otherTabId` to `anchorTabId`'s split group). */
-  splitWith(anchorTabId: number, otherTabId: number, placement?: 'left' | 'right'): void
+  splitWith(anchorTabId: number, otherTabId: number, placement?: import('./split').SplitPlacement): void
+  /** Drops a dragged tab (including the active tab) onto an edge of the page to split. */
+  splitDrop(draggedTabId: number, placement: import('./split').SplitPlacement): void
   /** Splits the active tab with the next tab in the workspace, or unsplits if already split. */
-  splitWithNext(): void
+  splitWithNext(orientation?: import('./split').SplitOrientation): void
+  /** Rotates a 2-pane split between left/right and top/bottom (or creates a stacked split if unsplit). */
+  rotateSplit(groupId?: string): void
   /** Dissolves the split group containing `tabId` (or the active tab if omitted). */
   unsplit(tabId?: number): void
   /** Updates a split group's column or row divider ratio (0.2..0.8). */
   setSplitRatio(groupId: string, kind: 'col' | 'row', ratio: number): void
   /** Swaps panes in a split group. */
   swapSplit(groupId: string): void
+  onCompactTabDrag(cb: (drag: CompactTabDragState) => void): () => void
   switchWorkspace(id: string): void
   createWorkspace(input: import('./workspaces').WorkspaceCreateInput): Promise<import('./workspaces').WorkspaceInfo | null>
   createPrivateWorkspace(): Promise<import('./workspaces').WorkspaceInfo | null>
