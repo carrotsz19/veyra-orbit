@@ -4,6 +4,8 @@ All notable changes to Veyra Orbit are documented here.
 
 ## Unreleased
 
+## 26.11.8 — 2026-11-22
+
 - A new start page: a clock and greeting with your name, quick-link tiles you can add, rename and reorder, "Continue where you left off", your bookmarks, a "What are you studying today?" note and a daily quote. Pick a soft moving background, a plain colour, or your own picture (with dim and blur). Use the Customize button to turn widgets on or off and reorder them.
 - Make Orbit yours in Settings → Appearance: seven themes (Veyra Clay, Midnight, Paper, Forest, Ocean, Rosé, Graphite), any accent colour, corner roundness, density, text size, sidebar on the left or right (drag its edge to resize, optionally see-through), address bar position, which toolbar buttons show, full menus or one ☰ menu, the gap and shadow around the page, and how much animation you want. Export and import your look as a file.
 - Nicer empty History and Bookmarks pages.
