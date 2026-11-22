@@ -52,6 +52,7 @@ import { Updater } from './updater'
 import { CompactPanel, MenuPopup, PalettePopup, PeekPopup } from './floating'
 import { BrowserImporter } from './importer'
 import { ExtensionManager } from './extensions'
+import { chooseAndSaveStartBackground, deleteStartBackgroundFile, readStartBackgroundDataUrl } from './backgrounds'
 
 const APP_NAME = __CHANNEL__ === 'dev' ? 'Veyra Orbit Dev' : 'Veyra Orbit'
 app.setName(APP_NAME)
@@ -1692,6 +1693,12 @@ handle('settings:update', (patch) => {
   const raw = patch as Record<string, unknown>
   const safePatch: Record<string, unknown> = { ...raw }
   if ('downloadsDir' in safePatch && safePatch.downloadsDir !== '') delete safePatch.downloadsDir
+  // Custom start-page background files are only created by main's image picker; renderer may only clear to ''.
+  if (safePatch.startPage && typeof safePatch.startPage === 'object' && !Array.isArray(safePatch.startPage)) {
+    const sp = { ...(safePatch.startPage as Record<string, unknown>) }
+    if ('backgroundImage' in sp && sp.backgroundImage !== '') delete sp.backgroundImage
+    safePatch.startPage = sp
+  }
   const prev = settings.get()
   const view = settings.update(safePatch)
   if (view.theme !== prev.theme) nativeTheme.themeSource = view.theme
@@ -1755,6 +1762,79 @@ handle('settings:choose-downloads-dir', async () => {
   })
   if (result.canceled || !result.filePaths[0]) return settings.view()
   const view = settings.update({ downloadsDir: result.filePaths[0] })
+  sendSettings()
+  return view
+})
+
+handle('startpage:data', () => {
+  const isPrivate = !!tabs && tabs.isPrivateWorkspace(tabs.state().activeWorkspaceId)
+  if (isPrivate || !store || !tabs) {
+    return { topSites: [], recentlyClosed: [], recentHistory: [], bookmarks: [] }
+  }
+  const topSites = store.topSites(8).map((s) => ({
+    url: s.url,
+    title: s.title,
+    favicon: tabs?.cachedFavicon(s.url),
+    time: s.last
+  }))
+  const recentlyClosed = tabs.recentClosedTabs(6)
+  const seenRecent = new Set(recentlyClosed.map((c) => c.url))
+  const recentHistory = store
+    .history('', null, 24)
+    .filter((h) => {
+      if (seenRecent.has(h.url)) return false
+      seenRecent.add(h.url)
+      return true
+    })
+    .slice(0, 8)
+    .map((h) => ({
+      url: h.url,
+      title: h.title,
+      favicon: tabs?.cachedFavicon(h.url),
+      time: h.time
+    }))
+  const bookmarks = store
+    .bookmarks()
+    .slice(0, 12)
+    .map((b) => ({
+      ...b,
+      favicon: tabs?.cachedFavicon(b.url)
+    }))
+  return { topSites, recentlyClosed, recentHistory, bookmarks }
+})
+
+handle('startpage:get-background', () => {
+  const filename = settings?.get().startPage.backgroundImage ?? ''
+  if (!filename) return null
+  return readStartBackgroundDataUrl(app.getPath('userData'), filename)
+})
+
+handle('startpage:choose-background', async () => {
+  if (!settings || !win || win.isDestroyed()) return { ok: false, error: 'Window unavailable.' }
+  const prev = settings.get().startPage.backgroundImage
+  const res = await chooseAndSaveStartBackground(win, app.getPath('userData'), prev)
+  if (!res.ok) return res
+  const view = settings.update({
+    startPage: {
+      background: 'image',
+      backgroundImage: res.filename
+    }
+  })
+  sendSettings()
+  return { ok: true, dataUrl: res.dataUrl, settings: view }
+})
+
+handle('startpage:remove-background', () => {
+  if (!settings) return null
+  const prev = settings.get().startPage.backgroundImage
+  if (prev) deleteStartBackgroundFile(app.getPath('userData'), prev)
+  const curBg = settings.get().startPage.background
+  const view = settings.update({
+    startPage: {
+      backgroundImage: '',
+      ...(curBg === 'image' ? { background: 'ambient' } : {})
+    }
+  })
   sendSettings()
   return view
 })

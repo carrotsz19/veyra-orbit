@@ -15,6 +15,7 @@ import { DEFAULT_SPLIT_RATIO, computeSplitLayout, findSplitGroup, ratioFromPoint
 import { APPEARANCE_LIMITS, DEFAULT_APPEARANCE } from '@shared/appearance'
 import './library.css'
 import './settings.css'
+import './startpage.css'
 import './import-private.css'
 import './extensions.css'
 import { applyResolvedAppearance } from './applyAppearance'
@@ -45,10 +46,11 @@ function renderTabSurface(
   tab: TabInfo,
   settings: SettingsView | null,
   update: UpdateState | null,
+  onOpenAppearance: () => void,
   shot?: string,
   isPrivate = false
 ): React.JSX.Element | null {
-  if (!tab.url) return <StartPage tabId={tab.id} isPrivate={isPrivate} />
+  if (!tab.url) return <StartPage tabId={tab.id} settings={settings} isPrivate={isPrivate} onOpenAppearance={onOpenAppearance} />
   if (tab.url === 'orbit://history') return <HistoryPage key={tab.id} tabId={tab.id} />
   if (tab.url === 'orbit://bookmarks') return <BookmarksPage key={tab.id} tabId={tab.id} />
   if (tab.url === 'orbit://settings') return <SettingsPage key={tab.id} settings={settings} update={update} />
@@ -462,7 +464,9 @@ export function App(): React.JSX.Element {
                       if (!focused) api.activate(pane.id)
                     }}
                   >
-                    <div className="split-pane-inner">{renderTabSurface(pane, settings, update, shots?.[pane.id], !!activeWorkspace?.private)}</div>
+                    <div className="split-pane-inner">
+                      {renderTabSurface(pane, settings, update, () => handleOpenSettingsSection('set-appearance'), shots?.[pane.id], !!activeWorkspace?.private)}
+                    </div>
                   </div>
                 )
               })}
@@ -488,7 +492,7 @@ export function App(): React.JSX.Element {
               ))}
             </>
           ) : (
-            active && renderTabSurface(active, settings, update, shots?.[active.id], !!activeWorkspace?.private)
+            active && renderTabSurface(active, settings, update, () => handleOpenSettingsSection('set-appearance'), shots?.[active.id], !!activeWorkspace?.private)
           )}
 
           {dragTabId !== null && dropSide && (

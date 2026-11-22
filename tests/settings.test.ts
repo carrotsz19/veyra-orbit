@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DEFAULT_SETTINGS, SEARCH_ENGINES, mergeSettings, sanitizeSettings, searchUrlFor } from '../src/shared/settings.ts'
 import { DEFAULT_APPEARANCE } from '../src/shared/appearance.ts'
+import { DEFAULT_START_PAGE } from '../src/shared/startpage.ts'
 import { SettingsStore } from '../src/main/settings.ts'
 
 test('sanitizeSettings returns safe defaults for non-objects and drops unknown keys', () => {
@@ -37,7 +38,8 @@ test('sanitizeSettings returns safe defaults for non-objects and drops unknown k
     sleepAfterMinutes: 60,
     sleepPinnedTabs: true,
     windowButtons: 'dots',
-    appearance: DEFAULT_APPEARANCE
+    appearance: DEFAULT_APPEARANCE,
+    startPage: DEFAULT_START_PAGE
   })
   assert.equal('extra' in cleaned, false)
 })
@@ -84,7 +86,8 @@ test('mergeSettings applies valid fields and ignores invalid or unknown ones', (
     sleepAfterMinutes: 15,
     sleepPinnedTabs: true,
     windowButtons: 'dots',
-    appearance: DEFAULT_APPEARANCE
+    appearance: DEFAULT_APPEARANCE,
+    startPage: DEFAULT_START_PAGE
   })
   assert.deepEqual(mergeSettings(next, null), next)
   assert.deepEqual(mergeSettings(next, { downloadsDir: 'bad\nline' }), next)

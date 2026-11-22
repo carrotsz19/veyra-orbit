@@ -57,7 +57,15 @@ export class SettingsStore {
   }
 
   get(): Settings {
-    return { ...this.data, appearance: { ...this.data.appearance } }
+    return {
+      ...this.data,
+      appearance: { ...this.data.appearance },
+      startPage: {
+        ...this.data.startPage,
+        quickLinks: this.data.startPage.quickLinks.map((l) => ({ ...l })),
+        widgets: this.data.startPage.widgets.map((w) => ({ ...w }))
+      }
+    }
   }
 
   searchUrl(): string {
@@ -78,8 +86,7 @@ export class SettingsStore {
 
   view(): SettingsView {
     return {
-      ...this.data,
-      appearance: { ...this.data.appearance },
+      ...this.get(),
       effectiveDownloadsDir: this.effectiveDownloadsDir(),
       downloadsOverridden: !!this.envDownloadsDir,
       activeWindowButtons: this.activeWindowButtons,

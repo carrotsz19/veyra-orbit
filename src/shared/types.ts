@@ -118,10 +118,22 @@ export type {
   SettingsPatch,
   SettingsView,
   SleepMinutes,
+  StartPagePatch,
+  StartPageSettings,
   StartupBehavior,
   ThemeSource,
   WindowButtonsStyle
 } from './settings'
+export type {
+  ClockFormat,
+  DailyQuote,
+  QuickLink,
+  QuickLinkSize,
+  StartBackgroundMode,
+  StartLayout,
+  StartWidgetConfig,
+  StartWidgetId
+} from './startpage'
 export type {
   AddressBarAlign,
   MenuBarStyle,
@@ -234,6 +246,20 @@ export interface ClearDataRequest {
   cache: boolean
 }
 
+export interface StartPageSiteItem {
+  url: string
+  title: string
+  favicon?: string
+  time?: number
+}
+
+export interface StartPageData {
+  topSites: StartPageSiteItem[]
+  recentlyClosed: StartPageSiteItem[]
+  recentHistory: StartPageSiteItem[]
+  bookmarks: (Bookmark & { favicon?: string })[]
+}
+
 export interface VeyraApi {
   onState(cb: (s: BrowserState) => void): () => void
   onFocusOmnibox(cb: () => void): () => void
@@ -300,6 +326,10 @@ export interface VeyraApi {
   chooseDownloadsDir(): Promise<import('./settings').SettingsView | null>
   exportAppearanceTheme(): Promise<{ ok: boolean; canceled?: boolean; error?: string }>
   importAppearanceTheme(): Promise<{ ok: boolean; canceled?: boolean; settings?: import('./settings').SettingsView; error?: string }>
+  getStartPageData(): Promise<StartPageData>
+  getStartBackground(): Promise<string | null>
+  chooseStartBackground(): Promise<{ ok: boolean; canceled?: boolean; dataUrl?: string; settings?: import('./settings').SettingsView; error?: string }>
+  removeStartBackground(): Promise<import('./settings').SettingsView | null>
   savedPermissions(): Promise<SitePermission[]>
   setSavedPermission(origin: string, permission: string, allow: boolean): Promise<boolean>
   removeSavedPermission(origin: string, permission: string): Promise<void>

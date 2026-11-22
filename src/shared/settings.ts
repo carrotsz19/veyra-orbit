@@ -11,6 +11,13 @@ import {
   type AppearancePatch,
   type AppearanceSettings
 } from './appearance.ts'
+import {
+  DEFAULT_START_PAGE,
+  mergeStartPage,
+  sanitizeStartPage,
+  type StartPagePatch,
+  type StartPageSettings
+} from './startpage.ts'
 
 export const SEARCH_ENGINES = [
   { id: 'google', name: 'Google', url: 'https://www.google.com/search?q=' },
@@ -25,7 +32,7 @@ export type ThemeSource = 'system' | 'light' | 'dark'
 export type StartupBehavior = 'restore' | 'new-tab'
 export type NewTabBehavior = 'start-page' | 'command-bar'
 export type WindowButtonsStyle = 'windows' | 'dots'
-export type { SleepMinutes, AppearanceSettings, AppearancePatch }
+export type { SleepMinutes, AppearanceSettings, AppearancePatch, StartPageSettings, StartPagePatch }
 
 export interface Settings {
   searchEngine: SearchEngineId
@@ -46,10 +53,13 @@ export interface Settings {
   windowButtons: WindowButtonsStyle
   /** Theme preset, accent colour, layout, sidebar, toolbar, page card and motion preferences. */
   appearance: AppearanceSettings
+  /** Rich start page background, layout, clock, quick links, focus note and widget preferences. */
+  startPage: StartPageSettings
 }
 
-export type SettingsPatch = Partial<Omit<Settings, 'appearance'>> & {
+export type SettingsPatch = Partial<Omit<Settings, 'appearance' | 'startPage'>> & {
   appearance?: AppearancePatch
+  startPage?: StartPagePatch
 }
 
 export interface SettingsView extends Settings {
@@ -76,7 +86,8 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   sleepAfterMinutes: 30,
   sleepPinnedTabs: false,
   windowButtons: 'windows',
-  appearance: DEFAULT_APPEARANCE
+  appearance: DEFAULT_APPEARANCE,
+  startPage: DEFAULT_START_PAGE
 })
 
 const ENGINE_MAP = new Map<string, string>(SEARCH_ENGINES.map((e) => [e.id, e.url]))
@@ -125,7 +136,13 @@ function isValidPath(v: unknown): v is string {
 
 /** Validates arbitrary parsed JSON into a safe Settings object, dropping unknown keys. */
 export function sanitizeSettings(raw: unknown): Settings {
-  if (!isPlainObject(raw)) return { ...DEFAULT_SETTINGS, appearance: { ...DEFAULT_APPEARANCE } }
+  if (!isPlainObject(raw)) {
+    return {
+      ...DEFAULT_SETTINGS,
+      appearance: { ...DEFAULT_APPEARANCE },
+      startPage: sanitizeStartPage(null)
+    }
+  }
   return {
     searchEngine: isSearchEngineId(raw.searchEngine) ? raw.searchEngine : DEFAULT_SETTINGS.searchEngine,
     theme: isThemeSource(raw.theme) ? raw.theme : DEFAULT_SETTINGS.theme,
@@ -137,13 +154,18 @@ export function sanitizeSettings(raw: unknown): Settings {
     sleepAfterMinutes: isSleepMinutes(raw.sleepAfterMinutes) ? raw.sleepAfterMinutes : DEFAULT_SETTINGS.sleepAfterMinutes,
     sleepPinnedTabs: typeof raw.sleepPinnedTabs === 'boolean' ? raw.sleepPinnedTabs : DEFAULT_SETTINGS.sleepPinnedTabs,
     windowButtons: isWindowButtonsStyle(raw.windowButtons) ? raw.windowButtons : DEFAULT_SETTINGS.windowButtons,
-    appearance: sanitizeAppearance(raw.appearance)
+    appearance: sanitizeAppearance(raw.appearance),
+    startPage: sanitizeStartPage(raw.startPage)
   }
 }
 
 /** Applies a partial update to existing settings, ignoring unknown keys and invalid values. */
 export function mergeSettings(current: Settings, patch: unknown): Settings {
-  const next: Settings = { ...current, appearance: { ...current.appearance } }
+  const next: Settings = {
+    ...current,
+    appearance: { ...current.appearance },
+    startPage: sanitizeStartPage(current.startPage)
+  }
   if (!isPlainObject(patch)) return next
   const own = (k: string): boolean => Object.prototype.hasOwnProperty.call(patch, k)
   if (own('searchEngine') && isSearchEngineId(patch.searchEngine)) next.searchEngine = patch.searchEngine
@@ -157,5 +179,6 @@ export function mergeSettings(current: Settings, patch: unknown): Settings {
   if (own('sleepPinnedTabs') && typeof patch.sleepPinnedTabs === 'boolean') next.sleepPinnedTabs = patch.sleepPinnedTabs
   if (own('windowButtons') && isWindowButtonsStyle(patch.windowButtons)) next.windowButtons = patch.windowButtons
   if (own('appearance')) next.appearance = mergeAppearance(next.appearance, patch.appearance)
+  if (own('startPage')) next.startPage = mergeStartPage(next.startPage, patch.startPage)
   return next
 }
