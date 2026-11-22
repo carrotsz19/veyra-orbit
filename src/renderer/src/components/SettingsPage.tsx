@@ -32,6 +32,7 @@ const NEW_TAB_OPTIONS: { id: NewTabBehavior; label: string; detail: string }[] =
 
 const SLEEP_LABELS: Record<SleepMinutes, string> = {
   0: 'Off',
+  5: '5 min',
   15: '15 min',
   30: '30 min',
   60: '60 min',
@@ -326,7 +327,7 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
                 <div className="set-row-info">
                   <div className="set-label">Sleep inactive tabs</div>
                   <div className="set-desc">
-                    Discard background tabs to free memory after they sit unused. Active tabs, audio, prompts, find, and full-screen tabs never sleep.
+                    Discard background tabs to free memory after they sit unused. Active tabs, audio, camera/mic/screen capture, unsaved form text, prompts, find, and full-screen tabs never sleep.
                   </div>
                 </div>
                 <div className="set-pills" role="radiogroup" aria-label="Sleep inactive tabs after">

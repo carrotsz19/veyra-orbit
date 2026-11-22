@@ -91,6 +91,8 @@ test('mergeSettings applies valid fields and ignores invalid or unknown ones', (
   })
   assert.deepEqual(mergeSettings(next, null), next)
   assert.deepEqual(mergeSettings(next, { downloadsDir: 'bad\nline' }), next)
+  assert.equal(mergeSettings(next, { sleepAfterMinutes: 5 }).sleepAfterMinutes, 5)
+  assert.equal(DEFAULT_SETTINGS.sleepAfterMinutes, 30)
 })
 
 test('searchUrlFor covers every configured search engine', () => {

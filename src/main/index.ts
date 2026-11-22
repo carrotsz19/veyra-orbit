@@ -907,6 +907,7 @@ function createWindow(): void {
     },
     discardSession: (partition) => discardWebSession(partition),
     hasPendingPermission: (tabId) => perms?.hasPendingPermission(tabId) ?? false,
+    hasActiveMediaCapture: (tabId) => perms?.hasActiveMediaCapture(tabId) ?? false,
     sleepPolicy: () => {
       const cur = s.get()
       return {

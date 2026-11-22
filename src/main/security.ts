@@ -16,6 +16,8 @@ export const WEB_PARTITION = 'persist:web'
 const ALWAYS = new Set(['fullscreen', 'clipboard-sanitized-write', 'pointerLock'])
 /** Permissions the person can be asked for. Anything not listed is always denied. */
 const ASKABLE = new Set<string>(ASKABLE_PERMISSIONS)
+/** Active camera/mic/screen-capture permissions that protect a tab from sleeping. */
+const MEDIA_CAPTURE_PERMISSIONS = new Set<string>(['media', 'display-capture'])
 
 export interface PermissionStore {
   permissions(): SitePermission[]
@@ -30,6 +32,18 @@ export class Permissions {
   private pending: Pending[] = []
   /** Remembered answers by "origin|permission", persisted via store when available. */
   private answers = new Map<string, boolean>()
+  /** Active camera/mic/screen-capture grants per tabId ("origin|permission"), cleared on navigation/close. */
+  private mediaCaptureGrants = new Map<number, Set<string>>()
+
+  private noteMediaCaptureGrant(tabId: number | null, origin: string, permission: string): void {
+    if (tabId === null || !MEDIA_CAPTURE_PERMISSIONS.has(permission)) return
+    let set = this.mediaCaptureGrants.get(tabId)
+    if (!set) {
+      set = new Set<string>()
+      this.mediaCaptureGrants.set(tabId, set)
+    }
+    set.add(`${origin}|${permission}`)
+  }
 
   constructor(
     private tabIdOf: (wc: WebContents) => number | null,
@@ -60,13 +74,20 @@ export class Permissions {
       const key = `${origin}|${permission}`
       if (!isPrivate) {
         const known = this.answers.get(key)
-        if (known !== undefined) return callback(known)
+        if (known !== undefined) {
+          if (known) this.noteMediaCaptureGrant(tabId, origin, permission)
+          return callback(known)
+        }
       }
       // One question per site and permission; repeat requests wait on the same answer.
       const same = this.pending.find((p) => p.origin === origin && p.permission === permission && p.isPrivate === isPrivate)
       if (same) {
         const prev = same.resolve
-        same.resolve = (allow) => (prev(allow), callback(allow))
+        same.resolve = (allow) => {
+          if (allow) this.noteMediaCaptureGrant(tabId, origin, permission)
+          prev(allow)
+          callback(allow)
+        }
         return
       }
       this.pending.push({ id: this.next++, tabId, origin, permission, resolve: callback, isPrivate })
@@ -92,6 +113,7 @@ export class Permissions {
       this.answers.set(`${p.origin}|${p.permission}`, allow)
       if (this.store?.setPermission(p.origin, p.permission, allow)) this.onSavedChanged()
     }
+    if (allow) this.noteMediaCaptureGrant(p.tabId, p.origin, p.permission)
     p.resolve(allow)
     this.emit()
   }
@@ -109,8 +131,18 @@ export class Permissions {
     const matching = this.pending.filter((p) => p.origin === norm && p.permission === permission)
     if (matching.length) {
       this.pending = this.pending.filter((p) => !(p.origin === norm && p.permission === permission))
-      for (const p of matching) p.resolve(allow)
+      for (const p of matching) {
+        if (allow) this.noteMediaCaptureGrant(p.tabId, p.origin, p.permission)
+        p.resolve(allow)
+      }
       this.emit()
+    }
+    if (!allow && MEDIA_CAPTURE_PERMISSIONS.has(permission)) {
+      const grantKey = `${norm}|${permission}`
+      for (const [tid, grants] of this.mediaCaptureGrants) {
+        grants.delete(grantKey)
+        if (grants.size === 0) this.mediaCaptureGrants.delete(tid)
+      }
     }
     this.onSavedChanged()
     return true
@@ -129,8 +161,15 @@ export class Permissions {
     return this.pending.some((p) => p.tabId === tabId)
   }
 
-  /** A tab closed or navigated away: its open questions are answered no. */
+  /** True when this tab was granted camera, microphone, or screen capture on its current page. */
+  hasActiveMediaCapture(tabId: number): boolean {
+    const grants = this.mediaCaptureGrants.get(tabId)
+    return !!grants && grants.size > 0
+  }
+
+  /** A tab closed or navigated away: its open questions are answered no and active media grants cleared. */
   dropTab(tabId: number): void {
+    this.mediaCaptureGrants.delete(tabId)
     const gone = this.pending.filter((p) => p.tabId === tabId)
     if (!gone.length) return
     this.pending = this.pending.filter((p) => p.tabId !== tabId)
