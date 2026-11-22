@@ -360,6 +360,12 @@
   padding: 0;
   list-style: none;
 }
+.set-perms > .set-row {
+  transition: background-color var(--t-fast) var(--ease-state);
+}
+.set-perms > .set-row:hover {
+  background: var(--fill-tertiary);
+}
 .set-empty {
   padding: 16px;
   color: var(--label-tertiary);

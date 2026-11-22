@@ -37,7 +37,7 @@ function Filter({ value, onChange, label }: { value: string; onChange: (v: strin
       <Search size={15} />
       <input autoFocus value={value} onChange={(e) => onChange(e.target.value)} placeholder={label} aria-label={label} />
       {value && (
-        <button className="icon-btn small" aria-label="Clear search" onClick={() => onChange('')}>
+        <button className="icon-btn small" aria-label="Clear search" title="Clear search" onClick={() => onChange('')}>
           <X size={14} />
         </button>
       )}
@@ -96,7 +96,7 @@ export function HistoryPage({ tabId }: { tabId: number }): React.JSX.Element {
               <button className="btn danger" onClick={() => void clear(0)}>
                 All history
               </button>
-              <button className="icon-btn small" aria-label="Cancel" onClick={() => setClearing(false)}>
+              <button className="icon-btn small" aria-label="Cancel" title="Cancel" onClick={() => setClearing(false)}>
                 <X size={14} />
               </button>
             </div>
@@ -211,7 +211,7 @@ export function BookmarksPage({ tabId }: { tabId: number }): React.JSX.Element {
                 }}
               >
                 <input autoFocus value={editing.title} onChange={(e) => setEditing({ url: b.url, title: e.target.value })} onKeyDown={(e) => e.key === 'Escape' && setEditing(null)} aria-label="Bookmark name" />
-                <button className="icon-btn small" type="submit" aria-label="Save name">
+                <button className="icon-btn small" type="submit" aria-label="Save name" title="Save">
                   <Check size={14} />
                 </button>
               </form>

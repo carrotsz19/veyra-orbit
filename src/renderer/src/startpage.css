@@ -113,6 +113,7 @@
   height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-gutter: stable;
   padding: var(--sp-pad-y, 52px) var(--sp-pad-x, 32px) 64px;
 }
 .sp-root.density-compact {
@@ -826,6 +827,10 @@
 .sp-widget-item {
   gap: 8px;
   padding: 8px 10px;
+  transition: background-color var(--t-fast) var(--ease-state);
+}
+.sp-widget-item:hover {
+  background: var(--fill-tertiary);
 }
 .sp-widget-item.dragging {
   opacity: 0.45;

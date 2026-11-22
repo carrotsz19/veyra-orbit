@@ -204,6 +204,19 @@ kbd {
   outline: 2px solid color-mix(in srgb, var(--tint) 75%, transparent);
   outline-offset: 2px;
 }
+.tab:focus-visible,
+.pin:focus-visible,
+.split-cell:focus-visible,
+.set-choice:focus-visible,
+.lib-link:focus-visible {
+  outline-offset: -2px;
+}
+.dl-item {
+  transition: background-color var(--t-fast) var(--ease-state);
+}
+.dl-item:hover {
+  background: var(--fill-hover);
+}
 
 /* ---- shared floating surface entrance ---------------------------------- */
 @keyframes surface-in {
