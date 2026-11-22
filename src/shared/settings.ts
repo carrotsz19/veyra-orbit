@@ -30,6 +30,16 @@ import {
   sanitizeSearchEngines,
   type SearchEngine
 } from './search.ts'
+import {
+  DEFAULT_CLOSE_CONFIRM_THRESHOLD,
+  isCloseTabSelection,
+  isExternalLinkBehavior,
+  isNewTabPosition,
+  sanitizeCloseTabThreshold,
+  type CloseTabSelection,
+  type ExternalLinkBehavior,
+  type NewTabPosition
+} from './behavior.ts'
 
 export const SEARCH_ENGINES = [
   { id: 'google', name: 'Google', url: 'https://www.google.com/search?q=' },
@@ -41,11 +51,22 @@ export const SEARCH_ENGINES = [
 
 export type SearchEngineId = string
 export type ThemeSource = 'system' | 'light' | 'dark'
-export type StartupBehavior = 'restore' | 'new-tab'
+export type StartupBehavior = 'restore' | 'restore-pinned' | 'new-tab'
 export type NewTabBehavior = 'start-page' | 'command-bar'
 export type WindowButtonsStyle = 'windows' | 'dots'
 export type UpdateMode = 'automatic' | 'notify'
-export type { SleepMinutes, AppearanceSettings, AppearancePatch, StartPageSettings, StartPagePatch, ShortcutOverrides, SearchEngine }
+export type {
+  SleepMinutes,
+  AppearanceSettings,
+  AppearancePatch,
+  StartPageSettings,
+  StartPagePatch,
+  ShortcutOverrides,
+  SearchEngine,
+  ExternalLinkBehavior,
+  NewTabPosition,
+  CloseTabSelection
+}
 
 export interface Settings {
   searchEngine: SearchEngineId
@@ -55,6 +76,16 @@ export interface Settings {
   startup: StartupBehavior
   /** What Ctrl+T / New tab opens: the start page or the floating Ctrl+K command bar. */
   newTabBehavior: NewTabBehavior
+  /** Whether links opened from other apps open in a new tab or replace the current tab. */
+  externalLinks: ExternalLinkBehavior
+  /** Where newly opened tabs are inserted: end of the tab list or right after the current tab. */
+  newTabPosition: NewTabPosition
+  /** Which tab becomes active after closing the current tab: right, left, or last used. */
+  closeTabSelection: CloseTabSelection
+  /** Ask for confirmation before closing a window that has many open tabs. */
+  confirmCloseWindow: boolean
+  /** Minimum number of open tabs required to show the close-window confirmation (2–100). */
+  confirmCloseThreshold: number
   /** Custom downloads folder path, or '' to use the system Downloads folder. */
   downloadsDir: string
   askWhereToSave: boolean
@@ -105,6 +136,11 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   theme: 'system',
   startup: 'restore',
   newTabBehavior: 'start-page',
+  externalLinks: 'new-tab',
+  newTabPosition: 'end',
+  closeTabSelection: 'right',
+  confirmCloseWindow: false,
+  confirmCloseThreshold: DEFAULT_CLOSE_CONFIRM_THRESHOLD,
   downloadsDir: '',
   askWhereToSave: false,
   compactMode: false,
@@ -119,7 +155,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
 
 const ENGINE_MAP = new Map<string, string>(SEARCH_ENGINES.map((e) => [e.id, e.url]))
 const THEMES = new Set<string>(['system', 'light', 'dark'])
-const STARTUPS = new Set<string>(['restore', 'new-tab'])
+const STARTUPS = new Set<string>(['restore', 'restore-pinned', 'new-tab'])
 const NEW_TAB_BEHAVIORS = new Set<string>(['start-page', 'command-bar'])
 const SLEEP_SET = new Set<number>(SLEEP_MINUTES_OPTIONS)
 const WINDOW_BUTTONS = new Set<string>(['windows', 'dots'])
@@ -188,6 +224,11 @@ export function sanitizeSettings(raw: unknown): Settings {
     theme: isThemeSource(raw.theme) ? raw.theme : DEFAULT_SETTINGS.theme,
     startup: isStartupBehavior(raw.startup) ? raw.startup : DEFAULT_SETTINGS.startup,
     newTabBehavior: isNewTabBehavior(raw.newTabBehavior) ? raw.newTabBehavior : DEFAULT_SETTINGS.newTabBehavior,
+    externalLinks: isExternalLinkBehavior(raw.externalLinks) ? raw.externalLinks : DEFAULT_SETTINGS.externalLinks,
+    newTabPosition: isNewTabPosition(raw.newTabPosition) ? raw.newTabPosition : DEFAULT_SETTINGS.newTabPosition,
+    closeTabSelection: isCloseTabSelection(raw.closeTabSelection) ? raw.closeTabSelection : DEFAULT_SETTINGS.closeTabSelection,
+    confirmCloseWindow: typeof raw.confirmCloseWindow === 'boolean' ? raw.confirmCloseWindow : DEFAULT_SETTINGS.confirmCloseWindow,
+    confirmCloseThreshold: sanitizeCloseTabThreshold(raw.confirmCloseThreshold),
     downloadsDir: isValidPath(raw.downloadsDir) ? raw.downloadsDir.trim() : DEFAULT_SETTINGS.downloadsDir,
     askWhereToSave: typeof raw.askWhereToSave === 'boolean' ? raw.askWhereToSave : DEFAULT_SETTINGS.askWhereToSave,
     compactMode: typeof raw.compactMode === 'boolean' ? raw.compactMode : DEFAULT_SETTINGS.compactMode,
@@ -223,6 +264,13 @@ export function mergeSettings(current: Settings, patch: unknown): Settings {
   if (own('theme') && isThemeSource(patch.theme)) next.theme = patch.theme
   if (own('startup') && isStartupBehavior(patch.startup)) next.startup = patch.startup
   if (own('newTabBehavior') && isNewTabBehavior(patch.newTabBehavior)) next.newTabBehavior = patch.newTabBehavior
+  if (own('externalLinks') && isExternalLinkBehavior(patch.externalLinks)) next.externalLinks = patch.externalLinks
+  if (own('newTabPosition') && isNewTabPosition(patch.newTabPosition)) next.newTabPosition = patch.newTabPosition
+  if (own('closeTabSelection') && isCloseTabSelection(patch.closeTabSelection)) next.closeTabSelection = patch.closeTabSelection
+  if (own('confirmCloseWindow') && typeof patch.confirmCloseWindow === 'boolean') next.confirmCloseWindow = patch.confirmCloseWindow
+  if (own('confirmCloseThreshold') && typeof patch.confirmCloseThreshold === 'number' && Number.isFinite(patch.confirmCloseThreshold)) {
+    next.confirmCloseThreshold = sanitizeCloseTabThreshold(patch.confirmCloseThreshold)
+  }
   if (own('downloadsDir') && isValidPath(patch.downloadsDir)) next.downloadsDir = patch.downloadsDir.trim()
   if (own('askWhereToSave') && typeof patch.askWhereToSave === 'boolean') next.askWhereToSave = patch.askWhereToSave
   if (own('compactMode') && typeof patch.compactMode === 'boolean') next.compactMode = patch.compactMode

@@ -118,7 +118,10 @@ export type { Suggestion } from './suggest'
 export type {
   AppearancePatch,
   AppearanceSettings,
+  CloseTabSelection,
+  ExternalLinkBehavior,
   NewTabBehavior,
+  NewTabPosition,
   SearchEngine,
   SearchEngineId,
   Settings,

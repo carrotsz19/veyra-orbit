@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { Download, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
 import type {
   ClearDataRange,
+  CloseTabSelection,
+  ExternalLinkBehavior,
   NewTabBehavior,
+  NewTabPosition,
   SettingsPatch,
   SettingsView,
   SitePermission,
@@ -11,6 +14,10 @@ import type {
   UpdateMode,
   UpdateState
 } from '@shared/types'
+import {
+  MAX_CLOSE_CONFIRM_THRESHOLD,
+  MIN_CLOSE_CONFIRM_THRESHOLD
+} from '@shared/behavior'
 import { SLEEP_MINUTES_OPTIONS } from '@shared/sleep'
 import { pickActiveSection } from '@shared/compact'
 import { permissionName } from '@shared/permissions'
@@ -26,12 +33,29 @@ const api = window.veyra
 
 const STARTUP_OPTIONS: { id: StartupBehavior; label: string; detail: string }[] = [
   { id: 'restore', label: "Reopen last session's tabs", detail: 'Pick up where you left off. Restored tabs load only when you open them.' },
+  { id: 'restore-pinned', label: 'Reopen pinned tabs only', detail: 'Restore only your pinned tabs and start fresh for everything else.' },
   { id: 'new-tab', label: 'Start with a new tab', detail: 'Open a clean start page each time Orbit launches.' }
 ]
 
 const NEW_TAB_OPTIONS: { id: NewTabBehavior; label: string; detail: string }[] = [
   { id: 'start-page', label: 'Start page', detail: 'Open a fresh start page with the greeting and search bar.' },
   { id: 'command-bar', label: 'Command bar', detail: 'Open the floating Ctrl+K command bar in new-tab mode.' }
+]
+
+const EXTERNAL_LINK_OPTIONS: readonly SegmentedOption<ExternalLinkBehavior>[] = [
+  { value: 'new-tab', label: 'New tab' },
+  { value: 'current-tab', label: 'Current tab' }
+]
+
+const NEW_TAB_POSITION_OPTIONS: readonly SegmentedOption<NewTabPosition>[] = [
+  { value: 'end', label: 'End of list' },
+  { value: 'after-current', label: 'After current tab' }
+]
+
+const CLOSE_TAB_SELECTION_OPTIONS: readonly SegmentedOption<CloseTabSelection>[] = [
+  { value: 'right', label: 'Right' },
+  { value: 'left', label: 'Left' },
+  { value: 'last-used', label: 'Last used' }
 ]
 
 const SLEEP_LABELS: Record<SleepMinutes, string> = {
@@ -314,6 +338,87 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
                   </div>
                 </button>
               ))}
+            </div>
+          </section>
+
+          <section className="set-section" aria-labelledby="set-behaviour-h">
+            <h2 id="set-behaviour-h">Tabs &amp; links</h2>
+            <div className="set-card">
+              <div className="set-row">
+                <div className="set-row-info">
+                  <div className="set-label">Links from other apps</div>
+                  <div className="set-desc">Choose where web links opened from another app load.</div>
+                </div>
+                <SegmentedControl
+                  options={EXTERNAL_LINK_OPTIONS}
+                  value={settings.externalLinks}
+                  onChange={(v) => patch({ externalLinks: v })}
+                  ariaLabel="Links from other apps"
+                />
+              </div>
+
+              <div className="set-row">
+                <div className="set-row-info">
+                  <div className="set-label">New tab position</div>
+                  <div className="set-desc">Where newly opened tabs are added in the tab list.</div>
+                </div>
+                <SegmentedControl
+                  options={NEW_TAB_POSITION_OPTIONS}
+                  value={settings.newTabPosition}
+                  onChange={(v) => patch({ newTabPosition: v })}
+                  ariaLabel="New tab position"
+                />
+              </div>
+
+              <div className="set-row">
+                <div className="set-row-info">
+                  <div className="set-label">When closing a tab</div>
+                  <div className="set-desc">Which tab becomes active after closing the current tab.</div>
+                </div>
+                <SegmentedControl
+                  options={CLOSE_TAB_SELECTION_OPTIONS}
+                  value={settings.closeTabSelection}
+                  onChange={(v) => patch({ closeTabSelection: v })}
+                  ariaLabel="Tab selected after closing a tab"
+                />
+              </div>
+
+              <div className="set-row">
+                <div className="set-row-info">
+                  <div className="set-label">Confirm before closing many tabs</div>
+                  <div className="set-desc">
+                    Ask before closing the window when at least {settings.confirmCloseThreshold} tabs are open.
+                  </div>
+                </div>
+                <div className="set-row-actions">
+                  {settings.confirmCloseWindow && (
+                    <label className="set-threshold-wrap" aria-label="Tab count threshold">
+                      <input
+                        type="number"
+                        className="set-threshold-input"
+                        min={MIN_CLOSE_CONFIRM_THRESHOLD}
+                        max={MAX_CLOSE_CONFIRM_THRESHOLD}
+                        value={settings.confirmCloseThreshold}
+                        onChange={(e) => {
+                          const n = Number(e.target.value)
+                          if (Number.isFinite(n)) patch({ confirmCloseThreshold: n })
+                        }}
+                      />
+                      <span className="set-threshold-unit">tabs</span>
+                    </label>
+                  )}
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={settings.confirmCloseWindow}
+                    aria-label="Confirm before closing many tabs"
+                    className={`set-switch ${settings.confirmCloseWindow ? 'on' : ''}`}
+                    onClick={() => patch({ confirmCloseWindow: !settings.confirmCloseWindow })}
+                  >
+                    <span className="set-switch-thumb" />
+                  </button>
+                </div>
+              </div>
             </div>
           </section>
 

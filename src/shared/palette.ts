@@ -173,7 +173,7 @@ interface CommandDef {
 }
 
 const SETTINGS_SECTIONS: readonly { id: string; label: string; keywords: string }[] = [
-  { id: 'set-general', label: 'General & startup settings', keywords: 'startup new tab command bar start page behavior' },
+  { id: 'set-general', label: 'General & tab behaviour settings', keywords: 'startup pinned new tab position close tab external links confirm window behaviour behavior' },
   { id: 'set-search', label: 'Search engines & shortcuts', keywords: 'search engine bang keyword custom google duckduckgo wikipedia' },
   { id: 'set-appearance', label: 'Appearance settings', keywords: 'theme light dark compact mode window buttons dots' },
   { id: 'set-shortcuts', label: 'Keyboard shortcuts', keywords: 'hotkeys keybindings rebind shortcuts keys' },

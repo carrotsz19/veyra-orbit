@@ -25,6 +25,7 @@ import {
   type WindowBounds
 } from '../shared/compact'
 import { resolveSleepTimeoutMs } from '../shared/sleep'
+import { extractExternalUrlFromArgv, shouldConfirmWindowClose } from '../shared/behavior'
 import { computeMemorySnapshot } from '../shared/memory'
 import { WORKSPACE_ACCENTS, applyWorkspaceAppearance } from '../shared/workspaces'
 import {
@@ -84,6 +85,9 @@ const COMPACT_HIDE_DELAY_MS = 240
 const PALETTE_PREWARM_DELAY_MS = 4_000
 
 let safeModeActive = isSafeModeLaunch(process.argv, process.env)
+let pendingExternalUrl: string | null = extractExternalUrlFromArgv(process.argv)
+let allowCloseConfirmed = false
+let confirmingClose = false
 const launchedAt = Date.now()
 
 function resolveCurrentAppearance(): ResolvedAppearance {
@@ -1020,6 +1024,8 @@ function createWindow(): void {
     },
     searchUrl: () => s.searchUrl(),
     searchEngines: () => s.searchEngines(),
+    newTabPosition: () => s.get().newTabPosition,
+    closeTabSelection: () => s.get().closeTabSelection,
     externalApp: (tabId, pageUrl, targetUrl) => {
       ext.request(tabId, pageUrl, targetUrl)
     },
@@ -1299,7 +1305,45 @@ function createWindow(): void {
   w.on('resized', () => {
     if (settings?.get().compactMode) syncCompactPanels()
   })
-  w.on('close', () => t.save())
+  w.on('close', (e) => {
+    if (!allowCloseConfirmed && settings) {
+      const cur = settings.get()
+      const count = t.tabCount()
+      if (shouldConfirmWindowClose(count, cur.confirmCloseWindow, cur.confirmCloseThreshold)) {
+        e.preventDefault()
+        if (confirmingClose) return
+        confirmingClose = true
+        void dialog
+          .showMessageBox(w, {
+            type: 'question',
+            buttons: ['Close window', 'Cancel'],
+            defaultId: 1,
+            cancelId: 1,
+            title: 'Close Veyra Orbit?',
+            message: `Close window with ${count} open tabs?`,
+            detail:
+              cur.startup === 'restore'
+                ? 'Your tabs will be restored next time you open Orbit.'
+                : cur.startup === 'restore-pinned'
+                  ? 'Only your pinned tabs will be restored next time you open Orbit.'
+                  : 'Your open tabs in this window will be closed.'
+          })
+          .then(({ response }) => {
+            confirmingClose = false
+            if (response === 0 && !w.isDestroyed()) {
+              allowCloseConfirmed = true
+              t.save()
+              w.close()
+            }
+          })
+          .catch(() => {
+            confirmingClose = false
+          })
+        return
+      }
+    }
+    t.save()
+  })
   w.on('closed', () => {
     finishCompactTabDrag(false)
     if (paletteWarmTimer) {
@@ -1350,7 +1394,12 @@ function createWindow(): void {
   // so the very first navigation already has Google sign-in / Client Hints rules active.
   void em.whenSessionReady(WEB_PARTITION).finally(() => {
     if (!w.isDestroyed() && tabs === t) {
-      t.restore(s.get().startup !== 'new-tab')
+      t.restore(s.get().startup)
+      if (pendingExternalUrl) {
+        const externalUrl = pendingExternalUrl
+        pendingExternalUrl = null
+        t.openExternalUrl(externalUrl, s.get().externalLinks)
+      }
       syncWorkspaceAppearanceIfChanged()
       syncCompactMode()
     }
@@ -1363,7 +1412,10 @@ function createWindow(): void {
       },
       {
         getMode: () => settings?.get().updateMode ?? 'automatic',
-        onBeforeInstall: () => tabs?.save(),
+        onBeforeInstall: () => {
+          allowCloseConfirmed = true
+          tabs?.save()
+        },
         metaFile: join(app.getPath('userData'), 'update-meta.json')
       }
     )
@@ -2310,10 +2362,28 @@ nativeTheme.on('updated', () => {
   applyWindowAppearance()
 })
 
-app.on('second-instance', () => {
+app.on('second-instance', (_e, argv) => {
   if (!win) return
   if (win.isMinimized()) win.restore()
   win.focus()
+  const externalUrl = extractExternalUrlFromArgv(argv)
+  if (externalUrl && tabs && settings) {
+    tabs.openExternalUrl(externalUrl, settings.get().externalLinks)
+  }
+})
+
+app.on('open-url', (e, url) => {
+  e.preventDefault()
+  if (!/^https?:\/\//i.test(url) || !isAllowedUrl(url)) return
+  if (tabs && settings) {
+    tabs.openExternalUrl(url, settings.get().externalLinks)
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    }
+  } else {
+    pendingExternalUrl = url
+  }
 })
 
 void app.whenReady().then(() => {

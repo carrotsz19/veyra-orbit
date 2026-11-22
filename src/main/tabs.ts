@@ -46,6 +46,15 @@ import {
   toElectronAccelerator,
   type ShortcutOverrides
 } from '../shared/shortcuts'
+import {
+  filterTabsForStartup,
+  pickNextTabAfterClose,
+  resolveNewTabInsertIndex,
+  type CloseTabSelection,
+  type ExternalLinkBehavior,
+  type NewTabPosition
+} from '../shared/behavior'
+import type { StartupBehavior } from '../shared/settings'
 import { attachPageCompat } from './compat'
 
 interface Tab {
@@ -57,6 +66,8 @@ interface Tab {
   typed?: boolean
   /** Timestamp when this tab was last active in the window (for sleeping tabs). */
   lastActiveAt: number
+  /** Monotonic activation sequence number for deterministic 'last-used' tab close selection. */
+  lastActiveSeq: number
   /** True once a typing/editing keydown occurred in the current document (gates cheap on-demand form probe). */
   hasTypedInput: boolean
   /** Cached result of the cheap on-demand unsaved-form-text check for the current document. */
@@ -118,6 +129,10 @@ export interface TabHooks {
   isLoadedExtension?(partition: string, extensionId: string): boolean
   /** Current user keyboard shortcut overrides. */
   shortcuts?(): ShortcutOverrides
+  /** Where newly created tabs are inserted ('end' or 'after-current'). */
+  newTabPosition?(): NewTabPosition
+  /** Which tab becomes active after closing a tab ('right', 'left', or 'last-used'). */
+  closeTabSelection?(): CloseTabSelection
   /** Opens the screenshot chooser (wired in Part 8). */
   onScreenshot?(): void
   /** Quits the application (Ctrl+Q). */
@@ -137,6 +152,7 @@ export class Tabs {
   private nextSplitId = 1
   private activeId: number | null = null
   private nextId = 1
+  private activeSeq = 0
   private bounds: Rect | null = null
   private pageRadius = 10
   /** The tab whose page asked for full screen (a video, a slideshow); its page fills the window. */
@@ -601,10 +617,33 @@ export class Tabs {
 
   // ---- making and closing tabs -------------------------------------------
 
+  /** Total number of open tabs across all workspaces (used for close-window confirmation). */
+  tabCount(): number {
+    return this.tabs.length
+  }
+
+  /** Opens a validated http(s) URL received from another app according to the user's preference. */
+  openExternalUrl(url: string, behavior: ExternalLinkBehavior): void {
+    if (!isAllowedUrl(url)) return
+    if (behavior === 'current-tab' && this.active) {
+      this.navigate(this.active.info.id, url, true)
+      return
+    }
+    this.create(url, { activate: true })
+  }
+
   /** A new tab. With no URL it shows the start page. */
   create(
     url = '',
-    opts: { activate?: boolean; after?: number; pinned?: boolean; lazy?: boolean; title?: string; workspaceId?: string } = {}
+    opts: {
+      activate?: boolean
+      after?: number
+      atEnd?: boolean
+      pinned?: boolean
+      lazy?: boolean
+      title?: string
+      workspaceId?: string
+    } = {}
   ): number {
     const workspaceId =
       opts.workspaceId && this.workspaces.some((w) => w.id === opts.workspaceId) ? opts.workspaceId : this.activeWorkspaceId
@@ -613,6 +652,7 @@ export class Tabs {
     const tab: Tab = {
       view: null,
       lastActiveAt: now,
+      lastActiveSeq: 0,
       hasTypedInput: false,
       hasUnsavedFormText: false,
       info: {
@@ -632,8 +672,17 @@ export class Tabs {
       }
     }
 
-    const at = opts.after !== undefined ? this.tabs.findIndex((t) => t.info.id === opts.after) + 1 : this.tabs.length
-    this.tabs.splice(at > 0 ? at : this.tabs.length, 0, tab)
+    const pos = this.hooks.newTabPosition?.() ?? 'end'
+    const at = opts.atEnd
+      ? this.tabs.length
+      : resolveNewTabInsertIndex(
+          this.tabs.map((t) => ({ id: t.info.id, workspaceId: t.info.workspaceId })),
+          workspaceId,
+          this.activeId,
+          pos,
+          opts.after
+        )
+    this.tabs.splice(at, 0, tab)
     this.sortPinned(workspaceId)
 
     if (url && isAllowedUrl(url)) {
@@ -688,10 +737,14 @@ export class Tabs {
     this.destroyView(tab)
 
     const wsAfter = this.workspaceTabs(wsId)
-    const preferredNext =
-      (siblingInGroup !== undefined ? wsAfter.find((t) => t.info.id === siblingInGroup) : undefined) ??
-      wsAfter[wsIndex] ??
-      wsAfter[wsIndex - 1]
+    const selection = this.hooks.closeTabSelection?.() ?? 'right'
+    const picked = pickNextTabAfterClose(
+      wsAfter.map((t) => ({ id: t.info.id, lastActiveSeq: t.lastActiveSeq, tab: t })),
+      wsIndex,
+      selection,
+      siblingInGroup
+    )
+    const preferredNext = picked?.tab
     if (this.workspaceActiveTab.get(wsId) === id) {
       if (preferredNext) this.workspaceActiveTab.set(wsId, preferredNext.info.id)
       else this.workspaceActiveTab.delete(wsId)
@@ -767,6 +820,7 @@ export class Tabs {
     }
 
     this.activeId = id
+    tab.lastActiveSeq = ++this.activeSeq
     this.workspaceActiveTab.set(tab.info.workspaceId, id)
 
     for (const vt of this.visibleTabs()) {
@@ -797,6 +851,7 @@ export class Tabs {
     if (this.active) this.active.lastActiveAt = now
     this.stopFind(true)
     this.activeId = id
+    tab.lastActiveSeq = ++this.activeSeq
     this.workspaceActiveTab.set(tab.info.workspaceId, id)
     tab.lastActiveAt = now
     this.lastFocusTarget = 'page'
@@ -2231,8 +2286,10 @@ export class Tabs {
     }
   }
 
-  /** Opens last time's workspaces and tabs (without loading them yet), or a clean new tab. */
-  restore(restoreTabs = true): void {
+  /** Opens last time's workspaces and tabs (all or pinned-only, without loading yet), or a clean new tab. */
+  restore(startup: StartupBehavior | boolean = 'restore'): void {
+    const mode: StartupBehavior =
+      startup === true ? 'restore' : startup === false ? 'new-tab' : startup
     let raw: unknown = null
     try {
       raw = JSON.parse(readFileSync(this.sessionFile, 'utf8')) as unknown
@@ -2247,17 +2304,18 @@ export class Tabs {
     // Lazy-load isolated workspace sessions only when they are first activated/used.
     this.hooks.ensureSession(this.partitionFor(this.activeWorkspaceId))
 
-    if (!restoreTabs) {
-      this.create('', { workspaceId: this.activeWorkspaceId, activate: true })
+    if (mode === 'new-tab') {
+      this.create('', { workspaceId: this.activeWorkspaceId, activate: true, atEnd: true })
       return
     }
 
     for (const ws of saved.workspaces) {
-      if (!ws.tabs.length) continue
-      const ids = ws.tabs.map((t) =>
-        this.create(t.url, { activate: false, lazy: true, pinned: t.pinned, title: t.title, workspaceId: ws.id })
+      const keptTabs = filterTabsForStartup(ws.tabs, mode)
+      if (!keptTabs.length) continue
+      const ids = keptTabs.map((t) =>
+        this.create(t.url, { activate: false, lazy: true, pinned: t.pinned, title: t.title, workspaceId: ws.id, atEnd: true })
       )
-      if (ws.splits?.length) {
+      if (mode === 'restore' && ws.splits?.length) {
         const groups: SplitGroup[] = []
         for (const sp of ws.splits) {
           const tabIds = sp.tabs.map((idx) => ids[idx]).filter((tid): tid is number => tid !== undefined)
@@ -2276,15 +2334,22 @@ export class Tabs {
           this.sortPinned(ws.id)
         }
       }
-      const activeIdx = Math.max(0, Math.min(ws.active, ids.length - 1))
-      this.workspaceActiveTab.set(ws.id, ids[activeIdx])
+      if (mode === 'restore') {
+        const activeIdx = Math.max(0, Math.min(ws.active, ids.length - 1))
+        this.workspaceActiveTab.set(ws.id, ids[activeIdx])
+      } else {
+        // restore-pinned: prefer the previously active tab if it was pinned, else the first pinned tab
+        const prevActive = ws.tabs[ws.active]
+        const keptIdx = prevActive?.pinned ? keptTabs.indexOf(prevActive) : 0
+        this.workspaceActiveTab.set(ws.id, ids[Math.max(0, keptIdx)])
+      }
     }
 
     const activeTabId = this.workspaceActiveTab.get(this.activeWorkspaceId)
     if (activeTabId !== undefined) {
       this.activate(activeTabId)
     } else {
-      this.create('', { workspaceId: this.activeWorkspaceId, activate: true })
+      this.create('', { workspaceId: this.activeWorkspaceId, activate: true, atEnd: true })
     }
   }
 }
