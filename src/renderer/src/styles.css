@@ -275,7 +275,7 @@ input[type='checkbox']:disabled {
 }
 .shell.compact .page {
   margin: 5px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
 }
 .shell.compact .perm {
   margin: 5px 5px 0 5px;
@@ -653,8 +653,8 @@ html.compact-panel-win #root {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 12px;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-3);
   background: transparent;
   -webkit-app-region: drag;
   user-select: none;
@@ -679,15 +679,15 @@ html[data-platform='darwin'] .titlebar {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   min-width: 0;
 }
 .wb-brand {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding-right: 11px;
-  margin-right: 3px;
+  padding-right: 12px;
+  margin-right: 2px;
   position: relative;
   white-space: nowrap;
 }
@@ -696,47 +696,53 @@ html[data-platform='darwin'] .titlebar {
   position: absolute;
   right: 0;
   top: 50%;
-  height: 16px;
-  margin-top: -8px;
+  height: 14px;
+  margin-top: -7px;
   width: 1px;
-  background: var(--separator);
+  background: var(--hairline-strong);
 }
 .wb-mark-svg {
   flex: none;
   display: block;
   border-radius: 5px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14);
+  box-shadow: var(--shadow-1);
 }
 .wb-brand-name {
+  font-family: var(--font-display);
   font-size: 13px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-weight: 600;
+  letter-spacing: -0.015em;
   color: var(--label-primary);
 }
 .wb-menus {
   display: flex;
   align-items: center;
-  gap: 1px;
+  gap: 2px;
 }
 .wb-menu-btn {
   border: 0;
   background: transparent;
   color: var(--label-secondary);
-  font-size: 12.5px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 450;
+  letter-spacing: -0.005em;
   padding: 4px 8px;
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   min-height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: background-color 0.12s, color 0.12s;
+  transition: background-color var(--t-fast) ease, color var(--t-fast) ease, transform var(--t-fast) var(--ease-out);
 }
 .wb-menu-btn:hover,
 .wb-menu-btn.open,
 .wb-menu-btn:focus-visible {
   background: var(--fill-hover);
   color: var(--label-primary);
+}
+.wb-menu-btn:active {
+  transform: scale(0.98);
+  background: var(--fill-active);
 }
 .wb-menu-hamburger {
   width: 28px;
@@ -753,11 +759,12 @@ html[data-platform='darwin'] .titlebar {
   max-width: 620px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
 }
 .nav {
   flex: none;
   display: flex;
+  align-items: center;
   gap: 2px;
 }
 .icon-btn {
@@ -765,20 +772,21 @@ html[data-platform='darwin'] .titlebar {
   height: 28px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   color: var(--label-secondary);
   -webkit-app-region: no-drag;
-  transition: background 0.15s, transform var(--spring-snappy-ms) var(--spring-snappy);
+  transition: background-color var(--t-fast) ease, color var(--t-fast) ease, transform var(--t-fast) var(--ease-out);
 }
 .icon-btn:hover:not(:disabled) {
   background: var(--fill-hover);
   color: var(--label-primary);
 }
 .icon-btn:active:not(:disabled) {
-  transform: scale(0.9);
+  background: var(--fill-active);
+  transform: scale(0.96);
 }
 .icon-btn:disabled {
-  opacity: 0.35;
+  opacity: 0.34;
 }
 .omni {
   flex: 1;
@@ -787,19 +795,21 @@ html[data-platform='darwin'] .titlebar {
   margin: 0 auto;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 11px;
-  border-radius: 9px;
+  gap: 7px;
+  padding: 0 12px;
+  border-radius: var(--r-pill);
   background: var(--fill-tertiary);
+  box-shadow: inset 0 0 0 1px var(--hairline);
   -webkit-app-region: no-drag;
-  transition: background 0.15s, box-shadow 0.2s var(--ease-out);
+  transition: background-color var(--t-base) ease, box-shadow var(--t-base) var(--ease-out);
 }
 .omni:hover {
   background: var(--fill-hover);
+  box-shadow: inset 0 0 0 1px var(--hairline-strong);
 }
 .omni.editing {
-  background: var(--bg-elevated);
-  box-shadow: var(--elev-1), 0 0 0 2px var(--tint-soft);
+  background: var(--bg-surface-raised);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tint) 58%, transparent), 0 0 0 3px var(--tint-soft), var(--shadow-1);
 }
 .omni input {
   flex: 1;
@@ -807,15 +817,25 @@ html[data-platform='darwin'] .titlebar {
   border: 0;
   outline: 0;
   background: none;
+  font-size: 12.5px;
+  color: var(--label-primary);
   user-select: text;
   text-align: center;
+}
+.omni input::placeholder {
+  color: var(--label-tertiary);
 }
 .omni.editing input {
   text-align: left;
 }
 .omni-icon {
   display: grid;
+  flex: none;
   color: var(--label-tertiary);
+  transition: color var(--t-fast) ease;
+}
+.omni.editing .omni-icon {
+  color: var(--label-secondary);
 }
 .omni-icon.warn {
   color: var(--warning);
@@ -824,21 +844,22 @@ html[data-platform='darwin'] .titlebar {
   flex: none;
   height: 24px;
   padding: 0 9px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--fill-tertiary);
+  box-shadow: inset 0 0 0 1px var(--hairline);
   color: var(--label-secondary);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   -webkit-app-region: no-drag;
-  transition: background 0.15s, color 0.15s, transform var(--spring-snappy-ms) var(--spring-snappy);
+  transition: background-color var(--t-fast) ease, color var(--t-fast) ease, transform var(--t-fast) var(--ease-out);
 }
 .zoom-pill:hover {
   background: var(--fill-hover);
   color: var(--label-primary);
 }
 .zoom-pill:active {
-  transform: scale(0.94);
+  transform: scale(0.96);
 }
 .caption-space {
   width: max(138px, calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px)));
@@ -1470,9 +1491,9 @@ html[data-material='solid'] .peek-shell {
   flex: 1;
   min-height: 0;
   margin: 0 var(--gap) var(--gap) 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--bg-elevated);
-  box-shadow: var(--elev-2);
+  box-shadow: 0 0 0 1px var(--hairline), var(--shadow-2);
   overflow: hidden;
   position: relative;
 }
@@ -1937,13 +1958,14 @@ html[data-material='solid'] .peek-shell {
 }
 
 .brand-dev {
-  margin-left: 2px;
+  margin-left: 3px;
   padding: 1px 5px;
-  border-radius: 5px;
-  background: var(--tint);
-  color: var(--on-tint);
-  font: 600 9px/1.4 -apple-system, 'Segoe UI', system-ui, sans-serif;
-  letter-spacing: 0.06em;
+  border-radius: var(--r-xs);
+  background: var(--tint-soft);
+  color: var(--tint);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tint) 24%, transparent);
+  font: 600 9px/1.35 var(--font-sans);
+  letter-spacing: 0.08em;
 }
 
 /* ---- update ready note ------------------------------------------------- */

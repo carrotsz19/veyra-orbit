@@ -679,7 +679,7 @@ export function TitleBar({
             disabled={!tab?.canGoBack}
             onClick={() => api.back()}
           >
-            <ArrowLeft size={16} />
+            <ArrowLeft size={15} strokeWidth={1.75} />
           </button>
           <button
             type="button"
@@ -689,11 +689,11 @@ export function TitleBar({
             disabled={!tab?.canGoForward}
             onClick={() => api.forward()}
           >
-            <ArrowRight size={16} />
+            <ArrowRight size={15} strokeWidth={1.75} />
           </button>
           {tab?.loading ? (
             <button type="button" className="icon-btn" aria-label="Stop" title="Stop" onClick={() => api.stop()}>
-              <X size={16} />
+              <X size={15} strokeWidth={1.75} />
             </button>
           ) : (
             <button
@@ -704,7 +704,7 @@ export function TitleBar({
               disabled={!tab?.url || isInternalUrl(tab.url)}
               onClick={() => api.reload()}
             >
-              <RotateCw size={15} />
+              <RotateCw size={14} strokeWidth={1.75} />
             </button>
           )}
         </div>
