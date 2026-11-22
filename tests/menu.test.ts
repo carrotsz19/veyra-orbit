@@ -84,7 +84,9 @@ test('buildMenus produces all seven Orbit menus with shortcuts and checked/disab
   const view = byId.get('view')!
   assert.equal(view.find((i) => i.id === 'view:palette')?.keys, 'Ctrl+K')
   assert.equal(view.find((i) => i.id === 'view:compact')?.checked, true)
+  assert.equal(view.find((i) => i.id === 'view:bookmark-bar')?.keys, 'Ctrl+Shift+B')
   assert.equal(view.find((i) => i.id === 'view:split')?.keys, 'Ctrl+Shift+\\')
+  assert.ok(view.some((i) => i.id === 'view:split-rotate'))
   assert.equal(view.find((i) => i.id === 'view:zoom-reset')?.disabled, false)
   assert.equal(view.find((i) => i.id === 'view:fullscreen')?.checked, false)
   assert.equal(view.find((i) => i.id === 'view:devtools')?.keys, 'F12')

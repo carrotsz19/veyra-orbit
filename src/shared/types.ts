@@ -106,6 +106,12 @@ export interface Bookmark {
   url: string
   title: string
   created: number
+  /** Folder name for grouping on the bookmark bar, or '' for top-level bar items. */
+  folder?: string
+  /** Display order position on the bookmark bar. */
+  position?: number
+  /** Optional cached favicon URL supplied by main when listing bookmarks. */
+  favicon?: string
 }
 
 export type { Suggestion } from './suggest'
@@ -137,6 +143,7 @@ export type {
 } from './startpage'
 export type {
   AddressBarAlign,
+  BookmarkBarMode,
   MenuBarStyle,
   MotionMode,
   ResolvedAppearance,
@@ -365,8 +372,11 @@ export interface VeyraApi {
   clearHistory(sinceMsAgo: number): Promise<void>
   bookmarks(): Promise<Bookmark[]>
   toggleBookmark(): void
+  toggleBookmarkBar(): void
+  addBookmark(url: string, title: string, folder?: string): Promise<boolean>
   removeBookmark(url: string): Promise<void>
-  renameBookmark(url: string, title: string): Promise<void>
+  renameBookmark(url: string, title: string, folder?: string): Promise<void>
+  reorderBookmarks(order: { url: string; position: number }[]): Promise<void>
   onDataChanged(cb: () => void): () => void
   /** Sent once the UI shows the page's picture, so the real page can be taken out without a flash. */
   hidePageForOverlay(): void

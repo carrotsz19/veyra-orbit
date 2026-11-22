@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BrowserState, DownloadInfo, SettingsView, TabInfo, UpdateState, WindowState } from '@shared/types'
 import '../extensions.css'
 import { applyResolvedAppearance } from '../applyAppearance'
+import { shouldShowBookmarkBar } from '@shared/bookmarks'
+import { BookmarkBar } from './BookmarkBar'
 import { Sidebar } from './Sidebar'
 import { TitleBar } from './TitleBar'
 
@@ -119,6 +121,7 @@ export function CompactTitlebarWindow(): React.JSX.Element {
   const [update, setUpdate] = useState<UpdateState | null>(null)
   const [winState, setWinState] = useState<WindowState>({ focused: true, maximized: false, fullscreen: false })
   const [omniboxEditing, setOmniboxEditing] = useState(false)
+  const [bmEditing, setBmEditing] = useState(false)
   const [visible, setVisible] = useState(false)
   const panel = window.veyraCompactPanel!
 
@@ -140,10 +143,15 @@ export function CompactTitlebarWindow(): React.JSX.Element {
   }, [panel])
 
   useEffect(() => {
-    api.setCompactPin('omnibox', omniboxEditing)
-  }, [omniboxEditing])
+    api.setCompactPin('omnibox', omniboxEditing || bmEditing)
+  }, [omniboxEditing, bmEditing])
 
   const active: TabInfo | undefined = state.tabs.find((t) => t.id === state.activeId)
+  const showBookmarkBar = shouldShowBookmarkBar(
+    settings?.appearance.bookmarkBar ?? 'start-page',
+    !!active && !active.url && !active.error,
+    winState.fullscreen
+  )
   const activeWorkspace = state.workspaces.find((w) => w.id === state.activeWorkspaceId)
   const noopShot = useCallback((): void => {}, [])
   const draggingRef = useRef(false)
@@ -218,6 +226,14 @@ export function CompactTitlebarWindow(): React.JSX.Element {
           onCompactDragStart={handleCompactDragStart}
           onCompactDragDoubleClick={() => api.winCmd('maximize')}
         />
+        {showBookmarkBar && (
+          <BookmarkBar
+            tab={active}
+            inCompactPanel
+            onPointerEdge={(inside) => api.setCompactHover('toolbar', inside)}
+            onEditingChange={setBmEditing}
+          />
+        )}
       </div>
     </div>
   )

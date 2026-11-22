@@ -141,7 +141,29 @@ export function Omnibox({
           pick(list[sel])
         }}
       >
-        <span className={`omni-icon ${insecure ? 'warn' : ''}`} title={secure ? 'Connection is secure' : insecure ? 'Connection is not secure' : undefined}>
+        <span
+          className={`omni-icon ${insecure ? 'warn' : ''} ${canStar && !editing ? 'draggable' : ''}`}
+          draggable={canStar && !editing}
+          title={
+            canStar && !editing
+              ? `${secure ? 'Connection is secure' : insecure ? 'Connection is not secure' : 'Site info'} · Drag to bookmark bar`
+              : secure
+                ? 'Connection is secure'
+                : insecure
+                  ? 'Connection is not secure'
+                  : undefined
+          }
+          onDragStart={(e) => {
+            if (!canStar || !tab) return
+            e.dataTransfer.setData(
+              'application/x-orbit-bookmark',
+              JSON.stringify({ url, title: tab.title || displayUrl(url) })
+            )
+            e.dataTransfer.setData('text/uri-list', url)
+            e.dataTransfer.setData('text/plain', url)
+            e.dataTransfer.effectAllowed = 'copyLink'
+          }}
+        >
           {editing || !url ? <Search size={14} /> : secure ? <Lock size={13} /> : insecure ? <TriangleAlert size={14} /> : isInternalUrl(url) ? <AppWindow size={14} /> : <Search size={14} />}
         </span>
         <input

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { Store } from '../src/main/store.ts'
 
 function fresh(): { s: Store; done: () => void } {
@@ -94,4 +95,55 @@ test('site permissions persist per origin and reject invalid origins or non-aska
     ['https://meet.example.com|notifications']
   )
   done()
+})
+
+test('bookmarks migration preserves legacy rows safely and supports folders and reordering', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orbit-store-migrate-'))
+  const dbPath = join(dir, 'orbit.db')
+  try {
+    // Seed a legacy pre-folder bookmarks table
+    const legacy = new DatabaseSync(dbPath)
+    legacy.exec(`
+      CREATE TABLE bookmarks (
+        url TEXT PRIMARY KEY,
+        title TEXT NOT NULL DEFAULT '',
+        created INTEGER NOT NULL
+      );
+    `)
+    legacy.prepare('INSERT INTO bookmarks (url, title, created) VALUES (?, ?, ?)').run('https://old.example/', 'Old', 1000)
+    legacy.prepare('INSERT INTO bookmarks (url, title, created) VALUES (?, ?, ?)').run('https://new.example/', 'New', 2000)
+    legacy.close()
+
+    const s = new Store(dbPath)
+    const migrated = s.bookmarks()
+    assert.deepEqual(
+      migrated.map((b) => ({ url: b.url, title: b.title, folder: b.folder, position: b.position })),
+      [
+        { url: 'https://new.example/', title: 'New', folder: '', position: 0 },
+        { url: 'https://old.example/', title: 'Old', folder: '', position: 1 }
+      ]
+    )
+
+    // Add with folder, edit folder, and reorder
+    assert.equal(s.addBookmark('https://math.example/', 'Math', 'Study'), true)
+    assert.equal(s.addBookmark('javascript:alert(1)', 'Bad'), false)
+    s.renameBookmark('https://old.example/', 'Old Renamed', 'Study')
+    s.reorderBookmarks([
+      { url: 'https://math.example/', position: 0 },
+      { url: 'https://new.example/', position: 1 },
+      { url: 'https://old.example/', position: 2 }
+    ])
+    const reordered = s.bookmarks()
+    assert.deepEqual(
+      reordered.map((b) => ({ url: b.url, title: b.title, folder: b.folder })),
+      [
+        { url: 'https://math.example/', title: 'Math', folder: 'Study' },
+        { url: 'https://new.example/', title: 'New', folder: '' },
+        { url: 'https://old.example/', title: 'Old Renamed', folder: 'Study' }
+      ]
+    )
+    s.close()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

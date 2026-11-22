@@ -300,6 +300,7 @@ html[data-sidebar-side='right'] .shell:not(.fullscreen):not(.compact) .side {
   grid-row: 2;
 }
 html[data-sidebar-side='right'] .shell:not(.fullscreen):not(.compact) .page,
+html[data-sidebar-side='right'] .shell:not(.fullscreen):not(.compact) .bm-bar,
 html[data-sidebar-side='right'] .shell:not(.fullscreen):not(.compact) .perm,
 html[data-sidebar-side='right'] .shell:not(.fullscreen):not(.compact) .updated-toast,
 html[data-sidebar-side='right'] .shell:not(.fullscreen):not(.compact) .find {
@@ -347,6 +348,7 @@ html[data-sidebar-side='right'] .shell:not(.fullscreen):not(.compact) .find {
 }
 .shell.fullscreen .side,
 .shell.fullscreen .titlebar,
+.shell.fullscreen .bm-bar,
 .shell.fullscreen .perm,
 .shell.fullscreen .updated-toast,
 .shell.fullscreen .find {
@@ -964,6 +966,12 @@ html[data-platform='darwin'] .titlebar {
   color: var(--label-tertiary);
   transition: color var(--t-fast) var(--ease-state);
 }
+.omni-icon.draggable {
+  cursor: grab;
+}
+.omni-icon.draggable:active {
+  cursor: grabbing;
+}
 .omni.editing .omni-icon {
   color: var(--label-secondary);
 }
@@ -1052,6 +1060,152 @@ html[data-platform='darwin'] .titlebar {
 }
 .updated-toast-link:hover {
   background: var(--tint-soft);
+}
+
+/* ---- bookmark bar (Safari/Chrome-style calm strip below toolbar) -------- */
+.bm-bar {
+  position: relative;
+  flex: none;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0 var(--gap) 4px 0;
+  padding: 0 4px;
+  border-radius: var(--r-sm);
+  background: transparent;
+  transition: background-color var(--t-fast) var(--ease-state), box-shadow var(--t-fast) var(--ease-state);
+}
+.bm-bar.compact {
+  margin: 0;
+  padding: 0 8px 4px;
+  height: 30px;
+  border-top: 1px solid var(--hairline);
+  border-radius: 0;
+}
+.bm-bar.drop-target {
+  background: var(--tint-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tint) 45%, transparent);
+}
+.bm-track {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow: hidden;
+}
+.bm-measure {
+  position: absolute;
+  left: 4px;
+  top: 0;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.bm-item {
+  flex: none;
+  height: 24px;
+  max-width: 164px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border-radius: var(--r-xs);
+  color: var(--label-secondary);
+  font-size: 12px;
+  font-weight: 450;
+  white-space: nowrap;
+  transition: background-color var(--t-fast) var(--ease-state), color var(--t-fast) var(--ease-state), transform var(--t-fast) var(--ease-state);
+}
+.bm-item:hover,
+.bm-item.open {
+  background: var(--fill-hover);
+  color: var(--label-primary);
+}
+.bm-item:active {
+  transform: scale(0.97);
+  background: var(--fill-active);
+}
+.bm-item.dragging {
+  opacity: 0.45;
+}
+.bm-item.drag-over {
+  box-shadow: inset 2px 0 0 var(--tint);
+  background: var(--tint-soft);
+}
+.bm-fav {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  border-radius: 3px;
+  object-fit: contain;
+}
+.bm-fav-glyph,
+.bm-folder-icon,
+.bm-caret {
+  flex: none;
+  color: var(--label-tertiary);
+}
+.bm-item:hover .bm-fav-glyph,
+.bm-item:hover .bm-folder-icon,
+.bm-item:hover .bm-caret,
+.bm-item.open .bm-folder-icon,
+.bm-item.open .bm-caret {
+  color: var(--label-secondary);
+}
+.bm-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bm-overflow {
+  width: 26px;
+  padding: 0;
+  justify-content: center;
+}
+.bm-empty {
+  font-size: 11.5px;
+  color: var(--label-tertiary);
+  padding: 0 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bm-edit-form {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.bm-edit-input {
+  flex: 1;
+  min-width: 80px;
+  max-width: 220px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--hairline-strong);
+  background: var(--bg-surface-raised);
+  font-size: 12px;
+  color: var(--label-primary);
+  outline: none;
+  user-select: text;
+}
+.bm-edit-input:focus {
+  border-color: color-mix(in srgb, var(--tint) 60%, transparent);
+  box-shadow: 0 0 0 2px var(--tint-ring);
+}
+.bm-edit-folder {
+  max-width: 150px;
+}
+.bm-edit-save {
+  color: var(--tint-text, var(--tint));
 }
 .caption-space {
   width: max(138px, calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px)));

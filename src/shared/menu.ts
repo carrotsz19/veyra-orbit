@@ -88,6 +88,7 @@ export interface MenuBuildContext {
   workspaces: readonly MenuWorkspaceContext[]
   activeWorkspaceId: string
   compactMode: boolean
+  bookmarkBarVisible?: boolean
   isSplit?: boolean
   splitPaneCount?: number
   splitOrientation?: SplitOrientation
@@ -168,6 +169,7 @@ export function buildMenus(ctx: MenuBuildContext): MenuSection[] {
   const viewItems: MenuEntry[] = [
     { kind: 'item', id: 'view:palette', label: 'Command bar', keys: 'Ctrl+K' },
     { kind: 'item', id: 'view:compact', label: 'Compact mode', keys: 'Ctrl+Shift+S', checked: ctx.compactMode },
+    { kind: 'item', id: 'view:bookmark-bar', label: 'Bookmark bar', keys: 'Ctrl+Shift+B', checked: !!ctx.bookmarkBarVisible },
     {
       kind: 'item',
       id: 'view:split',

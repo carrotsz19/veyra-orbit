@@ -23,6 +23,7 @@ import {
   shouldCollapseMenus
 } from '@shared/menu'
 import { isInternalUrl } from '@shared/url'
+import { shouldShowBookmarkBar } from '@shared/bookmarks'
 import { Omnibox } from './Omnibox'
 import { ExtensionToolbar } from './ExtensionToolbar'
 
@@ -237,6 +238,11 @@ export function TitleBar({
         workspaces: state.workspaces.map((w) => ({ id: w.id, name: w.name, private: w.private })),
         activeWorkspaceId: state.activeWorkspaceId,
         compactMode: !!settings?.compactMode,
+        bookmarkBarVisible: shouldShowBookmarkBar(
+          settings?.appearance.bookmarkBar ?? 'start-page',
+          !!tab && !tab.url && !tab.error,
+          winState.fullscreen
+        ),
         isSplit: !!activeSplitGroup,
         splitPaneCount: activeSplitGroup?.tabIds.length,
         splitOrientation: activeSplitGroup?.orientation,
@@ -248,7 +254,7 @@ export function TitleBar({
         isDev: __CHANNEL__ === 'dev',
         updateReadyVersion: update?.status === 'ready' ? (update.availableVersion ?? '') : null
       }),
-    [tab, activeSplitGroup, state.workspaces, state.activeWorkspaceId, state.canReopenClosed, settings?.compactMode, winState.fullscreen, history, bookmarks, update?.status, update?.availableVersion]
+    [tab, activeSplitGroup, state.workspaces, state.activeWorkspaceId, state.canReopenClosed, settings?.compactMode, settings?.appearance.bookmarkBar, winState.fullscreen, history, bookmarks, update?.status, update?.availableVersion]
   )
 
   const recentUrls = useMemo(() => recentHistoryItems(history.map((h) => ({ url: h.url, title: h.title }))), [history])
@@ -263,6 +269,8 @@ export function TitleBar({
 
   const runAction = useCallback(
     (id: string): void => {
+      if (id.startsWith('bmbar:') || id.startsWith('submenu:bmbar-folder:')) return
+      if (!liveRef.current.openTarget && (id.startsWith('submenu:') || id === 'submenu-back')) return
       if (id.startsWith('submenu:')) {
         const subId = id.slice('submenu:'.length) as MenuId
         if (subId === 'history' || subId === 'bookmarks') refreshLibraryData()
@@ -374,6 +382,9 @@ export function TitleBar({
           return
         case 'view:compact':
           api.toggleCompactMode()
+          return
+        case 'view:bookmark-bar':
+          api.toggleBookmarkBar()
           return
         case 'view:split':
           api.splitWithNext()

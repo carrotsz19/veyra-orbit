@@ -36,6 +36,7 @@ import {
 } from '../shared/palette'
 import { PEEK_TAB_ID, isPeekAction } from '../shared/peek'
 import { dropPlacementFromPoint, isSplitOrientation, isSplitPlacement, type SplitPlacement } from '../shared/split'
+import { shouldShowBookmarkBar, toggleBookmarkBarMode } from '../shared/bookmarks'
 import { shouldLoadExtensionsForPartition } from '../shared/extensions'
 import {
   DEFAULT_APPEARANCE,
@@ -168,6 +169,7 @@ let paletteWarmTimer: NodeJS.Timeout | null = null
 
 const COMPACT_SIDEBAR_W = 264
 const COMPACT_TITLEBAR_H = 52
+const COMPACT_BOOKMARK_BAR_H = 30
 const COMPACT_TITLEBAR_OPEN_H = 380
 const COMPACT_MARGIN = 6
 
@@ -200,12 +202,25 @@ function broadcastUi(channel: string, payload?: unknown): void {
   compactTitlebar?.send(channel, payload)
 }
 
+function isBookmarkBarVisibleNow(): boolean {
+  const mode = settings?.get().appearance.bookmarkBar ?? 'start-page'
+  const st = tabs?.state()
+  const active = st?.tabs.find((t) => t.id === st.activeId)
+  const isStartPage = !!active && !active.url && !active.error
+  const isFs = !!tabs?.isPageFullscreen() || (!!win && !win.isDestroyed() && win.isFullScreen())
+  return shouldShowBookmarkBar(mode, isStartPage, isFs)
+}
+
+function compactTitlebarHeight(): number {
+  return COMPACT_TITLEBAR_H + (isBookmarkBarVisibleNow() ? COMPACT_BOOKMARK_BAR_H : 0)
+}
+
 function compactSidebarGeometry(): { offset: { x: number; y: number }; size: { width: number; height: number } } {
   const cb = win && !win.isDestroyed() ? win.getContentBounds() : { width: 1200, height: 800 }
   const z = win && !win.isDestroyed() ? win.webContents.getZoomFactor() : 1
   const cw = Math.round(cb.width / z)
   const ch = Math.round(cb.height / z)
-  const top = compactState.toolbar ? COMPACT_TITLEBAR_H + 2 : COMPACT_MARGIN
+  const top = compactState.toolbar ? compactTitlebarHeight() + 2 : COMPACT_MARGIN
   const appCfg = settings?.get().appearance ?? DEFAULT_APPEARANCE
   const width = Math.min(Math.max(appCfg.sidebarWidth + 16, COMPACT_SIDEBAR_W), Math.max(220, cw - COMPACT_MARGIN * 2))
   const x = appCfg.sidebarSide === 'right' ? Math.max(COMPACT_MARGIN, cw - width - COMPACT_MARGIN) : COMPACT_MARGIN
@@ -220,7 +235,8 @@ function compactTitlebarGeometry(): { offset: { x: number; y: number }; size: { 
   const z = win && !win.isDestroyed() ? win.webContents.getZoomFactor() : 1
   const cw = Math.round(cb.width / z)
   const ch = Math.round(cb.height / z)
-  const h = compactOmniboxOpen ? Math.min(COMPACT_TITLEBAR_OPEN_H, Math.max(COMPACT_TITLEBAR_H, ch - COMPACT_MARGIN * 2)) : COMPACT_TITLEBAR_H
+  const baseH = compactTitlebarHeight()
+  const h = compactOmniboxOpen ? Math.min(COMPACT_TITLEBAR_OPEN_H, Math.max(baseH, ch - COMPACT_MARGIN * 2)) : baseH
   return {
     offset: { x: COMPACT_MARGIN, y: COMPACT_MARGIN },
     size: { width: Math.max(320, cw - COMPACT_MARGIN * 2), height: h }
@@ -528,6 +544,18 @@ function toggleCompactMode(): void {
   settings.update({ compactMode: !settings.get().compactMode })
   sendSettings()
   syncCompactMode()
+}
+
+function toggleBookmarkBar(): void {
+  if (!settings) return
+  const st = tabs?.state()
+  const active = st?.tabs.find((t) => t.id === st.activeId)
+  const isStartPage = !!active && !active.url && !active.error
+  const next = toggleBookmarkBarMode(settings.get().appearance.bookmarkBar, isStartPage)
+  settings.update({ appearance: { bookmarkBar: next } })
+  sendSettings()
+  applyWindowAppearance()
+  if (settings.get().compactMode) syncCompactPanels()
 }
 
 function buildPaletteContext(query: string, mode: PaletteMode): PaletteContext | null {
@@ -979,6 +1007,7 @@ function createWindow(): void {
       }
     },
     toggleCompactMode: () => toggleCompactMode(),
+    toggleBookmarkBar: () => toggleBookmarkBar(),
     onMenuOpen: (open) => {
       compactPins.menu = open
       if (settings?.get().compactMode) sendCompactState()
@@ -1013,6 +1042,9 @@ function createWindow(): void {
     onState: (st) => {
       compactSidebar?.send('state', st)
       compactTitlebar?.send('state', st)
+      if (settings?.get().compactMode && compactTitlebar?.isRevealed()) {
+        syncCompactPanels()
+      }
       logSmoke('state', {
         activeId: st.activeId,
         tabCount: st.tabs.length,
@@ -1822,15 +1854,45 @@ handle('history:clear', (msAgo) => {
   store?.clear(msAgo === 0 ? 0 : Date.now() - msAgo)
   dataChanged()
 })
-handleSurface('bookmarks:list', () => store?.bookmarks() ?? [])
+handleSurface('bookmarks:list', () => {
+  const list = store?.bookmarks() ?? []
+  return list.map((b) => ({
+    ...b,
+    favicon: tabs?.cachedFavicon(b.url)
+  }))
+})
 onSurface('bookmark:toggle', (t) => t.toggleBookmark())
-handle('bookmark:remove', (url) => {
+onSurface('bookmark-bar:toggle', () => toggleBookmarkBar())
+handleSurface('bookmark:add', (url, title, folder) => {
+  if (!str(url) || !isAllowedUrl(url)) return false
+  const ok = store?.addBookmark(url, str(title) ? title : '', str(folder) ? folder : '') ?? false
+  if (ok) dataChanged()
+  return ok
+})
+handleSurface('bookmark:remove', (url) => {
   if (str(url)) store?.removeBookmark(url)
   dataChanged()
 })
-handle('bookmark:rename', (url, title) => {
-  if (str(url) && str(title)) store?.renameBookmark(url, title)
+handleSurface('bookmark:rename', (url, title, folder) => {
+  if (str(url) && str(title)) {
+    store?.renameBookmark(url, title, str(folder) ? folder : undefined)
+  }
   dataChanged()
+})
+handleSurface('bookmark:reorder', (rawOrder) => {
+  if (!Array.isArray(rawOrder) || !store) return
+  const valid: { url: string; position: number }[] = []
+  for (const item of rawOrder.slice(0, 2000)) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const rec = item as Record<string, unknown>
+    if (str(rec.url) && num(rec.position)) {
+      valid.push({ url: rec.url, position: rec.position })
+    }
+  }
+  if (valid.length > 0) {
+    store.reorderBookmarks(valid)
+    dataChanged()
+  }
 })
 
 handle('settings:get', () => settings?.view() ?? null)
@@ -1858,7 +1920,12 @@ handle('settings:update', (patch) => {
   }
   sendSettings()
   applyWindowAppearance()
-  if (view.compactMode && (view.appearance.sidebarSide !== prev.appearance.sidebarSide || view.appearance.sidebarWidth !== prev.appearance.sidebarWidth)) {
+  if (
+    view.compactMode &&
+    (view.appearance.sidebarSide !== prev.appearance.sidebarSide ||
+      view.appearance.sidebarWidth !== prev.appearance.sidebarWidth ||
+      view.appearance.bookmarkBar !== prev.appearance.bookmarkBar)
+  ) {
     syncCompactPanels()
   }
   return view

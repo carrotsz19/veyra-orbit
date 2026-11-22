@@ -82,6 +82,8 @@ export interface TabHooks {
   sleepPolicy(): SleepPolicy
   /** Toggles Zen-style compact mode (Ctrl+Shift+S). */
   toggleCompactMode(): void
+  /** Toggles the bookmark bar (Ctrl+Shift+B). */
+  toggleBookmarkBar?(): void
   /** Notifies compact mode when a native context menu opens or closes. */
   onMenuOpen?(open: boolean): void
   /** Notifies compact mode when the address bar is about to be focused. Returns true if handled externally. */
@@ -1686,6 +1688,7 @@ export class Tabs {
       if (key === 'k' && !input.shift) return run(() => this.hooks.onTogglePalette?.('command'))
       if (key === 'n' && input.shift) return run(() => this.createPrivateWorkspace())
       if (key === 's' && input.shift) return run(() => this.hooks.toggleCompactMode())
+      if (key === 'b' && input.shift) return run(() => this.hooks.toggleBookmarkBar?.())
       if (input.shift && (key === '\\' || key === '|' || input.code === 'Backslash')) return run(() => this.splitWithNext())
       if (key === 't' && input.shift) return run(() => this.reopenClosed())
       if (key === 't') return run(() => { if (!this.hooks.onNewTabShortcut?.()) this.create() })

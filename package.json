@@ -10,7 +10,7 @@
     "build": "npm run typecheck && electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "electron-vite preview",
-    "test": "node --test tests/url.test.ts tests/suggest.test.ts tests/store.test.ts tests/format.test.ts tests/downloads.test.ts tests/settings.test.ts tests/appearance.test.ts tests/startpage.test.ts tests/external.test.ts tests/updates.test.ts tests/release.test.ts tests/compat.test.ts tests/workspaces.test.ts tests/sleep.test.ts tests/memory.test.ts tests/compact.test.ts tests/menu.test.ts tests/split.test.ts tests/palette.test.ts tests/peek.test.ts tests/importer.test.ts tests/extensions.test.ts",
+    "test": "node --test tests/url.test.ts tests/suggest.test.ts tests/store.test.ts tests/format.test.ts tests/downloads.test.ts tests/settings.test.ts tests/appearance.test.ts tests/startpage.test.ts tests/external.test.ts tests/updates.test.ts tests/release.test.ts tests/compat.test.ts tests/workspaces.test.ts tests/sleep.test.ts tests/memory.test.ts tests/compact.test.ts tests/menu.test.ts tests/split.test.ts tests/palette.test.ts tests/peek.test.ts tests/importer.test.ts tests/extensions.test.ts tests/bookmarks.test.ts",
     "icons:generate": "node tools/generate-icons.mjs",
     "dist": "npm run build && electron-builder --win --publish never",
     "postinstall": "node node_modules/electron/install.js",

@@ -21,6 +21,7 @@ import {
   type SplitPlacement
 } from '@shared/split'
 import { APPEARANCE_LIMITS, DEFAULT_APPEARANCE } from '@shared/appearance'
+import { shouldShowBookmarkBar } from '@shared/bookmarks'
 import './library.css'
 import './settings.css'
 import './startpage.css'
@@ -29,6 +30,7 @@ import './extensions.css'
 import { applyResolvedAppearance } from './applyAppearance'
 import { Sidebar } from './components/Sidebar'
 import { TitleBar } from './components/TitleBar'
+import { BookmarkBar } from './components/BookmarkBar'
 import { StartPage } from './components/StartPage'
 import { ErrorPage } from './components/ErrorPage'
 import { ExternalAppBar, PermissionBar } from './components/PermissionBar'
@@ -255,6 +257,10 @@ export function App(): React.JSX.Element {
   }, [sendBounds])
 
   const appearance = settings?.appearance ?? DEFAULT_APPEARANCE
+  const active: TabInfo | undefined = state.tabs.find((t) => t.id === state.activeId)
+  const showBookmarkBar =
+    !compact.enabled &&
+    shouldShowBookmarkBar(appearance.bookmarkBar, !!active && !active.url && !active.error, pageFullscreen || winState.fullscreen)
 
   useLayoutEffect(() => {
     pageFullscreenRef.current = pageFullscreen
@@ -265,6 +271,7 @@ export function App(): React.JSX.Element {
   }, [
     pageFullscreen,
     compact.enabled,
+    showBookmarkBar,
     asks.length,
     externalAsks.length,
     extInstallAsks.length,
@@ -278,7 +285,6 @@ export function App(): React.JSX.Element {
     sendBounds
   ])
 
-  const active: TabInfo | undefined = state.tabs.find((t) => t.id === state.activeId)
   const activeSplit = useMemo(() => findSplitGroup(state.splits, state.activeId), [state.splits, state.activeId])
   const visiblePanes: TabInfo[] = useMemo(() => {
     if (!active) return []
@@ -522,6 +528,7 @@ export function App(): React.JSX.Element {
         />
       )}
       <main className="main">
+        {showBookmarkBar && <BookmarkBar tab={active} />}
         {tabAsks.length > 0 && <PermissionBar ask={tabAsks[0]} />}
         {tabExternalAsks.length > 0 && <ExternalAppBar ask={tabExternalAsks[0]} />}
         {extInstallAsks.length > 0 && <ExtensionInstallBar ask={extInstallAsks[0]} />}
