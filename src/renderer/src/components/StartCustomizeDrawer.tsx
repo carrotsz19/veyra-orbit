@@ -66,7 +66,7 @@ export function StartCustomizeDrawer({
 }: Props): React.JSX.Element {
   const [nameDraft, setNameDraft] = useState(config.userName)
   const [dragIdx, setDragIdx] = useState<number | null>(null)
-  const closeBtnRef = useRef<HTMLButtonElement>(null)
+  const drawerRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     setNameDraft(config.userName)
@@ -74,7 +74,7 @@ export function StartCustomizeDrawer({
 
   useEffect(() => {
     if (!open) return
-    requestAnimationFrame(() => closeBtnRef.current?.focus({ preventScroll: true }))
+    requestAnimationFrame(() => drawerRef.current?.focus({ preventScroll: true }))
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
         e.preventDefault()
@@ -100,6 +100,8 @@ export function StartCustomizeDrawer({
     <>
       {open && <div className="sp-drawer-backdrop" aria-hidden onClick={onClose} />}
       <aside
+        ref={drawerRef}
+        tabIndex={-1}
         className={`sp-drawer ${open ? 'open' : ''}`}
         role="dialog"
         aria-modal="false"
@@ -109,7 +111,6 @@ export function StartCustomizeDrawer({
         <header className="sp-drawer-head">
           <h2>Customize start page</h2>
           <button
-            ref={closeBtnRef}
             type="button"
             className="icon-btn small"
             aria-label="Close"

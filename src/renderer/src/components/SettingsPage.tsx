@@ -57,6 +57,11 @@ const PERM_OPTIONS: readonly SegmentedOption<'allow' | 'block'>[] = [
   { value: 'block', label: 'Block', tone: 'block' }
 ]
 
+const ENGINE_OPTIONS = SEARCH_ENGINES.map((engine) => ({
+  value: engine.id,
+  label: engine.name
+}))
+
 const SETTING_SECTIONS = [
   { id: 'set-general', label: 'General' },
   { id: 'set-import', label: 'Import data' },
@@ -270,19 +275,12 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
                   <div className="set-label">Address bar search</div>
                   <div className="set-desc">Used when you search from the address bar, start page, or right-click menu.</div>
                 </div>
-                <div className="set-pills" role="radiogroup" aria-label="Search engine">
-                  {SEARCH_ENGINES.map((engine) => (
-                    <button
-                      key={engine.id}
-                      role="radio"
-                      aria-checked={settings.searchEngine === engine.id}
-                      className={`set-pill ${settings.searchEngine === engine.id ? 'on' : ''}`}
-                      onClick={() => patch({ searchEngine: engine.id })}
-                    >
-                      {engine.name}
-                    </button>
-                  ))}
-                </div>
+                <SegmentedControl
+                  options={ENGINE_OPTIONS}
+                  value={settings.searchEngine}
+                  onChange={(id) => patch({ searchEngine: id })}
+                  ariaLabel="Search engine"
+                />
               </div>
             </div>
           </section>

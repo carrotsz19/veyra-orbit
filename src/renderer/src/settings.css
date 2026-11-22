@@ -122,6 +122,10 @@
   align-items: stretch;
   gap: var(--sp-3);
 }
+.set-row.stack > .set-seg:not(.sp-seg-full) {
+  align-self: flex-start;
+  width: fit-content;
+}
 .set-row-top {
   display: flex;
   align-items: center;

@@ -114,19 +114,19 @@
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-gutter: stable;
-  padding: var(--sp-pad-y, 52px) var(--sp-pad-x, 32px) 64px;
+  padding: var(--sp-pad-y, 40px) var(--sp-pad-x, 32px) 56px;
 }
 .sp-root.density-compact {
-  --sp-pad-y: 32px;
-  --sp-gap: 20px;
+  --sp-pad-y: 24px;
+  --sp-gap: 18px;
 }
 .sp-root.density-comfortable {
-  --sp-pad-y: 52px;
-  --sp-gap: 28px;
+  --sp-pad-y: 40px;
+  --sp-gap: 24px;
 }
 .sp-root.density-spacious {
-  --sp-pad-y: 68px;
-  --sp-gap: 36px;
+  --sp-pad-y: 56px;
+  --sp-gap: 32px;
 }
 
 .sp-container {
@@ -693,6 +693,9 @@
   visibility: hidden;
   pointer-events: none;
   transition: transform 220ms var(--ease-sheet), opacity 180ms var(--ease-state), visibility 0ms linear 220ms;
+}
+.sp-drawer:focus {
+  outline: none;
 }
 .sp-drawer.open {
   transform: translateX(0);
