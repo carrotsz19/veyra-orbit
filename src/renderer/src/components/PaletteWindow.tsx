@@ -99,6 +99,7 @@ export function PaletteWindow(): React.JSX.Element {
   const [items, setItems] = useState<PaletteItem[]>([])
   const [active, setActive] = useState(0)
   const [resultQuery, setResultQuery] = useState('')
+  const [openTick, setOpenTick] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const boxRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
@@ -115,6 +116,7 @@ export function PaletteWindow(): React.JSX.Element {
       setResultQuery('')
       setItems(init.items)
       setActive(0)
+      setOpenTick((n) => n + 1)
       requestAnimationFrame(() => {
         inputRef.current?.focus()
         inputRef.current?.select()
@@ -204,7 +206,7 @@ export function PaletteWindow(): React.JSX.Element {
 
   let lastGroup = ''
   return (
-    <div ref={boxRef} className="pal-win" role="dialog" aria-label="Command bar" onKeyDown={onKeyDown}>
+    <div key={openTick} ref={boxRef} className="pal-win" role="dialog" aria-label="Command bar" onKeyDown={onKeyDown}>
       <div className="pal-input">
         <Search size={17} className="pal-search-icon" aria-hidden />
         <input

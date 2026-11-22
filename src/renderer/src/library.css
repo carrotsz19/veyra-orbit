@@ -44,17 +44,13 @@
   margin: 0;
   padding: 6px;
   list-style: none;
-  background: var(--bg-elevated);
-  border-radius: 0 0 var(--r-card) var(--r-card);
-  box-shadow: var(--elev-2), 0 0 0 2px var(--tint-soft);
+  background: var(--bg-float);
+  border: 1px solid var(--hairline-strong);
+  border-top: 0;
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+  box-shadow: var(--shadow-3);
   clip-path: inset(0 -40px -60px -40px);
-  animation: omni-in 0.22s var(--ease-out);
-}
-@keyframes omni-in {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
+  animation: surface-in var(--t-pop) var(--ease-out);
 }
 .omni-list li {
   height: 34px;
@@ -62,8 +58,9 @@
   align-items: center;
   gap: 10px;
   padding: 0 10px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   color: var(--label-primary);
+  transition: background-color var(--t-fast) ease;
 }
 .omni-list li.sel {
   background: var(--fill-tertiary);
