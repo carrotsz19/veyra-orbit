@@ -78,6 +78,17 @@ export class Store {
     this.db.prepare('UPDATE bookmarks SET title = ? WHERE url = ? AND title = \'\'').run(clip(title, MAX_TITLE), url)
   }
 
+  /** Most frequently visited sites for start-page default quick links. */
+  topSites(limit = 8): { url: string; title: string; visits: number; last: number }[] {
+    return this.db
+      .prepare(
+        `SELECT url, title, visits, last FROM urls
+         ORDER BY (visits * 3 + typed * 5) DESC, last DESC
+         LIMIT ?`
+      )
+      .all(Math.min(Math.max(1, limit), 24)) as unknown as { url: string; title: string; visits: number; last: number }[]
+  }
+
   /** Newest first. `query` matches address or title; `before` pages back through time. */
   history(query: string, before: number | null, limit = 100): HistoryEntry[] {
     const q = query.trim().toLowerCase()

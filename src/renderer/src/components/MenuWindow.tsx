@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Check, ChevronLeft, ChevronRight } from 'lucide-react'
 import { isSelectable, reduceMenuKey, type MenuPopupSpec } from '@shared/menu'
+import { applyResolvedAppearance } from '../applyAppearance'
 
 /**
  * Floating acrylic menu window (src/main/floating.ts).
@@ -20,9 +21,11 @@ export function MenuWindow(): React.JSX.Element | null {
       const init = typeof next.initialActive === 'number' ? next.initialActive : -1
       setActive(init >= 0 && init < next.items.length && isSelectable(next.items[init]) ? init : -1)
     })
+    const offApp = menu.onAppearance(applyResolvedAppearance)
     menu.ready()
     return () => {
       off()
+      offApp()
       document.documentElement.classList.remove('menu-window')
     }
   }, [menu])

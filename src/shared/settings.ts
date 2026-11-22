@@ -4,6 +4,20 @@
  */
 
 import { SLEEP_MINUTES_OPTIONS, type SleepMinutes } from './sleep.ts'
+import {
+  DEFAULT_APPEARANCE,
+  mergeAppearance,
+  sanitizeAppearance,
+  type AppearancePatch,
+  type AppearanceSettings
+} from './appearance.ts'
+import {
+  DEFAULT_START_PAGE,
+  mergeStartPage,
+  sanitizeStartPage,
+  type StartPagePatch,
+  type StartPageSettings
+} from './startpage.ts'
 
 export const SEARCH_ENGINES = [
   { id: 'google', name: 'Google', url: 'https://www.google.com/search?q=' },
@@ -18,7 +32,7 @@ export type ThemeSource = 'system' | 'light' | 'dark'
 export type StartupBehavior = 'restore' | 'new-tab'
 export type NewTabBehavior = 'start-page' | 'command-bar'
 export type WindowButtonsStyle = 'windows' | 'dots'
-export type { SleepMinutes }
+export type { SleepMinutes, AppearanceSettings, AppearancePatch, StartPageSettings, StartPagePatch }
 
 export interface Settings {
   searchEngine: SearchEngineId
@@ -37,6 +51,15 @@ export interface Settings {
   sleepPinnedTabs: boolean
   /** Window control button style on Windows: native titleBarOverlay or Mac-style Veyra dots. */
   windowButtons: WindowButtonsStyle
+  /** Theme preset, accent colour, layout, sidebar, toolbar, page card and motion preferences. */
+  appearance: AppearanceSettings
+  /** Rich start page background, layout, clock, quick links, focus note and widget preferences. */
+  startPage: StartPageSettings
+}
+
+export type SettingsPatch = Partial<Omit<Settings, 'appearance' | 'startPage'>> & {
+  appearance?: AppearancePatch
+  startPage?: StartPagePatch
 }
 
 export interface SettingsView extends Settings {
@@ -48,6 +71,8 @@ export interface SettingsView extends Settings {
   activeWindowButtons: WindowButtonsStyle
   /** True on platforms that let the user choose between native overlay and Veyra dots (Windows). */
   supportsWindowButtons: boolean
+  /** True on OS builds that support translucent acrylic sidebar backdrop (Windows 11 22H2+). */
+  supportsAcrylic: boolean
 }
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
@@ -60,7 +85,9 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   compactMode: false,
   sleepAfterMinutes: 30,
   sleepPinnedTabs: false,
-  windowButtons: 'windows'
+  windowButtons: 'windows',
+  appearance: DEFAULT_APPEARANCE,
+  startPage: DEFAULT_START_PAGE
 })
 
 const ENGINE_MAP = new Map<string, string>(SEARCH_ENGINES.map((e) => [e.id, e.url]))
@@ -109,7 +136,13 @@ function isValidPath(v: unknown): v is string {
 
 /** Validates arbitrary parsed JSON into a safe Settings object, dropping unknown keys. */
 export function sanitizeSettings(raw: unknown): Settings {
-  if (!isPlainObject(raw)) return { ...DEFAULT_SETTINGS }
+  if (!isPlainObject(raw)) {
+    return {
+      ...DEFAULT_SETTINGS,
+      appearance: { ...DEFAULT_APPEARANCE },
+      startPage: sanitizeStartPage(null)
+    }
+  }
   return {
     searchEngine: isSearchEngineId(raw.searchEngine) ? raw.searchEngine : DEFAULT_SETTINGS.searchEngine,
     theme: isThemeSource(raw.theme) ? raw.theme : DEFAULT_SETTINGS.theme,
@@ -120,13 +153,19 @@ export function sanitizeSettings(raw: unknown): Settings {
     compactMode: typeof raw.compactMode === 'boolean' ? raw.compactMode : DEFAULT_SETTINGS.compactMode,
     sleepAfterMinutes: isSleepMinutes(raw.sleepAfterMinutes) ? raw.sleepAfterMinutes : DEFAULT_SETTINGS.sleepAfterMinutes,
     sleepPinnedTabs: typeof raw.sleepPinnedTabs === 'boolean' ? raw.sleepPinnedTabs : DEFAULT_SETTINGS.sleepPinnedTabs,
-    windowButtons: isWindowButtonsStyle(raw.windowButtons) ? raw.windowButtons : DEFAULT_SETTINGS.windowButtons
+    windowButtons: isWindowButtonsStyle(raw.windowButtons) ? raw.windowButtons : DEFAULT_SETTINGS.windowButtons,
+    appearance: sanitizeAppearance(raw.appearance),
+    startPage: sanitizeStartPage(raw.startPage)
   }
 }
 
 /** Applies a partial update to existing settings, ignoring unknown keys and invalid values. */
 export function mergeSettings(current: Settings, patch: unknown): Settings {
-  const next: Settings = { ...current }
+  const next: Settings = {
+    ...current,
+    appearance: { ...current.appearance },
+    startPage: sanitizeStartPage(current.startPage)
+  }
   if (!isPlainObject(patch)) return next
   const own = (k: string): boolean => Object.prototype.hasOwnProperty.call(patch, k)
   if (own('searchEngine') && isSearchEngineId(patch.searchEngine)) next.searchEngine = patch.searchEngine
@@ -139,5 +178,7 @@ export function mergeSettings(current: Settings, patch: unknown): Settings {
   if (own('sleepAfterMinutes') && isSleepMinutes(patch.sleepAfterMinutes)) next.sleepAfterMinutes = patch.sleepAfterMinutes
   if (own('sleepPinnedTabs') && typeof patch.sleepPinnedTabs === 'boolean') next.sleepPinnedTabs = patch.sleepPinnedTabs
   if (own('windowButtons') && isWindowButtonsStyle(patch.windowButtons)) next.windowButtons = patch.windowButtons
+  if (own('appearance')) next.appearance = mergeAppearance(next.appearance, patch.appearance)
+  if (own('startPage')) next.startPage = mergeStartPage(next.startPage, patch.startPage)
   return next
 }

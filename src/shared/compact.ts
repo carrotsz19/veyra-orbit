@@ -17,6 +17,7 @@ export interface CompactZoneInput {
   contentHeight: number
   sidebarOpen: boolean
   toolbarOpen: boolean
+  sidebarSide?: 'left' | 'right'
   sidebarWidth?: number
   toolbarHeight?: number
   edgePx?: number
@@ -30,8 +31,8 @@ export interface CompactZoneResult {
 }
 
 /**
- * Evaluates whether the cursor is in the left/top reveal trigger zone or keep-open zone.
- * Trigger zones are narrow strips along the left/top edges; once revealed, the keep-open zone
+ * Evaluates whether the cursor is in the left/right/top reveal trigger zone or keep-open zone.
+ * Trigger zones are narrow strips along the active sidebar/top edges; once revealed, the keep-open zone
  * expands to cover the full revealed panel plus a small buffer to prevent jitter.
  */
 export function computeCompactZones(input: CompactZoneInput): CompactZoneResult {
@@ -39,6 +40,7 @@ export function computeCompactZones(input: CompactZoneInput): CompactZoneResult 
   const buffer = input.keepBufferPx ?? 16
   const sideW = input.sidebarWidth ?? 248
   const barH = input.toolbarHeight ?? 40
+  const rightSide = input.sidebarSide === 'right'
 
   const insideWindow =
     input.contentWidth > 0 &&
@@ -52,7 +54,8 @@ export function computeCompactZones(input: CompactZoneInput): CompactZoneResult 
     return { insideWindow: false, wantSidebar: false, wantToolbar: false }
   }
 
-  const wantSidebar = input.sidebarOpen ? input.rx <= sideW + buffer : input.rx <= edge
+  const distFromSide = rightSide ? input.contentWidth - input.rx : input.rx
+  const wantSidebar = input.sidebarOpen ? distFromSide <= sideW + buffer : distFromSide <= edge
   const wantToolbar = input.toolbarOpen ? input.ry <= barH + buffer : input.ry <= edge
 
   return { insideWindow: true, wantSidebar, wantToolbar }

@@ -20,6 +20,7 @@ import { PEEK_TAB_ID, computePeekBounds, computePeekViewRect, type PeekState } f
 import { shouldRestoreParentFocusOnCompactHide } from '../shared/compact'
 import { isAllowedUrl } from '../shared/url'
 import { isSafeSubframeUrl, parseExternalAppUrl } from '../shared/external'
+import type { ResolvedAppearance } from '../shared/appearance'
 import { attachPageCompat } from './compat'
 
 const FLOAT_DARK = '#1f1d18'
@@ -164,8 +165,8 @@ export class FloatingWindow {
     if (!this.win.isDestroyed()) this.win.webContents.setZoomFactor(zoom)
   }
 
-  setSurfaceTheme(dark: boolean): void {
-    if (!this.win.isDestroyed()) this.win.setBackgroundColor(dark ? FLOAT_DARK : FLOAT_LIGHT)
+  setSurfaceTheme(dark: boolean, bgHex?: string): void {
+    if (!this.win.isDestroyed()) this.win.setBackgroundColor(bgHex ?? (dark ? FLOAT_DARK : FLOAT_LIGHT))
   }
 
   /** Places the floating window at explicit screen bounds, clamped inside the display workArea. */
@@ -387,6 +388,11 @@ export class MenuPopup {
     this.floating.markReady()
   }
 
+  sendAppearance(tokens: ResolvedAppearance): void {
+    this.floating.setSurfaceTheme(tokens.isDark, tokens.floatBg)
+    this.floating.send('appearance:tokens', tokens)
+  }
+
   open(rawSpec: unknown, sender?: WebContents, offsetCss: { x: number; y: number } = { x: 0, y: 0 }): void {
     const spec = sanitizeMenuSpec(rawSpec)
     if (!spec || this.parent.isDestroyed()) return
@@ -513,6 +519,10 @@ export class CompactPanel {
 
   markReady(): void {
     this.floating.markReady()
+  }
+
+  sendAppearance(tokens: ResolvedAppearance): void {
+    this.floating.send('appearance:tokens', tokens)
   }
 
   send(channel: string, payload?: unknown): void {
@@ -653,6 +663,11 @@ export class PalettePopup {
 
   markReady(): void {
     this.floating.markReady()
+  }
+
+  sendAppearance(tokens: ResolvedAppearance): void {
+    this.floating.setSurfaceTheme(tokens.isDark, tokens.floatBg)
+    this.floating.send('appearance:tokens', tokens)
   }
 
   open(
@@ -801,6 +816,11 @@ export class PeekPopup {
   markReady(): void {
     this.floating.markReady()
     if (this.state) this.floating.send('peek:state', this.state)
+  }
+
+  sendAppearance(tokens: ResolvedAppearance): void {
+    this.floating.setSurfaceTheme(tokens.isDark, tokens.floatBg)
+    this.floating.send('appearance:tokens', tokens)
   }
 
   currentTarget(): PeekTarget | null {

@@ -14,13 +14,15 @@ export function Omnibox({
   onPageShot,
   onEditingChange,
   onOpenChange,
-  useOverlay = true
+  useOverlay = true,
+  showStar = true
 }: {
   tab?: TabInfo
   onPageShot: (shots: Record<number, string> | null) => void
   onEditingChange?: (editing: boolean) => void
   onOpenChange?: (open: boolean) => void
   useOverlay?: boolean
+  showStar?: boolean
 }): React.JSX.Element {
   const input = useRef<HTMLInputElement>(null)
   const [editing, setEditing] = useState(false)
@@ -182,7 +184,7 @@ export function Omnibox({
             }
           }}
         />
-        {canStar && !editing && (
+        {showStar && canStar && !editing && (
           <button
             type="button"
             className={`omni-star ${tab.bookmarked ? 'on' : ''}`}

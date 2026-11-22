@@ -1,31 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
-import { FolderOpen, Monitor, Moon, RefreshCw, RotateCcw, Shield, Sun, Trash2 } from 'lucide-react'
+import { FolderOpen, RefreshCw, RotateCcw, Shield, Trash2 } from 'lucide-react'
 import type {
   ClearDataRange,
   NewTabBehavior,
-  SearchEngineId,
+  SettingsPatch,
   SettingsView,
   SitePermission,
   SleepMinutes,
   StartupBehavior,
-  ThemeSource,
-  UpdateState,
-  WindowButtonsStyle
+  UpdateState
 } from '@shared/types'
 import { SEARCH_ENGINES } from '@shared/settings'
 import { SLEEP_MINUTES_OPTIONS } from '@shared/sleep'
 import { pickActiveSection } from '@shared/compact'
 import { permissionName } from '@shared/permissions'
 import { ImportSection } from './ImportCard'
+import { SettingsAppearance } from './SettingsAppearance'
 import { SettingsExtensions } from './SettingsExtensions'
 
 const api = window.veyra
-
-const THEMES: { id: ThemeSource; label: string; icon: typeof Monitor }[] = [
-  { id: 'system', label: 'System', icon: Monitor },
-  { id: 'light', label: 'Light', icon: Sun },
-  { id: 'dark', label: 'Dark', icon: Moon }
-]
 
 const STARTUP_OPTIONS: { id: StartupBehavior; label: string; detail: string }[] = [
   { id: 'restore', label: "Reopen last session's tabs", detail: 'Pick up where you left off. Restored tabs load only when you open them.' },
@@ -191,20 +184,7 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
     return () => window.removeEventListener('orbit:settings-section', onJump)
   }, [loaded])
 
-  const patch = (
-    next: Partial<{
-      searchEngine: SearchEngineId
-      theme: ThemeSource
-      startup: StartupBehavior
-      newTabBehavior: NewTabBehavior
-      downloadsDir: string
-      askWhereToSave: boolean
-      compactMode: boolean
-      sleepAfterMinutes: SleepMinutes
-      sleepPinnedTabs: boolean
-      windowButtons: WindowButtonsStyle
-    }>
-  ): void => {
+  const patch = (next: SettingsPatch): void => {
     void api.updateSettings(next).then((s) => s && setSettings(s))
   }
 
@@ -337,91 +317,7 @@ export function SettingsPage({ settings: initial, update: initialUpdate }: { set
           </section>
           <ImportSection />
 
-          <section className="set-section" id="set-appearance" aria-labelledby="set-appearance-h">
-            <h2 id="set-appearance-h">Appearance</h2>
-            <div className="set-card">
-              <div className="set-row">
-                <div className="set-row-info">
-                  <div className="set-label">Theme</div>
-                  <div className="set-desc">Follow your system theme or stay in light or dark mode.</div>
-                </div>
-                <div className="set-seg" role="radiogroup" aria-label="Theme">
-                  {THEMES.map(({ id, label, icon: Icon }) => (
-                    <button
-                      key={id}
-                      role="radio"
-                      aria-checked={settings.theme === id}
-                      className={`set-seg-btn ${settings.theme === id ? 'on' : ''}`}
-                      onClick={() => patch({ theme: id })}
-                    >
-                      <Icon size={14} aria-hidden />
-                      <span>{label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="set-row">
-                <div className="set-row-info">
-                  <div className="set-label">Compact mode</div>
-                  <div className="set-desc">
-                    Hide the sidebar and toolbar so the page fills the window. Move to the left or top edge to reveal them (<kbd>Ctrl+Shift+S</kbd>).
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={settings.compactMode}
-                  aria-label="Compact mode"
-                  className={`set-switch ${settings.compactMode ? 'on' : ''}`}
-                  onClick={() => patch({ compactMode: !settings.compactMode })}
-                >
-                  <span className="set-switch-thumb" />
-                </button>
-              </div>
-              {settings.supportsWindowButtons && (
-                <div className="set-row">
-                  <div className="set-row-info">
-                    <div className="set-label">Window buttons</div>
-                    <div className="set-desc">
-                      {settings.windowButtons === 'windows'
-                        ? "Windows' own minimise, maximise and close buttons (supports Snap layouts)."
-                        : 'Mac-style Veyra dots drawn in the title bar, in Windows order.'}
-                    </div>
-                    {settings.windowButtons !== settings.activeWindowButtons && (
-                      <div className="set-note">Takes effect after restarting Veyra Orbit.</div>
-                    )}
-                  </div>
-                  <div className="set-row-actions">
-                    <div className="set-seg" role="radiogroup" aria-label="Window buttons">
-                      <button
-                        type="button"
-                        role="radio"
-                        aria-checked={settings.windowButtons === 'windows'}
-                        className={`set-seg-btn ${settings.windowButtons === 'windows' ? 'on' : ''}`}
-                        onClick={() => patch({ windowButtons: 'windows' })}
-                      >
-                        Windows
-                      </button>
-                      <button
-                        type="button"
-                        role="radio"
-                        aria-checked={settings.windowButtons === 'dots'}
-                        className={`set-seg-btn ${settings.windowButtons === 'dots' ? 'on' : ''}`}
-                        onClick={() => patch({ windowButtons: 'dots' })}
-                      >
-                        Veyra dots
-                      </button>
-                    </div>
-                    {settings.windowButtons !== settings.activeWindowButtons && (
-                      <button type="button" className="btn primary" onClick={() => api.relaunch()}>
-                        Restart now
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </section>
+          <SettingsAppearance settings={settings} onPatch={patch} onSettingsReplaced={setSettings} />
 
           <section className="set-section" id="set-performance" aria-labelledby="set-performance-h">
             <h2 id="set-performance-h">Performance</h2>

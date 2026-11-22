@@ -1,7 +1,7 @@
 // Minimal preload bridge for the floating Ctrl+K command palette window only.
 // Exposes no Node APIs, no browser state, and sends only item IDs or typed query text.
 import { contextBridge, ipcRenderer } from 'electron'
-import type { PaletteOpenState, PaletteResultsPayload, VeyraPaletteWindowApi } from '../shared/types'
+import type { PaletteOpenState, PaletteResultsPayload, ResolvedAppearance, VeyraPaletteWindowApi } from '../shared/types'
 
 const api: VeyraPaletteWindowApi = {
   ready: () => ipcRenderer.send('palette:ready'),
@@ -14,6 +14,11 @@ const api: VeyraPaletteWindowApi = {
     const h = (_e: Electron.IpcRendererEvent, payload: PaletteResultsPayload): void => cb(payload)
     ipcRenderer.on('palette:results', h)
     return () => ipcRenderer.off('palette:results', h)
+  },
+  onAppearance: (cb) => {
+    const h = (_e: Electron.IpcRendererEvent, tokens: ResolvedAppearance): void => cb(tokens)
+    ipcRenderer.on('appearance:tokens', h)
+    return () => ipcRenderer.off('appearance:tokens', h)
   },
   query: (text) => ipcRenderer.send('palette:query', text),
   pick: (id, openInNewTab) => ipcRenderer.send('palette:pick', id, openInNewTab),

@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, type IpcMainEvent, type IpcMainInvokeEvent, type Session } from 'electron'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { release } from 'node:os'
 import type {
@@ -34,6 +35,13 @@ import {
 } from '../shared/palette'
 import { PEEK_TAB_ID, isPeekAction } from '../shared/peek'
 import { shouldLoadExtensionsForPartition } from '../shared/extensions'
+import {
+  DEFAULT_APPEARANCE,
+  exportAppearanceJson,
+  parseImportedAppearanceJson,
+  resolveAppearanceTokens,
+  type ResolvedAppearance
+} from '../shared/appearance'
 import { Tabs } from './tabs'
 import { Store } from './store'
 import { SettingsStore } from './settings'
@@ -44,6 +52,7 @@ import { Updater } from './updater'
 import { CompactPanel, MenuPopup, PalettePopup, PeekPopup } from './floating'
 import { BrowserImporter } from './importer'
 import { ExtensionManager } from './extensions'
+import { chooseAndSaveStartBackground, deleteStartBackgroundFile, readStartBackgroundDataUrl } from './backgrounds'
 
 const APP_NAME = __CHANNEL__ === 'dev' ? 'Veyra Orbit Dev' : 'Veyra Orbit'
 app.setName(APP_NAME)
@@ -64,20 +73,52 @@ function logSmoke(tag: string, data: unknown): void {
   if (smokeLog) console.log(`[smoke:${tag}] ${JSON.stringify(data)}`)
 }
 const TITLE_BAR_H = 40
-const SHELL_DARK = '#12110d'
-const SHELL_LIGHT = '#ebe8e1'
 const HOUR_MS = 3_600_000
 const CLEAR_RANGES = new Set<ClearDataRange>(['hour', 'day', 'all'])
 const COMPACT_POLL_MS = 100
 const COMPACT_HIDE_DELAY_MS = 240
 
-function shellBg(): string {
-  return nativeTheme.shouldUseDarkColors ? SHELL_DARK : SHELL_LIGHT
+function resolveCurrentAppearance(): ResolvedAppearance {
+  const appCfg = settings?.get().appearance ?? DEFAULT_APPEARANCE
+  return resolveAppearanceTokens(appCfg, nativeTheme.shouldUseDarkColors, acrylic, false)
 }
 
-function overlay(): Electron.TitleBarOverlayOptions {
-  const dark = nativeTheme.shouldUseDarkColors
-  return { color: shellBg(), symbolColor: dark ? '#c8c2b6' : '#57534b', height: TITLE_BAR_H }
+function overlay(tokens = resolveCurrentAppearance(), useAcrylic = false): Electron.TitleBarOverlayOptions {
+  return {
+    color: useAcrylic ? '#00000000' : tokens.shellBg,
+    symbolColor: tokens.symbolColor,
+    height: TITLE_BAR_H
+  }
+}
+
+function applyWindowAppearance(): void {
+  const tokens = resolveCurrentAppearance()
+  tabs?.setPageRadius(tokens.pageRadius)
+  if (win && !win.isDestroyed()) {
+    const fullscreen = win.isFullScreen()
+    const useAcrylic = !fullscreen && tokens.effectiveMaterial === 'acrylic'
+    if (acrylic) {
+      try {
+        win.setBackgroundMaterial(useAcrylic ? 'acrylic' : 'none')
+      } catch {
+        /* ignore on unsupported builds */
+      }
+    }
+    win.setBackgroundColor(useAcrylic ? '#00000000' : tokens.shellBg)
+    if (isWin && settings?.activeWindowButtonsStyle() === 'windows') {
+      try {
+        win.setTitleBarOverlay(overlay(tokens, useAcrylic))
+      } catch {
+        /* window without titleBarOverlay */
+      }
+    }
+    win.webContents.send('appearance:tokens', tokens)
+  }
+  compactSidebar?.sendAppearance(tokens)
+  compactTitlebar?.sendAppearance(tokens)
+  menuPopup?.sendAppearance(tokens)
+  palettePopup?.sendAppearance(tokens)
+  peekPopup?.sendAppearance(tokens)
 }
 
 let win: BrowserWindow | null = null
@@ -155,9 +196,12 @@ function compactSidebarGeometry(): { offset: { x: number; y: number }; size: { w
   const cw = Math.round(cb.width / z)
   const ch = Math.round(cb.height / z)
   const top = compactState.toolbar ? COMPACT_TITLEBAR_H + 2 : COMPACT_MARGIN
+  const appCfg = settings?.get().appearance ?? DEFAULT_APPEARANCE
+  const width = Math.min(Math.max(appCfg.sidebarWidth + 16, COMPACT_SIDEBAR_W), Math.max(220, cw - COMPACT_MARGIN * 2))
+  const x = appCfg.sidebarSide === 'right' ? Math.max(COMPACT_MARGIN, cw - width - COMPACT_MARGIN) : COMPACT_MARGIN
   return {
-    offset: { x: COMPACT_MARGIN, y: top },
-    size: { width: Math.min(COMPACT_SIDEBAR_W, Math.max(220, cw - COMPACT_MARGIN * 2)), height: Math.max(200, ch - top - COMPACT_MARGIN) }
+    offset: { x, y: top },
+    size: { width, height: Math.max(200, ch - top - COMPACT_MARGIN) }
   }
 }
 
@@ -342,13 +386,16 @@ function pollCompactCursor(): void {
   lastPolledCursor = cursor
 
   const content = win.getContentBounds()
+  const appCfg = settings.get().appearance
   const zones = computeCompactZones({
     rx: cursor.x - content.x,
     ry: cursor.y - content.y,
     contentWidth: content.width,
     contentHeight: content.height,
     sidebarOpen: compactState.sidebar,
-    toolbarOpen: compactState.toolbar
+    toolbarOpen: compactState.toolbar,
+    sidebarSide: appCfg.sidebarSide,
+    sidebarWidth: appCfg.sidebarWidth
   })
 
   // If the OS cursor is outside the window and hasn't moved (e.g. non-interactive desktop session),
@@ -639,6 +686,7 @@ function executePaletteAction(action: PaletteAction, openInNewTab: boolean): voi
           settings.update({ theme })
           nativeTheme.themeSource = theme
           sendSettings()
+          applyWindowAppearance()
           return
         }
       }
@@ -647,10 +695,12 @@ function executePaletteAction(action: PaletteAction, openInNewTab: boolean): voi
 }
 
 function createWindow(): void {
-  settings ??= new SettingsStore(join(app.getPath('userData'), 'settings.json'), app.getPath('downloads'), process.env.VEYRA_DOWNLOADS || '', isWin)
+  settings ??= new SettingsStore(join(app.getPath('userData'), 'settings.json'), app.getPath('downloads'), process.env.VEYRA_DOWNLOADS || '', isWin, acrylic)
   const s = settings
   nativeTheme.themeSource = s.get().theme
   const activeButtons = s.activeWindowButtonsStyle()
+  const initialTokens = resolveCurrentAppearance()
+  const initialAcrylic = initialTokens.effectiveMaterial === 'acrylic'
 
   const w = new BrowserWindow({
     width: 1360,
@@ -662,10 +712,11 @@ function createWindow(): void {
     // Windows picks the right hand-tuned size from the .ico; a 1024 px PNG gets shrunk badly.
     icon: join(__dirname, `../../resources/${__CHANNEL__ === 'dev' ? 'icon-dev' : 'icon'}.${isWin ? 'ico' : 'png'}`),
     autoHideMenuBar: true,
-    backgroundColor: shellBg(),
+    backgroundColor: initialAcrylic ? '#00000000' : initialTokens.shellBg,
+    ...(initialAcrylic ? { backgroundMaterial: 'acrylic' as const } : {}),
     ...(isWin
       ? activeButtons === 'windows'
-        ? { titleBarStyle: 'hidden' as const, titleBarOverlay: overlay() }
+        ? { titleBarStyle: 'hidden' as const, titleBarOverlay: overlay(initialTokens, initialAcrylic) }
         : { titleBarStyle: 'hidden' as const }
       : { titleBarStyle: 'hiddenInset' as const }),
     webPreferences: {
@@ -1067,13 +1118,13 @@ function createWindow(): void {
     }
   })
   w.on('enter-full-screen', () => {
-    w.setBackgroundColor(shellBg())
+    applyWindowAppearance()
     sendWinState()
     t.relayout()
     if (settings?.get().compactMode) syncCompactPanels()
   })
   w.on('leave-full-screen', () => {
-    w.setBackgroundColor(shellBg())
+    applyWindowAppearance()
     sendWinState()
     t.exitPageFullscreen()
     if (settings?.get().compactMode) syncCompactPanels()
@@ -1119,11 +1170,12 @@ function createWindow(): void {
   })
 
   const query = {
-    material: 'solid',
+    material: initialTokens.effectiveMaterial,
     platform: process.platform,
     buttons: activeButtons,
     version: app.getVersion()
   }
+  t.setPageRadius(initialTokens.pageRadius)
   if (process.env.ELECTRON_RENDERER_URL) void w.loadURL(`${process.env.ELECTRON_RENDERER_URL}?${new URLSearchParams(query)}`)
   else void w.loadFile(join(__dirname, '../renderer/index.html'), { query })
 
@@ -1211,6 +1263,7 @@ on('ready', () => {
   win.webContents.send('downloads', downloads?.list() ?? [])
   win.webContents.send('permissions:saved', perms?.listSaved() ?? [])
   sendSettings()
+  applyWindowAppearance()
   sendCompactState(true)
   sendWinState()
   win.webContents.send('page-fullscreen', tabs.isPageFullscreen())
@@ -1231,6 +1284,7 @@ ipcMain.on('compact-panel:ready', (e) => {
   panel.send('state', tabs.state())
   panel.send('downloads', downloads?.list() ?? [])
   if (settings) panel.send('settings', settings.view())
+  panel.sendAppearance(resolveCurrentAppearance())
   panel.send('compact:state', compactState)
   panel.send('win:state', {
     focused: isAnyOrbitFocused(),
@@ -1415,7 +1469,10 @@ ipcMain.on('menu:close', (e) => {
   if (fromUiSurface(e)) menuPopup?.close()
 })
 ipcMain.on('menu:ready', (e) => {
-  if (fromMenu(e)) menuPopup?.markReady()
+  if (fromMenu(e)) {
+    menuPopup?.markReady()
+    menuPopup?.sendAppearance(resolveCurrentAppearance())
+  }
 })
 ipcMain.on('menu:size', (e, width: unknown, height: unknown) => {
   if (fromMenu(e) && num(width) && num(height)) menuPopup?.applySize(width, height)
@@ -1432,7 +1489,10 @@ ipcMain.on('menu:dismiss', (e) => {
 
 // Floating Ctrl+K command palette IPC: strict sender check + main-side ID/URL validation.
 ipcMain.on('palette:ready', (e) => {
-  if (fromPalette(e)) palettePopup?.markReady()
+  if (fromPalette(e)) {
+    palettePopup?.markReady()
+    palettePopup?.sendAppearance(resolveCurrentAppearance())
+  }
 })
 ipcMain.on('palette:query', (e, text: unknown) => {
   if (!fromPalette(e) || !palettePopup || !str(text)) return
@@ -1462,7 +1522,10 @@ ipcMain.on('palette:dismiss', (e) => {
 
 // Floating Link Preview ("Peek") toolbar IPC: strict sender check + fixed action allowlist (never accepts URLs).
 ipcMain.on('peek:ready', (e) => {
-  if (fromPeek(e)) peekPopup?.markReady()
+  if (fromPeek(e)) {
+    peekPopup?.markReady()
+    peekPopup?.sendAppearance(resolveCurrentAppearance())
+  }
 })
 ipcMain.on('peek:action', (e, act: unknown) => {
   if (!fromPeek(e) || !peekPopup || !tabs || !isPeekAction(act)) return
@@ -1630,6 +1693,12 @@ handle('settings:update', (patch) => {
   const raw = patch as Record<string, unknown>
   const safePatch: Record<string, unknown> = { ...raw }
   if ('downloadsDir' in safePatch && safePatch.downloadsDir !== '') delete safePatch.downloadsDir
+  // Custom start-page background files are only created by main's image picker; renderer may only clear to ''.
+  if (safePatch.startPage && typeof safePatch.startPage === 'object' && !Array.isArray(safePatch.startPage)) {
+    const sp = { ...(safePatch.startPage as Record<string, unknown>) }
+    if ('backgroundImage' in sp && sp.backgroundImage !== '') delete sp.backgroundImage
+    safePatch.startPage = sp
+  }
   const prev = settings.get()
   const view = settings.update(safePatch)
   if (view.theme !== prev.theme) nativeTheme.themeSource = view.theme
@@ -1638,7 +1707,51 @@ handle('settings:update', (patch) => {
     tabs?.refreshSleepPolicy()
   }
   sendSettings()
+  applyWindowAppearance()
+  if (view.compactMode && (view.appearance.sidebarSide !== prev.appearance.sidebarSide || view.appearance.sidebarWidth !== prev.appearance.sidebarWidth)) {
+    syncCompactPanels()
+  }
   return view
+})
+handle('settings:export-theme', async () => {
+  if (!settings || !win || win.isDestroyed()) return { ok: false, error: 'Window unavailable.' }
+  const cur = settings.get()
+  const result = await dialog.showSaveDialog(win, {
+    title: 'Export Veyra Orbit theme',
+    defaultPath: `veyra-orbit-${cur.appearance.preset}.json`,
+    filters: [{ name: 'JSON theme', extensions: ['json'] }]
+  })
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true }
+  try {
+    writeFileSync(result.filePath, exportAppearanceJson(cur.theme, cur.appearance), 'utf8')
+    return { ok: true }
+  } catch {
+    return { ok: false, error: 'Could not save the theme file.' }
+  }
+})
+handle('settings:import-theme', async () => {
+  if (!settings || !win || win.isDestroyed()) return { ok: false, error: 'Window unavailable.' }
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Import Veyra Orbit theme',
+    filters: [{ name: 'JSON theme', extensions: ['json'] }],
+    properties: ['openFile']
+  })
+  if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true }
+  try {
+    const raw = readFileSync(result.filePaths[0], 'utf8')
+    const parsed = parseImportedAppearanceJson(raw)
+    if (!parsed.ok) return { ok: false, error: parsed.error }
+    const patchObj: Record<string, unknown> = { appearance: parsed.appearance }
+    if (parsed.theme) patchObj.theme = parsed.theme
+    const view = settings.update(patchObj)
+    if (parsed.theme) nativeTheme.themeSource = view.theme
+    sendSettings()
+    applyWindowAppearance()
+    if (view.compactMode) syncCompactPanels()
+    return { ok: true, settings: view }
+  } catch {
+    return { ok: false, error: 'Could not read the selected theme file.' }
+  }
 })
 handle('settings:choose-downloads-dir', async () => {
   if (!settings || !win || win.isDestroyed()) return settings?.view() ?? null
@@ -1649,6 +1762,79 @@ handle('settings:choose-downloads-dir', async () => {
   })
   if (result.canceled || !result.filePaths[0]) return settings.view()
   const view = settings.update({ downloadsDir: result.filePaths[0] })
+  sendSettings()
+  return view
+})
+
+handle('startpage:data', () => {
+  const isPrivate = !!tabs && tabs.isPrivateWorkspace(tabs.state().activeWorkspaceId)
+  if (isPrivate || !store || !tabs) {
+    return { topSites: [], recentlyClosed: [], recentHistory: [], bookmarks: [] }
+  }
+  const topSites = store.topSites(8).map((s) => ({
+    url: s.url,
+    title: s.title,
+    favicon: tabs?.cachedFavicon(s.url),
+    time: s.last
+  }))
+  const recentlyClosed = tabs.recentClosedTabs(6)
+  const seenRecent = new Set(recentlyClosed.map((c) => c.url))
+  const recentHistory = store
+    .history('', null, 24)
+    .filter((h) => {
+      if (seenRecent.has(h.url)) return false
+      seenRecent.add(h.url)
+      return true
+    })
+    .slice(0, 8)
+    .map((h) => ({
+      url: h.url,
+      title: h.title,
+      favicon: tabs?.cachedFavicon(h.url),
+      time: h.time
+    }))
+  const bookmarks = store
+    .bookmarks()
+    .slice(0, 12)
+    .map((b) => ({
+      ...b,
+      favicon: tabs?.cachedFavicon(b.url)
+    }))
+  return { topSites, recentlyClosed, recentHistory, bookmarks }
+})
+
+handle('startpage:get-background', () => {
+  const filename = settings?.get().startPage.backgroundImage ?? ''
+  if (!filename) return null
+  return readStartBackgroundDataUrl(app.getPath('userData'), filename)
+})
+
+handle('startpage:choose-background', async () => {
+  if (!settings || !win || win.isDestroyed()) return { ok: false, error: 'Window unavailable.' }
+  const prev = settings.get().startPage.backgroundImage
+  const res = await chooseAndSaveStartBackground(win, app.getPath('userData'), prev)
+  if (!res.ok) return res
+  const view = settings.update({
+    startPage: {
+      background: 'image',
+      backgroundImage: res.filename
+    }
+  })
+  sendSettings()
+  return { ok: true, dataUrl: res.dataUrl, settings: view }
+})
+
+handle('startpage:remove-background', () => {
+  if (!settings) return null
+  const prev = settings.get().startPage.backgroundImage
+  if (prev) deleteStartBackgroundFile(app.getPath('userData'), prev)
+  const curBg = settings.get().startPage.background
+  const view = settings.update({
+    startPage: {
+      backgroundImage: '',
+      ...(curBg === 'image' ? { background: 'ambient' } : {})
+    }
+  })
   sendSettings()
   return view
 })
@@ -1816,14 +2002,7 @@ handle('import:run', (raw) => {
 
 nativeTheme.on('updated', () => {
   if (!win || win.isDestroyed()) return
-  if (isWin && settings?.activeWindowButtonsStyle() === 'windows') {
-    try {
-      win.setTitleBarOverlay(overlay())
-    } catch {
-      /* window without titleBarOverlay */
-    }
-  }
-  win.setBackgroundColor(shellBg())
+  applyWindowAppearance()
 })
 
 app.on('second-instance', () => {

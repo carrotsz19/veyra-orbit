@@ -114,12 +114,15 @@ export class Tabs {
   private activeId: number | null = null
   private nextId = 1
   private bounds: Rect | null = null
+  private pageRadius = 10
   /** The tab whose page asked for full screen (a video, a slideshow); its page fills the window. */
   private fullscreenTab: Tab | null = null
   /** True when Orbit put the window into full screen for the page (vs the user pressing F11 first). */
   private fullscreenByPage = false
   private attachedViews = new Set<WebContentsView>()
   private closed: { url: string; title: string; pinned: boolean; workspaceId: string }[] = []
+  /** In-memory cache of favicons already seen in non-private tabs (host -> favicon URL). */
+  private faviconCache = new Map<string, string>()
   private emitQueued = false
   private saveTimer: NodeJS.Timeout | null = null
   private sleepTimer: NodeJS.Timeout | null = null
@@ -211,6 +214,30 @@ export class Tabs {
       if (!v.webContents.isDestroyed()) out.push(v.getBounds())
     }
     return out
+  }
+
+  /** Recently closed non-private tabs, newest first (for start page "continue where you left off"). */
+  recentClosedTabs(limit = 6): { url: string; title: string; favicon?: string }[] {
+    if (this.isPrivateWorkspace(this.activeWorkspaceId)) return []
+    const seen = new Set<string>()
+    const out: { url: string; title: string; favicon?: string }[] = []
+    for (let i = this.closed.length - 1; i >= 0 && out.length < limit; i--) {
+      const c = this.closed[i]
+      if (!c.url || seen.has(c.url)) continue
+      seen.add(c.url)
+      out.push({ url: c.url, title: c.title, favicon: this.cachedFavicon(c.url) })
+    }
+    return out
+  }
+
+  /** Returns a favicon URL already cached in memory for a site's host, or undefined (never fetches). */
+  cachedFavicon(url: string): string | undefined {
+    try {
+      const host = new URL(url).host.toLowerCase()
+      return this.faviconCache.get(host)
+    } catch {
+      return undefined
+    }
   }
 
   /** All tabs across all workspaces, for omnibox "Switch to tab" suggestions. */
@@ -364,7 +391,7 @@ export class Tabs {
       }
     })
     view.setBackgroundColor('#ffffffff')
-    this.radius(view, 10)
+    this.radius(view, this.pageRadius)
     if (tab.info.muted) view.webContents.setAudioMuted(true)
     attachPageCompat(view.webContents, tab.info.url || tab.pendingUrl)
     this.wire(tab, view)
@@ -1138,6 +1165,13 @@ export class Tabs {
     this.layout()
   }
 
+  setPageRadius(r: number): void {
+    const next = Math.min(24, Math.max(0, Math.round(r)))
+    if (this.pageRadius === next) return
+    this.pageRadius = next
+    this.layout()
+  }
+
   /** A tab shows its page once it has one that loaded; otherwise the UI shows the start or error page. */
   private showsPage(tab: Tab): boolean {
     return !!tab.info.url && !tab.info.error && !isInternalUrl(tab.info.url)
@@ -1164,7 +1198,7 @@ export class Tabs {
           const tab = vis[i]
           const slot = splitLayout.panes[i]
           if (slot && tab.view && !tab.view.webContents.isDestroyed() && this.showsPage(tab)) {
-            desired.set(tab.view, { rect: slot.view, radius: 10 })
+            desired.set(tab.view, { rect: slot.view, radius: this.pageRadius })
           }
         }
       }
@@ -1712,6 +1746,20 @@ export class Tabs {
     wc.on('page-favicon-updated', (_e, icons) => {
       if (!isCurrent()) return
       info.favicon = icons.find((u) => /^(https?|data):/.test(u))
+      if (info.favicon && !this.isPrivateWorkspace(info.workspaceId)) {
+        try {
+          const host = new URL(wc.getURL() || info.url).host.toLowerCase()
+          if (host) {
+            if (this.faviconCache.size > 300) {
+              const firstKey = this.faviconCache.keys().next().value
+              if (firstKey) this.faviconCache.delete(firstKey)
+            }
+            this.faviconCache.set(host, info.favicon)
+          }
+        } catch {
+          /* ignore invalid url */
+        }
+      }
       this.changed()
     })
     wc.on('did-fail-load', (_e, code, description, url, isMainFrame) => {

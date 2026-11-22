@@ -32,6 +32,7 @@ import {
 } from 'lucide-react'
 import type { PaletteItem, PaletteItemIcon, PaletteMode } from '@shared/palette'
 import { searchTerms } from '@shared/suggest'
+import { applyResolvedAppearance } from '../applyAppearance'
 
 const ICONS: Record<PaletteItemIcon, LucideIcon> = {
   search: Search,
@@ -127,10 +128,12 @@ export function PaletteWindow(): React.JSX.Element {
       setItems(payload.items)
       setActive(0)
     })
+    const offApp = palette.onAppearance(applyResolvedAppearance)
     palette.ready()
     return () => {
       offOpen()
       offResults()
+      offApp()
       document.documentElement.classList.remove('palette-window')
     }
   }, [palette])

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, Pencil, Search, Star, Trash2, X } from 'lucide-react'
+import { Bookmark as BookmarkIcon, Check, Clock, Pencil, Search, Star, Trash2, X } from 'lucide-react'
 import type { Bookmark, HistoryEntry } from '@shared/types'
 import { displayUrl } from '@shared/url'
 
@@ -108,7 +108,24 @@ export function HistoryPage({ tabId }: { tabId: number }): React.JSX.Element {
         </div>
       </header>
 
-      {!rows.length && <p className="lib-empty">{query ? 'Nothing in your history matches that.' : 'Pages you visit show up here.'}</p>}
+      {!rows.length && (
+        <div className="lib-empty-card" role="status">
+          <div className="lib-empty-emblem" aria-hidden>
+            {query ? <Search size={20} strokeWidth={1.75} /> : <Clock size={20} strokeWidth={1.75} />}
+          </div>
+          <h2>{query ? 'No matching history' : 'Your browsing history is quiet'}</h2>
+          <p>
+            {query
+              ? `Nothing in your history matched “${query}”. Try another term or clear the search.`
+              : 'Pages you visit in regular workspaces will appear here, grouped by day.'}
+          </p>
+          {query && (
+            <button type="button" className="btn sm" onClick={() => setQuery('')}>
+              Clear search
+            </button>
+          )}
+        </div>
+      )}
 
       {groups.map((g) => (
         <section key={g.day} className="lib-group">
@@ -166,15 +183,26 @@ export function BookmarksPage({ tabId }: { tabId: number }): React.JSX.Element {
       </header>
 
       {!shown.length && (
-        <p className="lib-empty">
-          {q ? (
-            'No bookmarks match that.'
-          ) : (
-            <>
-              Press <kbd>Ctrl D</kbd> or the <Star size={12} /> in the address bar to bookmark a page.
-            </>
+        <div className="lib-empty-card" role="status">
+          <div className="lib-empty-emblem" aria-hidden>
+            {q ? <Search size={20} strokeWidth={1.75} /> : <BookmarkIcon size={20} strokeWidth={1.75} />}
+          </div>
+          <h2>{q ? 'No matching bookmarks' : 'No bookmarks yet'}</h2>
+          <p>
+            {q ? (
+              `Nothing in your bookmarks matched “${query}”.`
+            ) : (
+              <>
+                Press <kbd>Ctrl D</kbd> or click the <Star size={12} strokeWidth={1.75} className="lib-inline-star" /> in the address bar to keep your favourite study pages close.
+              </>
+            )}
+          </p>
+          {q && (
+            <button type="button" className="btn sm" onClick={() => setQuery('')}>
+              Clear search
+            </button>
           )}
-        </p>
+        </div>
       )}
 
       <ul className="lib-group">

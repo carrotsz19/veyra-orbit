@@ -4,6 +4,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DEFAULT_SETTINGS, SEARCH_ENGINES, mergeSettings, sanitizeSettings, searchUrlFor } from '../src/shared/settings.ts'
+import { DEFAULT_APPEARANCE } from '../src/shared/appearance.ts'
+import { DEFAULT_START_PAGE } from '../src/shared/startpage.ts'
 import { SettingsStore } from '../src/main/settings.ts'
 
 test('sanitizeSettings returns safe defaults for non-objects and drops unknown keys', () => {
@@ -35,7 +37,9 @@ test('sanitizeSettings returns safe defaults for non-objects and drops unknown k
     compactMode: true,
     sleepAfterMinutes: 60,
     sleepPinnedTabs: true,
-    windowButtons: 'dots'
+    windowButtons: 'dots',
+    appearance: DEFAULT_APPEARANCE,
+    startPage: DEFAULT_START_PAGE
   })
   assert.equal('extra' in cleaned, false)
 })
@@ -81,7 +85,9 @@ test('mergeSettings applies valid fields and ignores invalid or unknown ones', (
     compactMode: true,
     sleepAfterMinutes: 15,
     sleepPinnedTabs: true,
-    windowButtons: 'dots'
+    windowButtons: 'dots',
+    appearance: DEFAULT_APPEARANCE,
+    startPage: DEFAULT_START_PAGE
   })
   assert.deepEqual(mergeSettings(next, null), next)
   assert.deepEqual(mergeSettings(next, { downloadsDir: 'bad\nline' }), next)
@@ -122,6 +128,13 @@ test('SettingsStore persists sanitized settings and honours env downloads overri
     assert.equal(overridden.get().downloadsDir, 'C:\\CustomDL')
     assert.equal(overridden.effectiveDownloadsDir(), 'C:\\EnvDownloads')
     assert.equal(overridden.view().downloadsOverridden, true)
+
+    // Nested appearance partial update merges cleanly and persists
+    const appUpdated = store.update({ appearance: { preset: 'ocean', sidebarWidth: 300, sidebarSide: 'right' } })
+    assert.equal(appUpdated.appearance.preset, 'ocean')
+    assert.equal(appUpdated.appearance.sidebarWidth, 300)
+    assert.equal(appUpdated.appearance.sidebarSide, 'right')
+    assert.equal(appUpdated.appearance.cornerRadius, DEFAULT_APPEARANCE.cornerRadius)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

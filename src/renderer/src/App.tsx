@@ -12,10 +12,13 @@ import type {
   WindowState
 } from '@shared/types'
 import { DEFAULT_SPLIT_RATIO, computeSplitLayout, findSplitGroup, ratioFromPointer } from '@shared/split'
+import { APPEARANCE_LIMITS, DEFAULT_APPEARANCE } from '@shared/appearance'
 import './library.css'
 import './settings.css'
+import './startpage.css'
 import './import-private.css'
 import './extensions.css'
+import { applyResolvedAppearance } from './applyAppearance'
 import { Sidebar } from './components/Sidebar'
 import { TitleBar } from './components/TitleBar'
 import { StartPage } from './components/StartPage'
@@ -43,10 +46,11 @@ function renderTabSurface(
   tab: TabInfo,
   settings: SettingsView | null,
   update: UpdateState | null,
+  onOpenAppearance: () => void,
   shot?: string,
   isPrivate = false
 ): React.JSX.Element | null {
-  if (!tab.url) return <StartPage tabId={tab.id} isPrivate={isPrivate} />
+  if (!tab.url) return <StartPage tabId={tab.id} settings={settings} isPrivate={isPrivate} onOpenAppearance={onOpenAppearance} />
   if (tab.url === 'orbit://history') return <HistoryPage key={tab.id} tabId={tab.id} />
   if (tab.url === 'orbit://bookmarks') return <BookmarksPage key={tab.id} tabId={tab.id} />
   if (tab.url === 'orbit://settings') return <SettingsPage key={tab.id} settings={settings} update={update} />
@@ -79,20 +83,31 @@ export function App(): React.JSX.Element {
   const [dragTabId, setDragTabId] = useState<number | null>(null)
   const [dropSide, setDropSide] = useState<'left' | 'right' | null>(null)
   const [resizingKind, setResizingKind] = useState<'col' | 'row' | null>(null)
+  const [resizingSidebar, setResizingSidebar] = useState(false)
   const pageRef = useRef<HTMLDivElement>(null)
   const pageFullscreenRef = useRef(false)
   const maxDownloadId = useRef(0)
   const dragOverlayActive = useRef(false)
   const dragTabRef = useRef<number | null>(null)
+  const lastTokensRef = useRef<import('@shared/types').ResolvedAppearance | null>(null)
   dragTabRef.current = dragTabId
 
   useEffect(() => {
+    const mqMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const onMotionChange = (): void => {
+      if (lastTokensRef.current) applyResolvedAppearance(lastTokensRef.current)
+    }
+    mqMotion.addEventListener('change', onMotionChange)
     const offs = [
       api.onState(setState),
       api.onPermission(setAsks),
       api.onExternalApps(setExternalAsks),
       api.extensions.onInstallAsk(setExtInstallAsks),
       api.onSettings(setSettings),
+      api.onAppearance((tokens) => {
+        lastTokensRef.current = tokens
+        applyResolvedAppearance(tokens)
+      }),
       api.onUpdateState(setUpdate),
       api.onCompactState(setCompact),
       api.onWinState(setWinState),
@@ -120,7 +135,10 @@ export function App(): React.JSX.Element {
       })
     ]
     api.ready()
-    return () => offs.forEach((off) => off())
+    return () => {
+      mqMotion.removeEventListener('change', onMotionChange)
+      offs.forEach((off) => off())
+    }
   }, [])
 
   // Keep revealed compact panels pinned while interactive UI inside them is open.
@@ -172,11 +190,28 @@ export function App(): React.JSX.Element {
     }
   }, [sendBounds])
 
+  const appearance = settings?.appearance ?? DEFAULT_APPEARANCE
+
   useLayoutEffect(() => {
     pageFullscreenRef.current = pageFullscreen
     if (pageFullscreen) return
     sendBounds()
-  }, [pageFullscreen, compact.enabled, asks.length, externalAsks.length, extInstallAsks.length, findOpen, sendBounds])
+    const raf = requestAnimationFrame(sendBounds)
+    return () => cancelAnimationFrame(raf)
+  }, [
+    pageFullscreen,
+    compact.enabled,
+    asks.length,
+    externalAsks.length,
+    extInstallAsks.length,
+    findOpen,
+    appearance.sidebarSide,
+    appearance.sidebarWidth,
+    appearance.pageGap,
+    appearance.density,
+    appearance.textScale,
+    sendBounds
+  ])
 
   const active: TabInfo | undefined = state.tabs.find((t) => t.id === state.activeId)
   const activeSplit = useMemo(() => findSplitGroup(state.splits, state.activeId), [state.splits, state.activeId])
@@ -266,20 +301,81 @@ export function App(): React.JSX.Element {
     api.splitWith(state.activeId, droppedId, side)
   }
 
+  const startSidebarResize = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    setResizingSidebar(true)
+    const isRight = appearance.sidebarSide === 'right'
+    const startX = e.clientX
+    const startW = appearance.sidebarWidth
+    let latestW = startW
+    let raf = 0
+
+    const applyWidth = (w: number): void => {
+      const clamped = Math.min(APPEARANCE_LIMITS.sidebarWidth.max, Math.max(APPEARANCE_LIMITS.sidebarWidth.min, Math.round(w)))
+      latestW = clamped
+      document.documentElement.style.setProperty('--side', `${clamped}px`)
+      sendBounds()
+    }
+
+    const onMove = (ev: PointerEvent): void => {
+      const dx = ev.clientX - startX
+      const target = isRight ? startW - dx : startW + dx
+      if (!raf) {
+        raf = requestAnimationFrame(() => {
+          raf = 0
+          applyWidth(target)
+        })
+      }
+    }
+    const onUp = (): void => {
+      if (raf) {
+        cancelAnimationFrame(raf)
+        raf = 0
+      }
+      setResizingSidebar(false)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      if (latestW !== startW) {
+        void api.updateSettings({ appearance: { sidebarWidth: latestW } })
+      }
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+  }
+
+  const handleSidebarResizeKey = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    const isRight = appearance.sidebarSide === 'right'
+    let delta = 0
+    if (e.key === 'ArrowLeft') delta = isRight ? 12 : -12
+    else if (e.key === 'ArrowRight') delta = isRight ? -12 : 12
+    else if (e.key === 'Home') {
+      e.preventDefault()
+      void api.updateSettings({ appearance: { sidebarWidth: APPEARANCE_LIMITS.sidebarWidth.default } })
+      return
+    } else return
+    e.preventDefault()
+    const next = Math.min(APPEARANCE_LIMITS.sidebarWidth.max, Math.max(APPEARANCE_LIMITS.sidebarWidth.min, appearance.sidebarWidth + delta))
+    void api.updateSettings({ appearance: { sidebarWidth: next } })
+  }
+
   // In compact mode, the main window always keeps the page full-size; sidebar and titlebar
   // float above the page in dedicated overlay windows so the page never jumps or resizes.
   const compactClasses = compact.enabled ? 'compact' : ''
 
   return (
     <div
-      className={`shell ${pageFullscreen ? 'fullscreen' : ''} ${compactClasses}`}
+      className={`shell ${pageFullscreen ? 'fullscreen' : ''} ${compactClasses} ${resizingSidebar ? 'resizing-side' : ''}`}
       data-ws-accent={activeWorkspace?.accent ?? 'clay'}
       data-ws-private={activeWorkspace?.private ? 'true' : undefined}
     >
       {compact.enabled && !pageFullscreen && (
         <>
           <div
-            className="compact-edge compact-edge-left"
+            className={`compact-edge ${appearance.sidebarSide === 'right' ? 'compact-edge-right' : 'compact-edge-left'}`}
             aria-hidden
             onMouseEnter={() => api.setCompactHover('sidebar', true)}
           />
@@ -313,6 +409,22 @@ export function App(): React.JSX.Element {
         onDragTabChange={setDragTabId}
         openNewWorkspaceTick={newWorkspaceTick}
       />
+      {!compact.enabled && !pageFullscreen && (
+        <div
+          role="separator"
+          tabIndex={0}
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          aria-valuemin={APPEARANCE_LIMITS.sidebarWidth.min}
+          aria-valuemax={APPEARANCE_LIMITS.sidebarWidth.max}
+          aria-valuenow={appearance.sidebarWidth}
+          title="Drag to resize sidebar · Double-click to reset"
+          className={`side-resizer ${appearance.sidebarSide === 'right' ? 'right' : 'left'} ${resizingSidebar ? 'dragging' : ''}`}
+          onPointerDown={startSidebarResize}
+          onDoubleClick={() => void api.updateSettings({ appearance: { sidebarWidth: APPEARANCE_LIMITS.sidebarWidth.default } })}
+          onKeyDown={handleSidebarResizeKey}
+        />
+      )}
       <main className="main">
         {tabAsks.length > 0 && <PermissionBar ask={tabAsks[0]} />}
         {tabExternalAsks.length > 0 && <ExternalAppBar ask={tabExternalAsks[0]} />}
@@ -352,7 +464,9 @@ export function App(): React.JSX.Element {
                       if (!focused) api.activate(pane.id)
                     }}
                   >
-                    <div className="split-pane-inner">{renderTabSurface(pane, settings, update, shots?.[pane.id], !!activeWorkspace?.private)}</div>
+                    <div className="split-pane-inner">
+                      {renderTabSurface(pane, settings, update, () => handleOpenSettingsSection('set-appearance'), shots?.[pane.id], !!activeWorkspace?.private)}
+                    </div>
                   </div>
                 )
               })}
@@ -378,7 +492,7 @@ export function App(): React.JSX.Element {
               ))}
             </>
           ) : (
-            active && renderTabSurface(active, settings, update, shots?.[active.id], !!activeWorkspace?.private)
+            active && renderTabSurface(active, settings, update, () => handleOpenSettingsSection('set-appearance'), shots?.[active.id], !!activeWorkspace?.private)
           )}
 
           {dragTabId !== null && dropSide && (

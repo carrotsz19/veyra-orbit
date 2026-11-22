@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BrowserState, DownloadInfo, SettingsView, TabInfo, UpdateState, WindowState } from '@shared/types'
 import '../extensions.css'
+import { applyResolvedAppearance } from '../applyAppearance'
 import { Sidebar } from './Sidebar'
 import { TitleBar } from './TitleBar'
 
@@ -38,6 +39,7 @@ export function CompactSidebarWindow(): React.JSX.Element {
     document.documentElement.classList.add('compact-panel-win')
     const offs = [
       api.onState(setState),
+      api.onAppearance(applyResolvedAppearance),
       api.onUpdateState(setUpdate),
       api.onDownloads((items) => {
         setDownloads(items)
@@ -108,6 +110,7 @@ export function CompactTitlebarWindow(): React.JSX.Element {
     const offs = [
       api.onState(setState),
       api.onSettings(setSettings),
+      api.onAppearance(applyResolvedAppearance),
       api.onWinState(setWinState),
       panel.onVisible(setVisible)
     ]

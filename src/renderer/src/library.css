@@ -164,7 +164,7 @@
 }
 .btn.danger {
   background: var(--tint-soft);
-  color: var(--tint);
+  color: var(--tint-text, var(--tint));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tint) 26%, transparent);
 }
 .btn.danger:hover:not(:disabled) {
@@ -178,13 +178,51 @@
   width: 26px;
   height: 26px;
 }
-.lib-empty {
-  margin: 48px 0;
+.lib-empty-card {
+  margin: 48px auto;
+  max-width: 420px;
+  padding: 32px 24px;
+  border-radius: var(--r-lg);
+  background: var(--bg-grouped);
+  border: 1px solid var(--hairline);
+  box-shadow: inset 0 1px 0 var(--hairline-inset), var(--shadow-1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
+  gap: 8px;
+  animation: surface-in var(--t-pop) var(--ease-out);
+}
+.lib-empty-emblem {
+  width: 44px;
+  height: 44px;
+  margin-bottom: 4px;
+  border-radius: var(--r-md);
+  background: var(--tint-soft);
+  color: var(--tint-text, var(--tint));
+  display: grid;
+  place-items: center;
+}
+.lib-empty-card h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--label-primary);
+}
+.lib-empty-card p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
   color: var(--label-secondary);
 }
-.lib-empty svg {
-  vertical-align: -1px;
+.lib-empty-card .btn {
+  margin-top: 8px;
+}
+.lib-inline-star {
+  vertical-align: -2px;
+  color: var(--tint-text, var(--tint));
 }
 .lib-group {
   margin: 0 0 var(--sp-5);
@@ -240,7 +278,7 @@
   text-overflow: ellipsis;
 }
 .lib-link:hover .lib-title {
-  color: var(--tint);
+  color: var(--tint-text, var(--tint));
 }
 .lib-host {
   flex: none;

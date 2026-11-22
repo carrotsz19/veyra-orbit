@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ArrowLeft, Columns2, ExternalLink, Globe, LoaderCircle, Lock, RotateCw, TriangleAlert, X } from 'lucide-react'
 import type { PeekState } from '@shared/peek'
 import { displayUrl } from '@shared/url'
+import { applyResolvedAppearance } from '../applyAppearance'
 
 /**
  * Floating Link Preview ("Peek") toolbar window.
@@ -20,6 +21,7 @@ export function PeekWindow(): React.JSX.Element {
       if (next.accent) root.style.setProperty('--peek-accent', next.accent)
       setState(next)
     })
+    const offApp = peek.onAppearance(applyResolvedAppearance)
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
         e.preventDefault()
@@ -30,6 +32,7 @@ export function PeekWindow(): React.JSX.Element {
     peek.ready()
     return () => {
       off()
+      offApp()
       window.removeEventListener('keydown', onKeyDown)
       document.documentElement.classList.remove('peek-window')
     }
