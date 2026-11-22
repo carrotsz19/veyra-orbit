@@ -173,7 +173,7 @@
 .ws-dot.private.on {
   background: #2b243e;
   color: #ece6fa;
-  box-shadow: inset 0 0 0 1px #8c78c8;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 0 1.5px #8c78c8, var(--shadow-1);
 }
 .private-pill {
   flex: none;

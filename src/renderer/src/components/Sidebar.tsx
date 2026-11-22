@@ -74,11 +74,11 @@ function tabTooltip(t: TabInfo): string {
 function Favicon({ tab }: { tab: TabInfo }): React.JSX.Element {
   const [broken, setBroken] = useState<string | null>(null)
   if (tab.loading) return <LoaderCircle className="fav spin" size={16} strokeWidth={2} />
-  if (tab.url === 'orbit://history') return <Clock className="fav" size={16} strokeWidth={1.75} />
-  if (tab.url === 'orbit://bookmarks') return <Bookmark className="fav" size={16} strokeWidth={1.75} />
-  if (tab.url === 'orbit://settings') return <Settings className="fav" size={16} strokeWidth={1.75} />
+  if (tab.url === 'orbit://history') return <Clock className="fav fav-glyph" size={15} strokeWidth={1.75} />
+  if (tab.url === 'orbit://bookmarks') return <Bookmark className="fav fav-glyph" size={15} strokeWidth={1.75} />
+  if (tab.url === 'orbit://settings') return <Settings className="fav fav-glyph" size={15} strokeWidth={1.75} />
   if (tab.favicon && broken !== tab.favicon) return <img className="fav" src={tab.favicon} alt="" onError={() => setBroken(tab.favicon!)} />
-  return <Globe className="fav" size={16} strokeWidth={1.75} />
+  return <Globe className="fav fav-glyph" size={15} strokeWidth={1.65} />
 }
 
 interface EditorState {

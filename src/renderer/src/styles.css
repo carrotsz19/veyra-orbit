@@ -447,7 +447,7 @@ html.compact-panel-win #root {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 2px 8px 8px;
+  padding: var(--sp-1) var(--sp-2) var(--sp-2);
 }
 
 .pins {
@@ -455,31 +455,31 @@ html.compact-panel-win #root {
   grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
   gap: 6px;
   padding: 6px 0 10px;
-  border-bottom: 1px solid var(--separator);
+  border-bottom: 1px solid var(--hairline);
   margin-bottom: 6px;
 }
 .pin {
   position: relative;
-  height: 44px;
+  height: 42px;
   display: grid;
   place-items: center;
-  border-radius: var(--r-control);
+  border-radius: var(--r-md);
   background: var(--fill-tertiary);
   cursor: default;
-  transition: background 0.15s, transform var(--spring-snappy-ms) var(--spring-snappy);
+  transition: background-color var(--t-fast) ease, box-shadow var(--t-base) var(--ease-out), transform var(--t-fast) var(--ease-out);
 }
 .pin:hover {
   background: var(--fill-hover);
 }
 .pin:active {
-  transform: scale(0.94);
+  transform: scale(0.96);
 }
 .pin.on {
-  background: var(--bg-elevated);
-  box-shadow: var(--elev-1), inset 0 0 0 1.5px var(--ws-accent);
+  background: var(--bg-surface-raised);
+  box-shadow: inset 0 1px 0 var(--hairline-inset), 0 0 0 1px color-mix(in srgb, var(--ws-accent) 42%, var(--hairline-strong)), var(--shadow-1);
 }
 .pin.sleeping {
-  opacity: 0.56;
+  opacity: 0.54;
 }
 .pin.sleeping .fav {
   filter: grayscale(0.45);
@@ -498,11 +498,11 @@ html.compact-panel-win #root {
   height: 18px;
   display: grid;
   place-items: center;
-  border-radius: 5px;
-  background: var(--bg-elevated);
+  border-radius: var(--r-xs);
+  background: var(--bg-surface-raised);
   color: var(--tint);
-  box-shadow: var(--elev-1);
-  transition: background 0.15s, color 0.15s, transform var(--spring-snappy-ms) var(--spring-snappy);
+  box-shadow: 0 0 0 1px var(--hairline), var(--shadow-1);
+  transition: background-color var(--t-fast) ease, color var(--t-fast) ease, transform var(--t-fast) var(--ease-out);
 }
 .pin-audio.muted {
   color: var(--label-tertiary);
@@ -512,7 +512,7 @@ html.compact-panel-win #root {
   color: var(--label-primary);
 }
 .pin-audio:active {
-  transform: scale(0.9);
+  transform: scale(0.94);
 }
 
 .tabs {
@@ -522,28 +522,33 @@ html.compact-panel-win #root {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding-top: 2px;
+  padding: 2px 2px 4px 0;
 }
 .tabs::-webkit-scrollbar {
-  width: 0;
+  width: 5px;
+}
+.tabs:not(:hover)::-webkit-scrollbar-thumb {
+  background: transparent;
 }
 .tab {
   flex: none;
-  height: 36px;
+  height: 34px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 6px 0 10px;
-  border-radius: var(--r-control);
+  gap: 9px;
+  padding: 0 6px 0 9px;
+  border-radius: var(--r-md);
   text-align: left;
+  font-size: 13px;
+  font-weight: 450;
   color: var(--label-secondary);
-  transition: background 0.15s, color 0.15s, transform var(--spring-snappy-ms) var(--spring-snappy);
-  animation: tab-in var(--spring-bouncy-ms) var(--spring-bouncy);
+  transition: background-color var(--t-fast) ease, color var(--t-fast) ease, box-shadow var(--t-base) var(--ease-out), transform var(--t-fast) var(--ease-out);
+  animation: tab-in 160ms var(--ease-out);
 }
 @keyframes tab-in {
   from {
     opacity: 0;
-    transform: translateX(-10px) scale(0.98);
+    transform: translateY(-3px) scale(0.985);
   }
 }
 .tab:hover {
@@ -551,32 +556,23 @@ html.compact-panel-win #root {
   color: var(--label-primary);
 }
 .tab:active {
-  transform: scale(0.985);
+  transform: scale(0.98);
 }
 .tab.on {
   position: relative;
-  background: var(--bg-elevated);
+  background: var(--bg-surface-raised);
   color: var(--label-primary);
-  box-shadow: var(--elev-1), inset 0 0 0 1px var(--ws-accent-soft);
-}
-.tab.on::before {
-  content: '';
-  position: absolute;
-  left: 3px;
-  top: 8px;
-  bottom: 8px;
-  width: 2.5px;
-  border-radius: 999px;
-  background: var(--ws-accent);
+  font-weight: 500;
+  box-shadow: inset 0 1px 0 var(--hairline-inset), 0 0 0 1px var(--hairline-strong), var(--shadow-1);
 }
 .tab.sleeping {
-  opacity: 0.56;
+  opacity: 0.54;
 }
 .tab.sleeping .fav {
   filter: grayscale(0.45);
 }
 .tab.sleeping:hover {
-  opacity: 0.86;
+  opacity: 0.85;
 }
 .tab.dragging {
   opacity: 0.45;
@@ -589,13 +585,14 @@ html.compact-panel-win #root {
   text-overflow: ellipsis;
 }
 .tab-btn {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   flex: none;
   display: none;
   place-items: center;
-  border-radius: 7px;
-  color: var(--label-secondary);
+  border-radius: var(--r-xs);
+  color: var(--label-tertiary);
+  transition: background-color var(--t-fast) ease, color var(--t-fast) ease, transform var(--t-fast) var(--ease-out);
 }
 .tab-btn.tab-audio {
   display: grid;
@@ -619,13 +616,22 @@ html.compact-panel-win #root {
   background: var(--fill-hover);
   color: var(--label-primary);
 }
+.tab-btn:active {
+  transform: scale(0.94);
+}
 .tab.new {
+  height: 32px;
+  margin-top: 2px;
   color: var(--label-tertiary);
+  font-weight: 450;
   animation: none;
+}
+.tab.new:hover {
+  color: var(--label-secondary);
 }
 .tab.new kbd {
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity var(--t-fast) ease;
 }
 .tab.new:hover kbd {
   opacity: 1;
@@ -634,7 +640,20 @@ html.compact-panel-win #root {
   width: 16px;
   height: 16px;
   flex: none;
-  border-radius: 3px;
+  border-radius: 4px;
+  object-fit: contain;
+}
+.fav-glyph {
+  color: var(--label-tertiary);
+  transition: color var(--t-fast) ease;
+}
+.tab:hover .fav-glyph,
+.tab.on .fav-glyph,
+.pin:hover .fav-glyph,
+.pin.on .fav-glyph,
+.split-cell:hover .fav-glyph,
+.split-cell.focused .fav-glyph {
+  color: var(--label-secondary);
 }
 .spin {
   animation: spin 0.9s linear infinite;
@@ -1604,33 +1623,36 @@ html[data-material='solid'] .peek-shell {
   grid-template-columns: 1fr 1fr;
   gap: 2px;
   padding: 2px;
-  border-radius: var(--r-control);
+  border-radius: var(--r-md);
   background: var(--fill-tertiary);
-  transition: background 0.15s, box-shadow 0.15s;
+  transition: background-color var(--t-fast) ease, box-shadow var(--t-base) var(--ease-out);
 }
 .split-row.on {
-  background: color-mix(in srgb, var(--ws-accent-soft) 55%, var(--bg-elevated));
-  box-shadow: var(--elev-1), inset 0 0 0 1px var(--ws-accent-soft);
+  background: var(--fill-hover);
+  box-shadow: inset 0 0 0 1px var(--hairline);
 }
 .split-cell {
   min-width: 0;
-  height: 32px;
+  height: 30px;
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 0 4px 0 7px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   color: var(--label-secondary);
-  transition: background 0.14s, color 0.14s;
+  transition: background-color var(--t-fast) ease, color var(--t-fast) ease, transform var(--t-fast) var(--ease-out);
 }
 .split-cell:hover {
   background: var(--fill-hover);
   color: var(--label-primary);
 }
+.split-cell:active {
+  transform: scale(0.98);
+}
 .split-cell.focused {
-  background: var(--bg-elevated);
+  background: var(--bg-surface-raised);
   color: var(--label-primary);
-  box-shadow: var(--elev-1), inset 0 0 0 1.25px var(--ws-accent);
+  box-shadow: inset 0 1px 0 var(--hairline-inset), 0 0 0 1px var(--hairline-strong), var(--shadow-1);
 }
 .split-cell.sleeping {
   opacity: 0.56;
@@ -2025,8 +2047,8 @@ html[data-material='solid'] .peek-shell {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 4px 8px 6px;
+  gap: var(--sp-2);
+  padding: 5px 6px 8px;
   margin-bottom: 2px;
 }
 .ws-head-badge {
@@ -2035,15 +2057,17 @@ html[data-material='solid'] .peek-shell {
   flex: none;
   display: grid;
   place-items: center;
-  border-radius: 7px;
+  border-radius: var(--r-pill);
   background: var(--ws-accent-soft);
   color: var(--ws-accent);
 }
 .ws-head-name {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-family: var(--font-display);
+  font-size: 12.5px;
   font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--label-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -2061,10 +2085,10 @@ html[data-material='solid'] .peek-shell {
   flex: none;
   display: grid;
   place-items: center;
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   color: var(--label-tertiary);
   opacity: 0;
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  transition: opacity var(--t-fast) ease, background-color var(--t-fast) ease, color var(--t-fast) ease, transform var(--t-fast) var(--ease-out);
 }
 .ws-head:hover .ws-head-edit,
 .ws-head-edit:focus-visible {
@@ -2073,6 +2097,9 @@ html[data-material='solid'] .peek-shell {
 .ws-head-edit:hover {
   background: var(--fill-hover);
   color: var(--label-primary);
+}
+.ws-head-edit:active {
+  transform: scale(0.94);
 }
 .ws-emoji {
   font-size: 13px;
@@ -2085,21 +2112,21 @@ html[data-material='solid'] .peek-shell {
   flex-direction: column;
 }
 .ws-slide-next {
-  animation: ws-from-right 180ms var(--ease-out);
+  animation: ws-from-right 170ms var(--ease-out);
 }
 .ws-slide-prev {
-  animation: ws-from-left 180ms var(--ease-out);
+  animation: ws-from-left 170ms var(--ease-out);
 }
 @keyframes ws-from-right {
   from {
     opacity: 0;
-    transform: translateX(12px);
+    transform: translateX(10px);
   }
 }
 @keyframes ws-from-left {
   from {
     opacity: 0;
-    transform: translateX(-12px);
+    transform: translateX(-10px);
   }
 }
 
@@ -2107,19 +2134,19 @@ html[data-material='solid'] .peek-shell {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--separator);
+  gap: 6px;
+  margin-top: 6px;
+  padding: 8px 2px 2px;
+  border-top: 1px solid var(--hairline);
 }
 .ws-dots {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   overflow-x: auto;
-  padding: 2px 1px;
+  padding: 2px 2px 5px;
 }
 .ws-dots::-webkit-scrollbar {
   height: 0;
@@ -2131,48 +2158,60 @@ html[data-material='solid'] .peek-shell {
   flex: none;
   display: grid;
   place-items: center;
-  border-radius: 8px;
-  color: var(--label-secondary);
-  transition: background 0.15s, color 0.15s, transform var(--spring-snappy-ms) var(--spring-snappy);
+  border-radius: var(--r-pill);
+  color: var(--label-tertiary);
+  transition: background-color var(--t-fast) ease, color var(--t-fast) ease, box-shadow var(--t-base) var(--ease-out), transform var(--t-fast) var(--ease-out);
 }
 .ws-dot:hover {
   background: var(--fill-hover);
   color: var(--label-primary);
 }
 .ws-dot:active {
-  transform: scale(0.92);
+  transform: scale(0.94);
 }
 .ws-dot.on {
-  background: var(--ws-accent-soft);
-  color: var(--ws-accent);
-  box-shadow: inset 0 0 0 1px var(--ws-accent);
+  background: var(--bg-surface-raised);
+  color: var(--label-primary);
+  box-shadow: inset 0 1px 0 var(--hairline-inset), 0 0 0 1.5px color-mix(in srgb, var(--ws-accent) 60%, transparent), var(--shadow-1);
+}
+.ws-dot.on::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: var(--r-pill);
+  background: var(--ws-accent);
 }
 .ws-dot-iso {
   position: absolute;
-  right: 3px;
-  bottom: 3px;
+  right: 2px;
+  bottom: 2px;
   width: 5px;
   height: 5px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.7;
+  border-radius: var(--r-pill);
+  background: var(--ws-accent);
+  box-shadow: 0 0 0 1.5px var(--bg-shell);
 }
 .ws-add {
   width: 28px;
   height: 28px;
+  margin-bottom: 3px;
   flex: none;
   display: grid;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--r-pill);
   color: var(--label-tertiary);
-  transition: background 0.15s, color 0.15s, transform var(--spring-snappy-ms) var(--spring-snappy);
+  transition: background-color var(--t-fast) ease, color var(--t-fast) ease, transform var(--t-fast) var(--ease-out);
 }
 .ws-add:hover {
   background: var(--fill-hover);
   color: var(--label-primary);
 }
 .ws-add:active {
-  transform: scale(0.92);
+  transform: scale(0.94);
 }
 
 .ws-editor {
