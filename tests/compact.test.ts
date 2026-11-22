@@ -45,6 +45,44 @@ test('computeCompactZones triggers sidebar at left edge and toolbar at top edge 
   )
 })
 
+test('computeCompactZones supports right-aligned sidebar trigger and keep-open zones', () => {
+  const closed = computeCompactZones({
+    rx: 1196,
+    ry: 300,
+    contentWidth: 1200,
+    contentHeight: 800,
+    sidebarOpen: false,
+    toolbarOpen: false,
+    sidebarSide: 'right',
+    sidebarWidth: 280
+  })
+  assert.equal(closed.wantSidebar, true)
+
+  const leftEdgeIgnored = computeCompactZones({
+    rx: 4,
+    ry: 300,
+    contentWidth: 1200,
+    contentHeight: 800,
+    sidebarOpen: false,
+    toolbarOpen: false,
+    sidebarSide: 'right',
+    sidebarWidth: 280
+  })
+  assert.equal(leftEdgeIgnored.wantSidebar, false)
+
+  const openKeep = computeCompactZones({
+    rx: 930,
+    ry: 300,
+    contentWidth: 1200,
+    contentHeight: 800,
+    sidebarOpen: true,
+    toolbarOpen: false,
+    sidebarSide: 'right',
+    sidebarWidth: 280
+  })
+  assert.equal(openKeep.wantSidebar, true)
+})
+
 test('pickActiveSection picks section nearest top and picks last section when scrolled to bottom', () => {
   const sections = [
     { id: 'set-general', top: -600 },

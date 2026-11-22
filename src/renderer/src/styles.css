@@ -411,6 +411,9 @@ html.compact-panel-win #root {
   overflow: hidden;
   transform: translateX(-8px) scale(0.98);
 }
+html[data-sidebar-side='right'] .compact-float-side-card {
+  transform: translateX(8px) scale(0.98);
+}
 .compact-float-bar-card {
   width: 100%;
   flex: none;
@@ -595,8 +598,14 @@ html.compact-panel-win #root {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 2px 2px 4px 0;
+  gap: 3px;
+  padding: 2px 2px 6px 0;
+}
+html[data-density='compact'] .tabs {
+  gap: 1px;
+}
+html[data-density='spacious'] .tabs {
+  gap: 5px;
 }
 .tabs::-webkit-scrollbar {
   width: 5px;
@@ -1573,7 +1582,7 @@ html.peek-window #root {
   border-radius: var(--page-radius);
   background: var(--bg-elevated);
   box-shadow: var(--page-shadow);
-  overflow: hidden;
+  overflow: clip;
   position: relative;
 }
 .page.split {
@@ -1931,7 +1940,7 @@ html[data-motion='reduced'] .ws-slide-prev {
   padding: 0 5px;
   border-radius: 999px;
   background: var(--tint-soft);
-  color: var(--tint);
+  color: var(--tint-text, var(--tint));
   font-size: 10px;
   font-weight: 600;
   display: inline-grid;
@@ -2077,7 +2086,7 @@ html[data-motion='reduced'] .ws-slide-prev {
   padding: 1px 5px;
   border-radius: var(--r-xs);
   background: var(--tint-soft);
-  color: var(--tint);
+  color: var(--tint-text, var(--tint));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tint) 24%, transparent);
   font: 600 9px/1.35 var(--font-sans);
   letter-spacing: 0.08em;

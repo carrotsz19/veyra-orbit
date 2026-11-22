@@ -8,7 +8,7 @@
   position: relative;
   height: 100%;
   width: 100%;
-  overflow: hidden;
+  overflow: clip;
   background: var(--bg-elevated);
   color: var(--label-primary);
 }
@@ -741,13 +741,16 @@ html[data-motion='off'] .sp-blob {
   box-shadow: var(--shadow-3);
   transform: translateX(102%);
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
-  transition: transform 200ms var(--ease-out), opacity 180ms ease;
+  transition: transform 200ms var(--ease-out), opacity 180ms ease, visibility 0ms linear 200ms;
 }
 .sp-drawer.open {
   transform: translateX(0);
   opacity: 1;
+  visibility: visible;
   pointer-events: auto;
+  transition: transform 200ms var(--ease-out), opacity 180ms ease, visibility 0ms;
 }
 .sp-drawer-head {
   flex: none;

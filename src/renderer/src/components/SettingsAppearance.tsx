@@ -295,7 +295,11 @@ export function SettingsAppearance({ settings, onPatch, onSettingsReplaced }: Pr
                     style={{ background: swatchColor }}
                     onClick={() => patchApp({ accent: sw.hex })}
                   >
-                    {selected && <Check size={12} strokeWidth={2.6} style={{ color: deriveAccentTokens(swatchColor, previewDark, activePal.bgElevated).onTint }} aria-hidden />}
+                    {selected ? (
+                      <Check size={12} strokeWidth={2.6} style={{ color: deriveAccentTokens(swatchColor, previewDark, activePal.bgElevated).onTint }} aria-hidden />
+                    ) : sw.hex === '' ? (
+                      <Sparkles size={11} strokeWidth={2.2} style={{ color: deriveAccentTokens(swatchColor, previewDark, activePal.bgElevated).onTint }} aria-hidden />
+                    ) : null}
                   </button>
                 )
               })}

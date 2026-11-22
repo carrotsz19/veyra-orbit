@@ -73,7 +73,7 @@ export function StartCustomizeDrawer({
 
   useEffect(() => {
     if (!open) return
-    requestAnimationFrame(() => closeBtnRef.current?.focus())
+    requestAnimationFrame(() => closeBtnRef.current?.focus({ preventScroll: true }))
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
         e.preventDefault()

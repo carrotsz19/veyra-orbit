@@ -732,7 +732,7 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
           <div className={`sp-widgets ${config.layout === 'wide' ? 'wide' : 'centered'}`}>
             {enabledWidgets.map((w) => {
               const fullIdx = config.widgets.findIndex((item) => item.id === w.id)
-              const isHero = w.id === 'clock' || w.id === 'search' || w.id === 'quote'
+              const isHero = w.id === 'clock' || w.id === 'search' || w.id === 'quick-links' || w.id === 'quote'
               return (
                 <div
                   key={w.id}
