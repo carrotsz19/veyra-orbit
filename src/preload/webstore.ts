@@ -58,13 +58,24 @@ const WebGlStatus = {
   WEBGL_BLOCKED: 'webgl_blocked'
 }
 
+// Chrome Web Store sets body { min-width: 1249px / 1280px } and main { min-width: 960px },
+// which causes unnecessary horizontal scrolling inside Orbit's vertical-sidebar layout.
+// Relaxing those min-widths lets its responsive grid fit normal window widths cleanly while
+// still allowing horizontal scroll naturally if the window is genuinely narrow.
+const WEBSTORE_LAYOUT_FIT_CSS = `
+  body { min-width: 0 !important; }
+  main { min-width: 0 !important; max-width: 100% !important; box-sizing: border-box !important; }
+`
+
 function updateBranding(appName: string): void {
   const run = (): void => {
     requestAnimationFrame(() => {
       try {
-        const nodes = Array.from(document.querySelectorAll('span')).filter((n) => n.innerText.includes('Chrome'))
+        const nodes = Array.from(document.querySelectorAll('span')).filter(
+          (n) => n.childElementCount === 0 && (n.textContent ?? '').includes('Chrome')
+        )
         for (const node of nodes) {
-          node.innerText = node.innerText.replace('Chrome', appName)
+          node.textContent = (node.textContent ?? '').replace('Chrome', appName)
         }
       } catch {
         /* ignore DOM access errors */
@@ -76,6 +87,7 @@ function updateBranding(appName: string): void {
 }
 
 function setupWebStoreBridge(): void {
+  void webFrame.insertCSS(WEBSTORE_LAYOUT_FIT_CSS)
   let appName = ''
   const maybeUpdateBranding = (): void => {
     if (appName) updateBranding(appName)

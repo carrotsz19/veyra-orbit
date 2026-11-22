@@ -45,12 +45,17 @@
 
 /* ---- Install confirmation strip ------------------------------------------ */
 .ext-install-bar {
+  flex: none;
   flex-direction: column;
   align-items: stretch;
-  gap: 10px;
+  gap: 8px;
+  padding: 10px 12px 10px 14px;
+  max-height: min(260px, 40%);
+  overflow: hidden;
 }
 
 .ext-install-head {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -63,6 +68,7 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
+  flex: 1 1 240px;
 }
 
 .ext-install-icon {
@@ -87,6 +93,7 @@
 .ext-install-name {
   font-size: 13px;
   color: var(--label-primary);
+  overflow-wrap: anywhere;
 }
 
 .ext-install-ver {
@@ -98,6 +105,7 @@
 .ext-install-sub {
   font-size: 12px;
   color: var(--label-secondary);
+  overflow-wrap: anywhere;
 }
 
 .ext-install-perms {
@@ -109,19 +117,26 @@
   gap: 4px;
   border-radius: var(--r-control);
   background: var(--fill-tertiary);
+  min-height: 0;
+  max-height: 120px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .ext-install-perm {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 7px;
   font-size: 12px;
+  line-height: 1.35;
   color: var(--label-primary);
+  overflow-wrap: anywhere;
 }
 
 .ext-perm-warn {
   color: var(--warning);
   flex: none;
+  margin-top: 2px;
 }
 
 /* ---- Settings -> Extensions ---------------------------------------------- */

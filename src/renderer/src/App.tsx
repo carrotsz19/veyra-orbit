@@ -176,7 +176,7 @@ export function App(): React.JSX.Element {
     pageFullscreenRef.current = pageFullscreen
     if (pageFullscreen) return
     sendBounds()
-  }, [pageFullscreen, compact.enabled, sendBounds])
+  }, [pageFullscreen, compact.enabled, asks.length, externalAsks.length, extInstallAsks.length, findOpen, sendBounds])
 
   const active: TabInfo | undefined = state.tabs.find((t) => t.id === state.activeId)
   const activeSplit = useMemo(() => findSplitGroup(state.splits, state.activeId), [state.splits, state.activeId])
