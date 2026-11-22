@@ -31,11 +31,31 @@ export function SettingsExtensions(): React.JSX.Element {
   useEffect(() => {
     refresh()
     const off = api.extensions.onState(setExtState)
-    // Refresh live memory readout gently while Settings -> Extensions is visible.
-    const timer = setInterval(refresh, 3000)
+    // Refresh live memory readout gently while Settings -> Extensions is visible; pause when hidden.
+    let timer: ReturnType<typeof setInterval> | null = null
+    const start = (): void => {
+      if (timer || document.hidden) return
+      timer = setInterval(refresh, 3000)
+    }
+    const stop = (): void => {
+      if (!timer) return
+      clearInterval(timer)
+      timer = null
+    }
+    const onVis = (): void => {
+      if (document.hidden) {
+        stop()
+      } else {
+        refresh()
+        start()
+      }
+    }
+    start()
+    document.addEventListener('visibilitychange', onVis)
     return () => {
       off()
-      clearInterval(timer)
+      stop()
+      document.removeEventListener('visibilitychange', onVis)
     }
   }, [refresh])
 

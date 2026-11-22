@@ -1431,7 +1431,8 @@ export class ExtensionManager {
         contextIsolation: true,
         nodeIntegration: false,
         nodeIntegrationInWorker: false,
-        enablePreferredSizeMode: true
+        enablePreferredSizeMode: true,
+        backgroundThrottling: true
       }
     })
     pw.setMenu(null)

@@ -428,6 +428,12 @@ function pollCompactCursor(): void {
   applyCompactTargets(wantSide, wantBar)
 }
 
+function startCompactPoller(): void {
+  if (!compactPoller && settings?.get().compactMode && win && !win.isDestroyed() && !win.isMinimized() && win.isVisible()) {
+    compactPoller = setInterval(pollCompactCursor, COMPACT_POLL_MS)
+  }
+}
+
 function syncCompactMode(): void {
   const enabled = !!settings?.get().compactMode
   if (!enabled) {
@@ -446,9 +452,7 @@ function syncCompactMode(): void {
     toolbar: compactPins.omnibox || compactPins.titleMenu || compactPins.dragging || compactPins.extPopup || compactHover.toolbar
   }
   sendCompactState(true)
-  if (!compactPoller) {
-    compactPoller = setInterval(pollCompactCursor, COMPACT_POLL_MS)
-  }
+  startCompactPoller()
 }
 
 /** History and bookmarks changed: the UI re-reads them (the Library page, the star). */
@@ -726,7 +730,8 @@ function createWindow(): void {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
-      spellcheck: true
+      spellcheck: true,
+      backgroundThrottling: true
     }
   })
   win = w
@@ -1105,8 +1110,18 @@ function createWindow(): void {
   w.on('focus', sendWinState)
   w.on('blur', handleOrbitFocusBlur)
   w.on('minimize', () => {
+    stopCompactPoller()
     compactSidebar?.hide(true)
     compactTitlebar?.hide(true)
+  })
+  w.on('hide', () => {
+    stopCompactPoller()
+    compactSidebar?.hide(true)
+    compactTitlebar?.hide(true)
+  })
+  w.on('show', () => {
+    startCompactPoller()
+    if (settings?.get().compactMode) syncCompactPanels()
   })
   w.on('maximize', () => {
     sendWinState()
@@ -1117,6 +1132,7 @@ function createWindow(): void {
     syncCompactPanels()
   })
   w.on('restore', () => {
+    startCompactPoller()
     sendWinState()
     syncCompactPanels()
   })

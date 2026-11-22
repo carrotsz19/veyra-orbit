@@ -393,7 +393,8 @@ export class Tabs {
         spellcheck: true,
         safeDialogs: true,
         // Chromium's built-in PDF viewer.
-        plugins: true
+        plugins: true,
+        backgroundThrottling: true
       }
     })
     view.setBackgroundColor('#ffffffff')
@@ -1731,7 +1732,8 @@ export class Tabs {
               sandbox: true,
               contextIsolation: true,
               nodeIntegration: false,
-              webSecurity: true
+              webSecurity: true,
+              backgroundThrottling: true
             }
           }
         }

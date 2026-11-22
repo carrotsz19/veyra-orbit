@@ -135,7 +135,12 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
   const [bgDataUrl, setBgDataUrl] = useState<string | null>(null)
   const [bgError, setBgError] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [pageHidden, setPageHidden] = useState(() => typeof document !== 'undefined' && document.hidden)
+  const [pageHidden, setPageHidden] = useState(
+    () => typeof document !== 'undefined' && (document.hidden || document.visibilityState !== 'visible')
+  )
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
   const [noteDraft, setNoteDraft] = useState(config.focusNote)
   const [linkEditor, setLinkEditor] = useState<LinkEditorState | null>(null)
   const [dragLinkIdx, setDragLinkIdx] = useState<number | null>(null)
@@ -147,20 +152,27 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
     void api.updateSettings({ startPage: patch })
   }, [])
 
-  // Pause ambient animation when window/document is hidden.
+  // Pause ambient animation and clock work when window/document is hidden or prefers-reduced-motion is active.
   useEffect(() => {
-    const onVis = (): void => setPageHidden(document.hidden)
+    const onVis = (): void => setPageHidden(document.hidden || document.visibilityState !== 'visible')
     document.addEventListener('visibilitychange', onVis)
-    return () => document.removeEventListener('visibilitychange', onVis)
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const onMotion = (): void => setPrefersReducedMotion(mq.matches)
+    mq.addEventListener('change', onMotion)
+    return () => {
+      document.removeEventListener('visibilitychange', onVis)
+      mq.removeEventListener('change', onMotion)
+    }
   }, [])
 
-  // Clock ticker: 1s only when seconds are shown, otherwise 15s for minimal idle CPU.
+  // Clock ticker: 1s only when seconds are shown, otherwise 15s; paused completely while hidden.
   useEffect(() => {
+    if (pageHidden) return
     setNow(new Date())
     const ms = config.showSeconds ? 1000 : 15_000
     const timer = setInterval(() => setNow(new Date()), ms)
     return () => clearInterval(timer)
-  }, [config.showSeconds])
+  }, [config.showSeconds, pageHidden])
 
   // Keep local note synced when changed from another tab or settings update.
   useEffect(() => {
@@ -703,7 +715,7 @@ export function StartPage({ tabId, settings, isPrivate = false, onOpenAppearance
       className={`sp-root layout-${config.layout} density-${config.density}`}
       data-bg={config.background}
       data-has-photo={hasPhoto ? 'true' : undefined}
-      data-paused={pageHidden ? 'true' : undefined}
+      data-paused={pageHidden || prefersReducedMotion ? 'true' : undefined}
       style={
         {
           '--sp-dim': `${config.backgroundDim / 100}`,

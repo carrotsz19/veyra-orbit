@@ -1227,7 +1227,8 @@ export class PeekPopup {
               sandbox: true,
               contextIsolation: true,
               nodeIntegration: false,
-              webSecurity: true
+              webSecurity: true,
+              backgroundThrottling: true
             }
           }
         }

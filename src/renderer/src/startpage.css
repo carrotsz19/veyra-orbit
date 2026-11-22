@@ -87,15 +87,19 @@
 }
 
 /* Pause ambient motion when page hidden, reduced motion, or motion off. */
-.sp-root[data-paused='true'] .sp-blob,
+.sp-root[data-paused='true'] .sp-blob {
+  animation-play-state: paused !important;
+  will-change: auto;
+}
 html[data-motion='reduced'] .sp-blob,
 html[data-motion='off'] .sp-blob {
-  animation-play-state: paused !important;
   animation: none !important;
+  will-change: auto;
 }
 @media (prefers-reduced-motion: reduce) {
   .sp-blob {
     animation: none !important;
+    will-change: auto;
   }
 }
 
