@@ -42,6 +42,7 @@ import { BookmarksPage, DownloadsPage, HistoryPage } from './components/Library'
 import { SettingsPage } from './components/SettingsPage'
 import { ToolbarCustomizeSheet } from './components/ToolbarEditor'
 import { WorkspaceEditSheet } from './components/WorkspaceEditSheet'
+import { ScreenshotAreaOverlay } from './components/ScreenshotAreaOverlay'
 
 const api = window.veyra
 
@@ -106,6 +107,7 @@ export function App(): React.JSX.Element {
   const [resizingSidebar, setResizingSidebar] = useState(false)
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [toolbarSheetOpen, setToolbarSheetOpen] = useState(false)
+  const [areaShot, setAreaShot] = useState<import('@shared/types').ScreenshotAreaInit | null>(null)
   const [workspaceSheet, setWorkspaceSheet] = useState<
     { mode: 'create' } | { mode: 'edit'; workspace: import('@shared/types').WorkspaceInfo } | null
   >(null)
@@ -138,6 +140,7 @@ export function App(): React.JSX.Element {
         lastTokensRef.current = tokens
         applyResolvedAppearance(tokens)
       }),
+      api.screenshot.onAreaStart((init) => setAreaShot(init)),
       api.onUpdateState(setUpdate),
       api.onCompactState(setCompact),
       api.onWinState(setWinState),
@@ -525,6 +528,7 @@ export function App(): React.JSX.Element {
         onToggleSidebar={isTopTabs ? undefined : () => setSidebarHidden((v) => !v)}
         sidebarHidden={sidebarHidden}
         onCustomizeToolbar={() => setToolbarSheetOpen(true)}
+        onScreenshot={(anchor) => api.screenshot.openChooser(anchor)}
       />
       {isTopTabs && !pageFullscreen && (
         <TopTabBar
@@ -694,6 +698,20 @@ export function App(): React.JSX.Element {
                 <span>{dropZoneLabel}</span>
               </div>
             </div>
+          )}
+
+          {areaShot && (
+            <ScreenshotAreaOverlay
+              init={areaShot}
+              onCommit={(rect) => {
+                setAreaShot(null)
+                api.screenshot.commitArea(rect)
+              }}
+              onCancel={() => {
+                setAreaShot(null)
+                api.screenshot.cancelArea()
+              }}
+            />
           )}
         </div>
       </main>

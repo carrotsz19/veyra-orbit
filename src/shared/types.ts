@@ -140,6 +140,14 @@ export type { ResolvedShortcuts, ShortcutCategory, ShortcutDef, ShortcutId } fro
 export type { ToolbarButtonId, ToolbarButtonMeta, ToolbarItemId } from './toolbar'
 export type { BuiltinModDef, BuiltinModId } from './customCss'
 export type {
+  ScreenshotAnchor,
+  ScreenshotAreaInit,
+  ScreenshotAreaRect,
+  ScreenshotChooserPayload,
+  ScreenshotMode,
+  ScreenshotToastPayload
+} from './screenshot'
+export type {
   ClockFormat,
   DailyQuote,
   QuickLink,
@@ -240,6 +248,29 @@ export interface VeyraPeekWindowApi {
   onState(cb: (state: import('./peek').PeekState) => void): () => void
   onAppearance(cb: (tokens: import('./appearance').ResolvedAppearance) => void): () => void
   action(act: import('./peek').PeekAction): void
+}
+
+/** Minimal bridge exposed ONLY to the floating Screenshot chooser & preview toast BrowserWindows. */
+export interface VeyraScreenshotWindowApi {
+  ready(): void
+  onChooser(cb: (payload: import('./screenshot').ScreenshotChooserPayload) => void): () => void
+  onToast(cb: (payload: import('./screenshot').ScreenshotToastPayload) => void): () => void
+  onAppearance(cb: (tokens: import('./appearance').ResolvedAppearance) => void): () => void
+  choose(mode: import('./screenshot').ScreenshotMode): void
+  save(id: string): Promise<{ ok: boolean; filename?: string; error?: string }>
+  copy(id: string): Promise<boolean>
+  showInFolder(id: string): void
+  size(width: number, height: number): void
+  setHover(hovering: boolean): void
+  dismiss(): void
+}
+
+export interface ScreenshotBridgeApi {
+  openChooser(anchor?: import('./screenshot').ScreenshotAnchor): void
+  capture(mode: import('./screenshot').ScreenshotMode): void
+  onAreaStart(cb: (init: import('./screenshot').ScreenshotAreaInit | null) => void): () => void
+  commitArea(rect: import('./screenshot').ScreenshotAreaRect): void
+  cancelArea(): void
 }
 
 export interface CompactTabDragState {
@@ -418,6 +449,7 @@ export interface VeyraApi {
   dismissImportPrompt(): Promise<void>
   getMemoryUsage(): Promise<import('./memory').MemoryUsageSnapshot>
   extensions: ExtensionsApi
+  screenshot: ScreenshotBridgeApi
 }
 
 export interface ExtensionsApi {

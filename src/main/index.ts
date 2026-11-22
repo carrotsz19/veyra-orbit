@@ -47,6 +47,8 @@ import {
   type ResolvedAppearance
 } from '../shared/appearance'
 import { isSafeModeLaunch } from '../shared/customCss'
+import { formatShortcutLabel, resolveShortcuts } from '../shared/shortcuts'
+import { isScreenshotMode } from '../shared/screenshot'
 import { Tabs } from './tabs'
 import { Store } from './store'
 import { SettingsStore } from './settings'
@@ -55,6 +57,7 @@ import { attachSessionCompat } from './compat'
 import { Downloads } from './downloads'
 import { Updater } from './updater'
 import { CompactPanel, MenuPopup, PalettePopup, PeekPopup } from './floating'
+import { ScreenshotController } from './screenshot'
 import { BrowserImporter } from './importer'
 import { ExtensionManager } from './extensions'
 import { chooseAndSaveStartBackground, deleteStartBackgroundFile, readStartBackgroundDataUrl } from './backgrounds'
@@ -141,12 +144,14 @@ function applyWindowAppearance(): void {
   menuPopup?.sendAppearance(tokens)
   palettePopup?.sendAppearance(tokens)
   peekPopup?.sendAppearance(tokens)
+  screenshotCtrl?.applyAppearance(tokens)
 }
 
 let win: BrowserWindow | null = null
 let menuPopup: MenuPopup | null = null
 let palettePopup: PalettePopup | null = null
 let peekPopup: PeekPopup | null = null
+let screenshotCtrl: ScreenshotController | null = null
 let compactSidebar: CompactPanel | null = null
 let compactTitlebar: CompactPanel | null = null
 let compactOmniboxOpen = false
@@ -762,6 +767,9 @@ function executePaletteAction(action: PaletteAction, openInNewTab: boolean): voi
         case 'print':
           tabs.print()
           return
+        case 'take-screenshot':
+          screenshotCtrl?.openChooser(null)
+          return
         case 'find':
           tabs.openFind()
           return
@@ -1149,9 +1157,56 @@ function createWindow(): void {
       return extManager?.hasLoadedExtension(partition, extId) ?? false
     },
     shortcuts: () => s.get().shortcuts,
+    onScreenshot: () => {
+      menuPopup?.close()
+      palettePopup?.close()
+      peekPopup?.close()
+      screenshotCtrl?.openChooser(null)
+    },
     quit: () => app.quit()
   })
   const t = tabs
+
+  screenshotCtrl?.destroy()
+  screenshotCtrl = new ScreenshotController({
+    parent: w,
+    preload: join(__dirname, '../preload/screenshot.js'),
+    acrylic,
+    getActiveTarget: () => t.activeScreenshotTarget(),
+    getThemeInfo: () => {
+      const appearance = resolveCurrentAppearance()
+      const resolved = resolveShortcuts(s.get().shortcuts)
+      return {
+        dark: nativeTheme.shouldUseDarkColors,
+        accent: activeWorkspaceAccentHex(),
+        appearance,
+        shortcutLabel: formatShortcutLabel(resolved.screenshot)
+      }
+    },
+    getDownloadsDir: () => s.effectiveDownloadsDir(),
+    recordDownload: (savePath, sizeBytes, sourceUrl) => {
+      d.recordSavedFile(savePath, sizeBytes, sourceUrl)
+    },
+    setPageOverlayHidden: (hidden) => {
+      t.setScreenshotOverlay(hidden)
+    },
+    onStartAreaSelect: (init) => {
+      if (!w.isDestroyed()) w.webContents.send('screenshot:area-start', init)
+    },
+    onCancelAreaSelect: () => {
+      if (!w.isDestroyed()) w.webContents.send('screenshot:area-start', null)
+    },
+    onChooserVisibilityChange: (open) => {
+      compactPins.titleMenu = open
+      if (settings?.get().compactMode) {
+        applyCompactTargets(
+          compactHover.sidebar || compactPins.sidebar || compactPins.menu,
+          compactHover.toolbar || compactPins.omnibox || compactPins.titleMenu || compactPins.dragging || compactPins.extPopup
+        )
+      }
+      sendWinState()
+    }
+  })
 
   extManager?.dispose()
   extManager = new ExtensionManager({
@@ -1368,6 +1423,8 @@ function createWindow(): void {
     peekPopup = null
     menuPopup?.destroy()
     menuPopup = null
+    screenshotCtrl?.destroy()
+    screenshotCtrl = null
     for (const sess of configuredSessions) {
       sess.off('will-download', onAltPeekDownload)
       sess.off('will-download', onDownload)
@@ -1451,6 +1508,11 @@ function fromPalette(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
 /** Only the floating Link Preview ("Peek") toolbar window may call peek:* return channels. */
 function fromPeek(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
   return !!peekPopup && peekPopup.isSender(e.sender)
+}
+
+/** Only the floating Screenshot chooser / preview toast windows may call screenshot-win:* channels. */
+function fromScreenshotWin(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  return !!screenshotCtrl && screenshotCtrl.isSender(e.sender)
 }
 
 const WIN_CMDS = new Set<WinCmd>([
@@ -1745,6 +1807,62 @@ ipcMain.on('menu:step', (e, by: unknown) => {
 })
 ipcMain.on('menu:dismiss', (e) => {
   if (fromMenu(e)) menuPopup?.dismiss()
+})
+
+// Screenshot tool IPC: UI surfaces open chooser or trigger capture; floating chooser/toast windows use minimal bridge.
+ipcMain.on('screenshot:open-chooser', (e, rawAnchor: unknown) => {
+  if (!fromUiSurface(e) || !screenshotCtrl) return
+  menuPopup?.close()
+  palettePopup?.close()
+  peekPopup?.close()
+  let anchor: { x: number; y: number } | null = null
+  if (rawAnchor && typeof rawAnchor === 'object' && !Array.isArray(rawAnchor)) {
+    const r = rawAnchor as Record<string, unknown>
+    if (num(r.x) && num(r.y)) {
+      const offset = compactTitlebar?.isSender(e.sender) ? compactTitlebar.offsetCss() : { x: 0, y: 0 }
+      anchor = { x: r.x + offset.x, y: r.y + offset.y }
+    }
+  }
+  screenshotCtrl.openChooser(anchor)
+})
+ipcMain.on('screenshot:capture', (e, mode: unknown) => {
+  if (!fromUiSurface(e) || !screenshotCtrl || !isScreenshotMode(mode)) return
+  void screenshotCtrl.capture(mode)
+})
+ipcMain.on('screenshot:area-commit', (e, rect: unknown) => {
+  if (!fromUi(e) || !screenshotCtrl) return
+  screenshotCtrl.commitArea(rect)
+})
+ipcMain.on('screenshot:area-cancel', (e) => {
+  if (!fromUi(e) || !screenshotCtrl) return
+  screenshotCtrl.cancelArea()
+})
+ipcMain.on('screenshot-win:ready', (e) => {
+  if (fromScreenshotWin(e)) screenshotCtrl?.markReady(e.sender)
+})
+ipcMain.on('screenshot-win:size', (e, width: unknown, height: unknown) => {
+  if (fromScreenshotWin(e) && num(width) && num(height)) screenshotCtrl?.resizeForSender(e.sender, width, height)
+})
+ipcMain.on('screenshot-win:choose', (e, mode: unknown) => {
+  if (!fromScreenshotWin(e) || !screenshotCtrl || !isScreenshotMode(mode)) return
+  void screenshotCtrl.capture(mode)
+})
+ipcMain.handle('screenshot-win:save', (e, id: unknown) => {
+  if (!fromScreenshotWin(e) || !screenshotCtrl || !str(id)) return { ok: false, error: 'Invalid screenshot.' }
+  return screenshotCtrl.saveCapture(id)
+})
+ipcMain.handle('screenshot-win:copy', (e, id: unknown) => {
+  if (!fromScreenshotWin(e) || !screenshotCtrl || !str(id)) return false
+  return screenshotCtrl.copyAgain(id)
+})
+ipcMain.on('screenshot-win:show', (e, id: unknown) => {
+  if (fromScreenshotWin(e) && str(id)) screenshotCtrl?.showInFolder(id)
+})
+ipcMain.on('screenshot-win:hover', (e, hovering: unknown) => {
+  if (fromScreenshotWin(e) && typeof hovering === 'boolean') screenshotCtrl?.setToastHover(hovering)
+})
+ipcMain.on('screenshot-win:dismiss', (e) => {
+  if (fromScreenshotWin(e)) screenshotCtrl?.dismissForSender(e.sender)
 })
 
 // Floating Ctrl+K command palette IPC: strict sender check + main-side ID/URL validation.

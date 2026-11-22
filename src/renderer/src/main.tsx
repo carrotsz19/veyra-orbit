@@ -27,6 +27,10 @@ if (view === 'menu') {
   void import('./components/PeekWindow').then(({ PeekWindow }) => {
     createRoot(document.getElementById('root')!).render(<PeekWindow />)
   })
+} else if (view === 'screenshot') {
+  void import('./components/ScreenshotWindow').then(({ ScreenshotWindow }) => {
+    createRoot(document.getElementById('root')!).render(<ScreenshotWindow />)
+  })
 } else {
   if (__CHANNEL__ === 'dev') document.title = 'Veyra Orbit Dev'
   void import('./App').then(({ App }) => {

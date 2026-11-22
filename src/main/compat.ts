@@ -34,6 +34,12 @@ export function chromeIdentity(): ChromeIdentity {
 }
 
 const attachedCompatSessions = new WeakSet<Session>()
+const compatDebuggerTargets = new WeakSet<WebContents>()
+
+/** True when `wc.debugger` is currently attached by Orbit's own page-compat layer. */
+export function isCompatDebuggerAttached(wc: WebContents): boolean {
+  return compatDebuggerTargets.has(wc) && !wc.isDestroyed() && wc.debugger.isAttached()
+}
 
 /**
  * Rewrites HTTP User-Agent and Sec-CH-UA* headers for the web session so every request
@@ -107,6 +113,7 @@ export function attachPageCompat(wc: WebContents, initialUrl?: string): void {
     } catch {
       return
     }
+    compatDebuggerTargets.add(wc)
     mode = null
     applyUaForUrl(initialUrl || wc.getURL())
     void dbg.sendCommand('Page.enable').catch(() => {})
@@ -126,6 +133,7 @@ export function attachPageCompat(wc: WebContents, initialUrl?: string): void {
   }
 
   dbg.on('detach', () => {
+    compatDebuggerTargets.delete(wc)
     mode = null
   })
 

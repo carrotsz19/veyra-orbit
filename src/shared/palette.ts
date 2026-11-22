@@ -49,6 +49,7 @@ export type PaletteItemIcon =
   | 'moon'
   | 'monitor'
   | 'star'
+  | 'camera'
 
 export type PaletteCommandId =
   | 'new-tab'
@@ -69,6 +70,7 @@ export type PaletteCommandId =
   | 'zoom-out'
   | 'zoom-reset'
   | 'print'
+  | 'take-screenshot'
   | 'find'
   | 'toggle-downloads'
   | 'devtools'
@@ -260,6 +262,14 @@ function buildCommandDefs(ctx: PaletteContext): CommandDef[] {
       icon: 'downloads',
       keys: k('downloads'),
       showWhenEmpty: true
+    },
+    {
+      cmd: 'take-screenshot',
+      label: 'Take screenshot',
+      keywords: 'screenshot capture snap photo screen full page area png',
+      icon: 'camera',
+      keys: k('screenshot'),
+      enabled: !!tab
     },
     {
       cmd: 'reopen-closed',

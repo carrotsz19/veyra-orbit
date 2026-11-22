@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   AppWindow,
   Bookmark,
+  Camera,
   Clock,
   Code2,
   Columns2,
@@ -64,7 +65,8 @@ const ICONS: Record<PaletteItemIcon, LucideIcon> = {
   sun: Sun,
   moon: Moon,
   monitor: Monitor,
-  star: Star
+  star: Star,
+  camera: Camera
 }
 
 /** Highlights matched search terms inside palette labels and subtitles. */

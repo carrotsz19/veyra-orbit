@@ -168,6 +168,13 @@ const api: VeyraApi = {
     clickAction: (id, anchorRect) => ipcRenderer.send('extensions:action-click', id, anchorRect),
     contextMenuAction: (id, anchorRect) => ipcRenderer.send('extensions:action-context-menu', id, anchorRect),
     answerInstall: (requestId, allow) => ipcRenderer.send('extensions:install-answer', requestId, allow)
+  },
+  screenshot: {
+    openChooser: (anchor) => ipcRenderer.send('screenshot:open-chooser', anchor ?? null),
+    capture: (mode) => ipcRenderer.send('screenshot:capture', mode),
+    onAreaStart: (cb) => listen('screenshot:area-start', cb),
+    commitArea: (rect) => ipcRenderer.send('screenshot:area-commit', rect),
+    cancelArea: () => ipcRenderer.send('screenshot:area-cancel')
   }
 }
 

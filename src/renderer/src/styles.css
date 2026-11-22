@@ -3544,3 +3544,342 @@ html[data-motion='off'] .dl-fly-chip {
   padding: 0 11px;
   font-size: 12px;
 }
+
+
+/* ---- Floating Screenshot chooser, preview toast, and Select-area overlay --- */
+.shot-window,
+.shot-window body,
+.shot-window #root {
+  background: transparent;
+  overflow: hidden;
+}
+
+.shot-chooser {
+  width: 240px;
+  padding: 6px;
+  border-radius: var(--r-md, 12px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+  color: var(--label-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  user-select: none;
+}
+
+.shot-chooser-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--label-secondary);
+}
+
+.shot-chooser-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shot-chooser-key {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--label-tertiary);
+}
+
+.shot-chooser-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shot-opt {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: var(--r-sm, 8px);
+  text-align: left;
+  color: var(--label-primary);
+  transition: background-color var(--t-fast) var(--ease-state);
+}
+
+.shot-opt:hover,
+.shot-opt:focus-visible {
+  background: var(--fill-hover);
+  outline: none;
+}
+
+.shot-opt-ico {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--fill-tertiary);
+  color: var(--tint-text, var(--tint));
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.shot-opt-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.shot-opt-label {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--label-primary);
+}
+
+.shot-opt-sub {
+  font-size: 11px;
+  color: var(--label-tertiary);
+}
+
+.shot-toast {
+  width: 328px;
+  padding: 10px;
+  border-radius: var(--r-md, 12px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.26);
+  color: var(--label-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  user-select: none;
+}
+
+.shot-toast-simple {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 2px;
+}
+
+.shot-toast-msg {
+  font-size: 12.5px;
+  color: var(--label-primary);
+  flex: 1;
+}
+
+.shot-toast-accent {
+  color: var(--tint);
+  flex: none;
+}
+
+.shot-toast-top {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.shot-thumb {
+  width: 96px;
+  height: 70px;
+  object-fit: cover;
+  object-position: top center;
+  border-radius: var(--r-xs, 6px);
+  border: 1px solid var(--hairline);
+  background: var(--bg-grouped);
+  flex: none;
+}
+
+.shot-toast-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.shot-toast-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.shot-toast-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.shot-toast-ok {
+  color: var(--success, #22c55e);
+  flex: none;
+}
+
+.shot-close {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: var(--label-tertiary);
+  flex: none;
+}
+
+.shot-close:hover {
+  background: var(--fill-hover);
+  color: var(--label-primary);
+}
+
+.shot-toast-dim {
+  font-size: 11px;
+  color: var(--label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.shot-toast-note {
+  font-size: 11px;
+  color: var(--label-secondary);
+  line-height: 1.35;
+}
+
+.shot-toast-saved {
+  font-size: 11px;
+  color: var(--tint-text, var(--tint));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shot-toast-err {
+  font-size: 11px;
+  color: var(--danger, #e5484d);
+}
+
+.shot-toast-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shot-btn {
+  flex: 1;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-sm, 8px);
+  border: 1px solid var(--hairline-strong);
+  background: var(--fill-tertiary);
+  color: var(--label-primary);
+  font-size: 12px;
+  font-weight: 550;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background-color var(--t-fast) var(--ease-state);
+}
+
+.shot-btn:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+
+.shot-btn.primary {
+  background: var(--tint);
+  border-color: transparent;
+  color: var(--tint-on, #fff);
+}
+
+.shot-btn.primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.shot-btn:disabled {
+  opacity: 0.55;
+}
+
+/* Select-area overlay drawn by Orbit's own main UI */
+.shot-area-overlay {
+  position: absolute;
+  z-index: 60;
+  overflow: hidden;
+  cursor: crosshair;
+  user-select: none;
+  border-radius: inherit;
+}
+
+.shot-area-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+}
+
+.shot-area-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 10, 12, 0.36);
+  pointer-events: none;
+}
+
+.shot-area-rect {
+  position: absolute;
+  border: 1.5px solid var(--tint);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 9999px rgba(10, 10, 12, 0.36);
+  pointer-events: none;
+}
+
+.shot-area-size {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 2px 7px;
+  border-radius: var(--r-pill, 999px);
+  background: rgba(16, 16, 18, 0.82);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.shot-area-hint {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 12px;
+  border-radius: var(--r-pill, 999px);
+  background: rgba(20, 20, 22, 0.84);
+  color: #f6f6f7;
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(12px);
+}
+
+.shot-area-cancel {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.78);
+  cursor: pointer;
+}
+
+.shot-area-cancel:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}

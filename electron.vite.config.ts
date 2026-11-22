@@ -47,6 +47,7 @@ export default defineConfig({
           compact: resolve('src/preload/compact.ts'),
           palette: resolve('src/preload/palette.ts'),
           peek: resolve('src/preload/peek.ts'),
+          screenshot: resolve('src/preload/screenshot.ts'),
           'ext-compat': resolve('src/preload/ext-compat.ts'),
           webstore: resolve('src/preload/webstore.ts')
         }

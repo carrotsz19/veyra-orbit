@@ -352,6 +352,53 @@ export class Tabs {
     return tab.view.webContents
   }
 
+  /** Returns active tab metadata, live WebContents (if web page), and page/pane CSS bounds for screenshots. */
+  activeScreenshotTarget(): {
+    url: string
+    title: string
+    wc: WebContents | null
+    isPrivate: boolean
+    isInternal: boolean
+    pageBounds: Rect | null
+    paneBounds: Rect | null
+  } | null {
+    const tab = this.active
+    if (!tab) return null
+    const wc = this.showsPage(tab) && tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null
+    const pageBounds = this.bounds ? { ...this.bounds } : null
+    let paneBounds: Rect | null = pageBounds
+    if (this.bounds && !this.fullscreenTab) {
+      const group = this.splitGroupOf(tab.info.id)
+      if (group) {
+        const slotIdx = group.tabIds.indexOf(tab.info.id)
+        const layout = computeSplitLayout(this.bounds, group.tabIds.length, {
+          colRatio: group.colRatio,
+          rowRatio: group.rowRatio,
+          orientation: group.orientation
+        })
+        const slot = slotIdx >= 0 ? layout.panes[slotIdx] : undefined
+        if (slot) {
+          paneBounds = { ...slot.view }
+        }
+      }
+    }
+    return {
+      url: tab.info.error?.url || tab.info.url || '',
+      title: tab.info.title || '',
+      wc,
+      isPrivate: this.isPrivateWorkspace(tab.info.workspaceId),
+      isInternal: !wc,
+      pageBounds,
+      paneBounds
+    }
+  }
+
+  /** Hides or restores native page views for the in-window screenshot area selector. */
+  setScreenshotOverlay(hidden: boolean): void {
+    this.overlayOpen = hidden
+    this.layout()
+  }
+
   tabDetailsForWebContents(wc: WebContents): { pinned: boolean; index: number; discarded: boolean; active: boolean } | null {
     const tab = this.tabs.find((t) => t.view?.webContents === wc)
     if (!tab) return null
@@ -2189,7 +2236,11 @@ export class Tabs {
       items.push({ label: 'Print…', accelerator: toElectronAccelerator(resolvedKeys.print), click: () => wc.print({}, () => {}) })
       gap()
     }
-    items.push({ label: 'Inspect', click: () => wc.inspectElement(p.x, p.y) })
+    items.push(
+      { label: 'Take screenshot…', accelerator: toElectronAccelerator(resolvedKeys.screenshot), click: () => this.hooks.onScreenshot?.() },
+      { type: 'separator' },
+      { label: 'Inspect', click: () => wc.inspectElement(p.x, p.y) }
+    )
     const menu = Menu.buildFromTemplate(items)
     if (extMenuItems.length > 0) {
       const insertAt = Math.max(0, menu.items.length - 1)

@@ -3,7 +3,8 @@ import type {
   VeyraCompactPanelApi,
   VeyraMenuWindowApi,
   VeyraPaletteWindowApi,
-  VeyraPeekWindowApi
+  VeyraPeekWindowApi,
+  VeyraScreenshotWindowApi
 } from '@shared/types'
 
 declare global {
@@ -13,6 +14,7 @@ declare global {
     veyraCompactPanel?: VeyraCompactPanelApi
     veyraPalette?: VeyraPaletteWindowApi
     veyraPeek?: VeyraPeekWindowApi
+    veyraScreenshot?: VeyraScreenshotWindowApi
   }
 }
 
