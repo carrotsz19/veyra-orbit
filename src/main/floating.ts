@@ -22,11 +22,15 @@ import { isAllowedUrl } from '../shared/url'
 import { isSafeSubframeUrl, parseExternalAppUrl } from '../shared/external'
 import { attachPageCompat } from './compat'
 
+const FLOAT_DARK = '#1f1d18'
+const FLOAT_LIGHT = '#fbfaf7'
+
 export interface FloatingWindowOptions {
   parent: BrowserWindow
   preload: string
   view: string
   acrylic: boolean
+  transparent?: boolean
   extraQuery?: Record<string, string>
   width?: number
   height?: number
@@ -65,6 +69,7 @@ export class FloatingWindow {
     this.onHidden = opts.onHidden
     this.onFocusChange = opts.onFocusChange
 
+    const useTransparent = opts.transparent ?? !opts.acrylic
     this.win = new BrowserWindow({
       parent: opts.parent,
       show: false,
@@ -75,9 +80,9 @@ export class FloatingWindow {
       maximizable: false,
       skipTaskbar: true,
       hasShadow: opts.hasShadow ?? true,
-      ...(opts.acrylic
-        ? { backgroundColor: '#00000000', backgroundMaterial: 'acrylic' as const }
-        : { transparent: true, backgroundColor: '#00000000' }),
+      ...(useTransparent
+        ? { transparent: true, backgroundColor: '#00000000' }
+        : { backgroundColor: FLOAT_DARK }),
       width: opts.width ?? 240,
       height: opts.height ?? 200,
       webPreferences: {
@@ -114,7 +119,7 @@ export class FloatingWindow {
 
     const query: Record<string, string> = {
       view: opts.view,
-      material: opts.acrylic ? 'acrylic' : 'solid',
+      material: 'solid',
       platform: process.platform,
       ...(opts.extraQuery ?? {})
     }
@@ -157,6 +162,10 @@ export class FloatingWindow {
 
   setZoomFactor(zoom: number): void {
     if (!this.win.isDestroyed()) this.win.webContents.setZoomFactor(zoom)
+  }
+
+  setSurfaceTheme(dark: boolean): void {
+    if (!this.win.isDestroyed()) this.win.setBackgroundColor(dark ? FLOAT_DARK : FLOAT_LIGHT)
   }
 
   /** Places the floating window at explicit screen bounds, clamped inside the display workArea. */
@@ -332,6 +341,7 @@ export class MenuPopup {
       preload: opts.preload,
       view: 'menu',
       acrylic: opts.acrylic,
+      transparent: false,
       width: 240,
       height: 200,
       hideOnBlur: true,
@@ -383,6 +393,7 @@ export class MenuPopup {
     this.owner = sender ?? this.parent.webContents
     this.pendingAnchor = { x: spec.x + offsetCss.x, y: spec.y + offsetCss.y }
     this.setOpen(true)
+    this.floating.setSurfaceTheme(spec.dark)
     this.floating.setZoomFactor(this.parent.webContents.getZoomFactor())
     this.floating.send('menu:render', spec)
   }
@@ -611,6 +622,7 @@ export class PalettePopup {
       preload: opts.preload,
       view: 'palette',
       acrylic: opts.acrylic,
+      transparent: false,
       width: 600,
       height: 360,
       hideOnBlur: true,
@@ -649,6 +661,7 @@ export class PalettePopup {
     if (this.parent.isDestroyed()) return
     this.mode = init.mode
     this.actions = init.actions
+    this.floating.setSurfaceTheme(init.dark)
     const z = this.parent.webContents.getZoomFactor()
     this.floating.setZoomFactor(z)
     const cb = this.parent.getContentBounds()
@@ -756,6 +769,7 @@ export class PeekPopup {
       preload: opts.preload,
       view: 'peek',
       acrylic: opts.acrylic,
+      transparent: false,
       width: 820,
       height: 600,
       hideOnBlur: true,
@@ -820,6 +834,7 @@ export class PeekPopup {
     this.ensureSession(req.partition)
 
     const z = this.parent.webContents.getZoomFactor()
+    this.floating.setSurfaceTheme(req.dark)
     this.floating.setZoomFactor(z)
     const cb = this.parent.getContentBounds()
     const workArea = screen.getDisplayNearestPoint({ x: cb.x + Math.round(cb.width / 2), y: cb.y + Math.round(cb.height / 2) }).workArea

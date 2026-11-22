@@ -52,7 +52,7 @@ const CLEAR_RANGES: { id: ClearDataRange; label: string }[] = [
 ]
 
 const SETTING_SECTIONS = [
-  { id: 'set-general', label: 'General / search & start' },
+  { id: 'set-general', label: 'General' },
   { id: 'set-import', label: 'Import data' },
   { id: 'set-appearance', label: 'Appearance' },
   { id: 'set-performance', label: 'Performance' },

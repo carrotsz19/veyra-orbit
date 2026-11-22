@@ -64,14 +64,20 @@ function logSmoke(tag: string, data: unknown): void {
   if (smokeLog) console.log(`[smoke:${tag}] ${JSON.stringify(data)}`)
 }
 const TITLE_BAR_H = 40
+const SHELL_DARK = '#12110d'
+const SHELL_LIGHT = '#ebe8e1'
 const HOUR_MS = 3_600_000
 const CLEAR_RANGES = new Set<ClearDataRange>(['hour', 'day', 'all'])
 const COMPACT_POLL_MS = 100
 const COMPACT_HIDE_DELAY_MS = 240
 
+function shellBg(): string {
+  return nativeTheme.shouldUseDarkColors ? SHELL_DARK : SHELL_LIGHT
+}
+
 function overlay(): Electron.TitleBarOverlayOptions {
   const dark = nativeTheme.shouldUseDarkColors
-  return { color: acrylic ? '#00000000' : dark ? '#15140f' : '#f3f1ec', symbolColor: dark ? '#e9e5dc' : '#2c2a26', height: TITLE_BAR_H }
+  return { color: shellBg(), symbolColor: dark ? '#c8c2b6' : '#57534b', height: TITLE_BAR_H }
 }
 
 let win: BrowserWindow | null = null
@@ -656,7 +662,7 @@ function createWindow(): void {
     // Windows picks the right hand-tuned size from the .ico; a 1024 px PNG gets shrunk badly.
     icon: join(__dirname, `../../resources/${__CHANNEL__ === 'dev' ? 'icon-dev' : 'icon'}.${isWin ? 'ico' : 'png'}`),
     autoHideMenuBar: true,
-    ...(acrylic ? { backgroundColor: '#00000000', backgroundMaterial: 'acrylic' as const } : { backgroundColor: nativeTheme.shouldUseDarkColors ? '#15140f' : '#f3f1ec' }),
+    backgroundColor: shellBg(),
     ...(isWin
       ? activeButtons === 'windows'
         ? { titleBarStyle: 'hidden' as const, titleBarOverlay: overlay() }
@@ -1061,19 +1067,13 @@ function createWindow(): void {
     }
   })
   w.on('enter-full-screen', () => {
-    if (acrylic) {
-      w.setBackgroundMaterial('none')
-      w.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#15140f' : '#f3f1ec')
-    }
+    w.setBackgroundColor(shellBg())
     sendWinState()
     t.relayout()
     if (settings?.get().compactMode) syncCompactPanels()
   })
   w.on('leave-full-screen', () => {
-    if (acrylic) {
-      w.setBackgroundColor('#00000000')
-      w.setBackgroundMaterial('acrylic')
-    }
+    w.setBackgroundColor(shellBg())
     sendWinState()
     t.exitPageFullscreen()
     if (settings?.get().compactMode) syncCompactPanels()
@@ -1119,7 +1119,7 @@ function createWindow(): void {
   })
 
   const query = {
-    material: acrylic ? 'acrylic' : 'solid',
+    material: 'solid',
     platform: process.platform,
     buttons: activeButtons,
     version: app.getVersion()
@@ -1823,7 +1823,7 @@ nativeTheme.on('updated', () => {
       /* window without titleBarOverlay */
     }
   }
-  if (!acrylic) win.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#15140f' : '#f3f1ec')
+  win.setBackgroundColor(shellBg())
 })
 
 app.on('second-instance', () => {
